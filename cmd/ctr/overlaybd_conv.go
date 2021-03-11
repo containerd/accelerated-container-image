@@ -37,7 +37,6 @@ import (
 )
 
 var (
-	emptyDigest      digest.Digest
 	emptyString      string
 	emptyDesc        ocispec.Descriptor
 	emptyLayer       layer
@@ -444,7 +443,7 @@ func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, co
 		if err := wcw.WriteHeader(&tar.Header{
 			Name:     "overlaybd.commit",
 			Mode:     0444,
-			Size:     int64(fi.Size()),
+			Size:     fi.Size(),
 			Typeflag: tar.TypeReg,
 		}); err != nil {
 			return emptyLayer, err
@@ -508,22 +507,17 @@ func currentPlatformManifest(ctx context.Context, cs content.Provider, img conta
 
 func createImage(ctx context.Context, is images.Store, img images.Image) error {
 	for {
-		if created, err := is.Create(ctx, img); err != nil {
+		if _, err := is.Create(ctx, img); err != nil {
 			if !errdefs.IsAlreadyExists(err) {
 				return err
 			}
 
-			updated, err := is.Update(ctx, img)
-			if err != nil {
+			if _, err := is.Update(ctx, img); err != nil {
 				if errdefs.IsNotFound(err) {
 					continue
 				}
 				return err
 			}
-
-			img = updated
-		} else {
-			img = created
 		}
 		return nil
 	}

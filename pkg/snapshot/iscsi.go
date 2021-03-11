@@ -39,7 +39,7 @@ const (
 
 // OverlayBDBSConfig is the config of OverlayBD backing store in open-iscsi target.
 type OverlayBDBSConfig struct {
-	RepoBlobUrl string                   `json:"repoBlobUrl"`
+	RepoBlobURL string                   `json:"repoBlobUrl"`
 	Lowers      []OverlayBDBSConfigLower `json:"lowers"`
 	Upper       OverlayBDBSConfigUpper   `json:"upper"`
 	ResultFile  string                   `json:"resultFile"`
@@ -252,12 +252,12 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		blobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
-		blobPrefixUrl, err := o.constructImageBlobUrl(info.Labels[labelKeyImageRef])
+		blobPrefixURL, err := o.constructImageBlobURL(info.Labels[labelKeyImageRef])
 		if err != nil {
-			return errors.Wrapf(err, "failed to contruct image blob prefix url for snapshot %s", key)
+			return errors.Wrapf(err, "failed to construct image blob prefix url for snapshot %s", key)
 		}
 
-		configJSON.RepoBlobUrl = blobPrefixUrl
+		configJSON.RepoBlobURL = blobPrefixURL
 		configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
 			Digest: blobDigest,
 			Size:   int64(blobSize),
@@ -275,7 +275,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 	default:
 		if !writable || info.Parent == "" {
-			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%s, parent=%s)", stype, key, writable, info.Parent)
+			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
 
 		if err := o.prepareWritableOverlaybd(ctx, id); err != nil {
@@ -311,10 +311,10 @@ func (o *snapshotter) loadBackingStoreConfig(ctx context.Context, snKey string) 
 	return &configJSON, nil
 }
 
-// contructImageBlobUrl returns the https://host/v2/<name>/blobs/.
+// constructImageBlobURL returns the https://host/v2/<name>/blobs/.
 //
 // TODO(fuweid): How to know the existing url schema?
-func (o *snapshotter) constructImageBlobUrl(ref string) (string, error) {
+func (o *snapshotter) constructImageBlobURL(ref string) (string, error) {
 	refspec, err := reference.Parse(ref)
 	if err != nil {
 		return "", errors.Wrapf(err, "invalid repo url %s", ref)
