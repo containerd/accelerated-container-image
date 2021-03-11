@@ -16,7 +16,7 @@ The key features are:
 
 * **High Reliability**
 
-    OverlayBD outputs block devices through iSCSI protocol, which is widely used and supportted in most operation systems. OverlayBD backing-store can recover from failures or crashes.
+    OverlayBD outputs block devices through iSCSI protocol, which is widely used and supported in most operation systems. OverlayBD backing-store can recover from failures or crashes.
 
 * **Native Support for Writable**
 
