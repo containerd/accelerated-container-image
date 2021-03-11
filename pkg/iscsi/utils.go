@@ -160,8 +160,8 @@ func GetISCSIHostSessionMapForTarget(targetIqn string, portal string) (map[int][
 				connectionPath := filepath.Join(sysConnectionPath, connectionName)
 
 				for _, ipPort := range [][]string{
-					[]string{"address", "port"},
-					[]string{"persistent_address", "persistent_port"},
+					{"address", "port"},
+					{"persistent_address", "persistent_port"},
 				} {
 					address, err := ioutil.ReadFile(filepath.Join(connectionPath, ipPort[0]))
 					if err != nil {
