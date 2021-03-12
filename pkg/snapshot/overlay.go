@@ -402,11 +402,79 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	return m, nil
 }
 
-// View
-//
-// TODO(fuweid): help-wanted!
-func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) ([]mount.Mount, error) {
-	return nil, errdefs.ErrNotImplemented
+// View returns a readonly view on parent snapshotter.
+func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+	ctx, t, err := o.ms.TransactionContext(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	rollback := true
+	defer func() {
+		if retErr != nil && rollback {
+			if rerr := t.Rollback(); rerr != nil {
+				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
+			}
+		}
+	}()
+
+	id, _, err := o.createSnapshot(ctx, snapshots.KindView, key, parent, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if retErr != nil {
+			if rerr := os.RemoveAll(o.snPath(id)); rerr != nil {
+				log.G(ctx).WithError(rerr).Warn("failed to cleanup")
+			}
+		}
+	}()
+
+	s, err := storage.GetSnapshot(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	stype := storageTypeNormal
+	if parent != "" {
+		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
+		}
+
+		stype, err = o.identifySnapshotStorageType(parentID, parentInfo)
+		if err != nil {
+			return nil, err
+		}
+
+		switch stype {
+		case storageTypeLocalBlock, storageTypeRemoteBlock:
+			obdID, obdName := parentID, parentInfo.Name
+
+			if err := o.attachAndMountBlockDevice(ctx, obdID, obdName, false); err != nil {
+				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
+			}
+		default:
+			// do nothing
+		}
+	}
+
+	rollback = false
+	if err := t.Commit(); err != nil {
+		return nil, err
+	}
+
+	var m []mount.Mount
+	switch stype {
+	case storageTypeNormal:
+		m = o.normalOverlayMount(s)
+	case storageTypeLocalBlock, storageTypeRemoteBlock:
+		m = o.basedOnBlockDeviceMount(s, false)
+	default:
+		panic("unreachable")
+	}
+	return m, nil
 }
 
 // Mounts returns the mounts for the transaction identified by key. Can be

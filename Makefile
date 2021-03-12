@@ -5,6 +5,9 @@ DESTDIR=/usr/local/bin
 COMMANDS=overlaybd-snapshotter ctr
 BINARIES=$(addprefix bin/,$(COMMANDS))
 
+# go packages
+GO_PACKAGES=$(shell go list ${GO_TAGS} ./... | grep -v /vendor/)
+
 all: binaries
 
 binaries: $(BINARIES) ## build binaries into bin
@@ -20,6 +23,9 @@ bin/%: cmd/% force
 install: ## install binaries from bin
 	@mkdir -p $(DESTDIR)
 	@install $(BINARIES) $(DESTDIR)
+
+test: ## run tests that require root
+	@go test ${GO_TESTFLAGS} ${GO_PACKAGES} -test.root
 
 clean:
 	@rm -rf ./bin
