@@ -98,3 +98,33 @@ jobs:
           echo "::group:: file headers"
           ltag -t "script/validate/template" --excludes "vendor contrib" --check -v
           echo "::endgroup::"
+
+  #
+  # Integration
+  #
+  integration:
+    name: integration
+    runs-on: ubuntu-18.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: src/github.com/alibaba/accelerated-container-image
+          fetch-depth: 100
+
+      - name: install Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.15.8'
+
+      - name: set env
+        shell: bash
+        run: |
+          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+
+      - name: unit test
+        working-directory: src/github.com/alibaba/accelerated-container-image
+        run: |
+          sudo GO_TESTFLAGS=-v make test
