@@ -7,8 +7,7 @@ This doc includes:
 * [Setup Components](#setup-components)
   * [OverlayBD](#overlaybd)
   * [Proxy OverlayBD Snapshotter](#proxy-overlaybd-snapshotter)
-* [Ondemand Pulling Image Case](#ondemand-pulling-image-case)
-* [Writable OverlayBD](#writable-overlaybd)
+* [Ondemand Pulling Image Case](#ondemand-pulling-image)
 * [Convert OCI Image into OverlayBD](#convert-oci-image-into-overlaybd)
 
 ## Setup Components
@@ -40,7 +39,7 @@ sudo cat <<-EOF | sudo tee /etc/overlaybd-snapshotter/config.json
 EOF
 
 # run snapshotter
-sudo bin/snapshotter
+sudo bin/overlaybd-snapshotter
 ```
 
 Use `ctr` to check the plugin.
@@ -54,14 +53,14 @@ sudo ctr snapshot --snapshotter overlaybd ls
 
 If there is no overlaybd plugin, please checkout the section [About proxy snapshotter plugin for containerd](BUILDING.md#about-proxy-snapshotter-plugin-for-containerd).
 
-## Ondemand Pulling Image.
+## Ondemand Pulling Image
 
 The containerd feature [supports target snapshot references on prepare](https://github.com/containerd/containerd/pull/3793) is released by v1.4.x.
 And we provide `ctr` subcommand `rpull` as plugin to use feature to support pulling image in on-demand mode.
 
 ```bash
 # you will see that the rpull doesn't pull layer data.
-sudo /opt/overlaybd/bin/ctr rpull overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1_obd
+sudo bin/ctr rpull overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1_obd
 ```
 
 And start a container based on this image.
@@ -108,7 +107,7 @@ OverlayBD image convertor helps to convert a normal image to OverlayBD-format re
 sudo ctr content fetch overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1
 
 # convert
-sudo /opt/overlaybd/bin/ctr obdconv overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1 localhost:5000/redis:6.2.1_obd
+sudo bin/ctr obdconv overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1 localhost:5000/redis:6.2.1_obd
 
 # run
 ctr run --net-host --snapshotter=overlaybd --rm -t localhost:5000/redis:6.2.1_obd demo
