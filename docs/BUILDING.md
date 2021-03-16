@@ -1,27 +1,21 @@
-# Build from source
+# Building
 
 This doc includes:
 
-* [Build requirements](#build-requirements)
-* [Build the development environment](#build-the-development-environment)
-  * [Requirements](#requirements)
-  * [Build](#build)
+* [Requirements](#requirements)
+* [Build from source](#build-from-source)
 * [Configure](#configure)
-  * [About proxy snapshotter plugin for containerd](#about-proxy-snapshotter-plugin-for-containerd)
+  * [Proxy snapshotter plugin config](#proxy-snapshotter-plugin-config)
+  * [containerd config](#containerd-config)
+* [Run](#run)
 
-## Build Requirements
+## Requirements
 
-Go >= 1.15.x is required.
-
-## Build the development environment
-
-### Requirements
-
-* OverlayBD proxy snapshotter required containerd daemon >= 1.4.x
-  * Require [supports target snapshot references on prepare](https://github.com/containerd/containerd/pull/3793).
+* Install Go >= 1.15.x
+* Install containerd >= 1.4.x
   * See [Downloads at containerd.io](https://containerd.io/downloads/).
 
-### Build
+### Build from source
 
 You need git to checkout the source code and compile:
 
@@ -30,20 +24,40 @@ git clone https://github.com/alibaba/accelerated-container-image.git
 cd accelerated-container-image
 make
 ```
+
 The snapshotter and ctr plugin are generated in `bin`.
 
 ## Configure
 
-### About proxy snapshotter plugin for containerd
+### proxy snapshotter plugin config
+
+```bash
+sudo mkdir /etc/overlaybd-snapshotter
+sudo cat <<-EOF | sudo tee /etc/overlaybd-snapshotter/config.json
+{
+    "root": "/var/lib/overlaybd/",
+    "address": "/run/overlaybd-snapshotter/overlaybd.sock"
+}
+EOF
+```
+
+### containerd config
 
 ```bash
 sudo cat <<-EOF | sudo tee --append /etc/containerd/config.toml
 
 [proxy_plugins.overlaybd]
-   type = "snapshot"
-   address = "/run/overlaybd-snapshotter/overlaybd.sock"
+    type = "snapshot"
+    address = "/run/overlaybd-snapshotter/overlaybd.sock"
 EOF
+```
 
-# don't forget to restart the containerd daemon.
+## Run
+
+```bash
+# run snapshotter plugin
+sudo bin/snapshotter
+
+# restart containerd
 sudo systemctl restart containerd
 ```
