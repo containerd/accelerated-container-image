@@ -31,7 +31,7 @@ import (
 
 var rpullCommand = cli.Command{
 	Name:        "rpull",
-	Usage:       "rpull an image from a remote for OverlayBD snapshotter",
+	Usage:       "rpull an image from a remote for overlaybd snapshotter",
 	ArgsUsage:   "[flags] <ref>",
 	Description: `Fetch and prepare an image for use in containerd.`,
 	Flags: append(append(commands.RegistryFlags, commands.LabelFlag),

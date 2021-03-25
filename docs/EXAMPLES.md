@@ -1,18 +1,19 @@
 # Getting Started
 
-Before checkout the examples, make sure that you have build or install the components described in [OverlayBD](https://github.com/alibaba/overlaybd/README.md), [BUILDING](BUILDING.md) and [INSTALL](INSTALL.md).
+Before checkout the examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/alibaba/overlaybd/README.md) and [BUILDING](BUILDING.md).
 
 This doc includes:
 
-* [Setup Components](#setup-components)
-  * [OverlayBD](#overlaybd)
-  * [Proxy OverlayBD Snapshotter](#proxy-overlaybd-snapshotter)
-* [Ondemand Pulling Image Case](#ondemand-pulling-image)
-* [Convert OCI Image into OverlayBD](#convert-oci-image-into-overlaybd)
+* [Check Components](#check-components)
+  * [Overlaybd](#overlaybd)
+  * [Proxy overlaybd snapshotter](#proxy-overlaybd-snapshotter)
+* [Ondemand pulling image case](#ondemand-pulling-image-case)
+* [Writable overlaybd](#writable-overlaybd)
+* [Convert OCI image into overlaybd](#convert-oci-image-into-overlaybd)
 
-## Setup Components
+## Check Components
 
-### OverlayBD
+### Overlaybd
 
 Check the overlaybd backing-store of tgt.
 
@@ -20,27 +21,9 @@ Check the overlaybd backing-store of tgt.
 sudo tgtadm --lld iscsi --mode system --op show | grep -B 5 overlaybd
 ```
 
-If there is no overlaybd backing-store, please checkout [OverlayBD](https://github.com/alibaba/overlaybd).
+If there is no overlaybd backing-store, please checkout [overlaybd](https://github.com/alibaba/overlaybd).
 
-### Proxy OverlayBD Snapshotter
-
-Start the OverlayBD snapshotter.
-
-```bash
-# in one terminal
-
-# add config for overlaybd-config
-sudo mkdir /etc/overlaybd-snapshotter
-sudo cat <<-EOF | sudo tee /etc/overlaybd-snapshotter/config.json
-{
-        "root": "/var/lib/overlaybd/",
-        "address": "/run/overlaybd-snapshotter/overlaybd.sock"
-}
-EOF
-
-# run snapshotter
-sudo bin/overlaybd-snapshotter
-```
+### Proxy overlaybd snapshotter
 
 Use `ctr` to check the plugin.
 
@@ -51,7 +34,7 @@ sudo ctr plugin ls | grep overlaybd
 sudo ctr snapshot --snapshotter overlaybd ls
 ```
 
-If there is no overlaybd plugin, please checkout the section [About proxy snapshotter plugin for containerd](BUILDING.md#about-proxy-snapshotter-plugin-for-containerd).
+If there is no overlaybd plugin, please checkout the section [Proxy snapshotter plugin config](#proxy-snapshotter-plugin-config).
 
 ## Ondemand Pulling Image
 
@@ -98,9 +81,17 @@ $ sudo ctr run --net-host --snapshotter=overlaybd --rm -t overlaybd-registry.cn-
 1:M 03 Mar 2021 04:39:31.810 * Ready to accept connections
 ```
 
-## Convert OCI Image into OverlayBD
+```bash
+$ sudo lsblk
+NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
+sdb           8:16   0   256G  1 disk /var/lib/overlaybd/snapshots/52/block/mountpoint
+```
 
-OverlayBD image convertor helps to convert a normal image to OverlayBD-format remote image.
+We could see a new iSCSI device (sdb) has been created, and its mount-point is the lowerdir of overlayfs.
+
+## Convert OCI Image into overlaybd
+
+Overlaybd image convertor helps to convert a normal image to overlaybd-format remote image.
 
 ```bash
 # pull the source image
@@ -110,7 +101,7 @@ sudo ctr content fetch overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/re
 sudo bin/ctr obdconv overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1 localhost:5000/redis:6.2.1_obd
 
 # run
-ctr run --net-host --snapshotter=overlaybd --rm -t localhost:5000/redis:6.2.1_obd demo
+sudo ctr run --net-host --snapshotter=overlaybd --rm -t localhost:5000/redis:6.2.1_obd demo
 
 1:C 03 Mar 2021 04:50:12.853 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
 1:C 03 Mar 2021 04:50:12.853 # Redis version=6.2.1, bits=64, commit=00000000, modified=0, pid=1, just started
