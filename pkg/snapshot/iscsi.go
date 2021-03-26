@@ -366,7 +366,7 @@ func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string)
 	// TODO(fuweid): 256GB can be configurable?
 	out, err := exec.CommandContext(ctx, binpath,
 		o.tgtOverlayBDWritableDataPath(snID),
-		o.tgtOverlayBDWritableIndexPath(snID), "256").CombinedOutput()
+		o.tgtOverlayBDWritableIndexPath(snID), "64").CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
 	}
