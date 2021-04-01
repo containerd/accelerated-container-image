@@ -311,7 +311,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	// NOTE: If the image is in overlaybd format, the baselayer will be
 	// the metadata(in small size) and should not be fetched on-demand.
 	if targetRef, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
-		stype, err := o.identifySnapshotStorageType(id, info)
+		stype, err := o.identifySnapshotStorageType(ctx, id, info)
 		if err != nil {
 			return nil, err
 		}
@@ -347,13 +347,13 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 	// if parent is not empty, try to attach and mount block device
 	_, writableBD := info.Labels[LabelSupportWritableOverlayBD]
-	if parent != "" {
+	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok && parent != "" {
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
 		}
 
-		stype, err = o.identifySnapshotStorageType(parentID, parentInfo)
+		stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -443,7 +443,7 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
 		}
 
-		stype, err = o.identifySnapshotStorageType(parentID, parentInfo)
+		stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -509,7 +509,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", info.Parent)
 		}
 
-		parentStype, err := o.identifySnapshotStorageType(parentID, parentInfo)
+		parentStype, err := o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to identify storage of parent snapshot %s", parentInfo.Name)
 		}
@@ -573,7 +573,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		return err
 	}
 
-	stype, err := o.identifySnapshotStorageType(id, info)
+	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
 	}
@@ -634,7 +634,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return err
 	}
 
-	stype, err := o.identifySnapshotStorageType(id, info)
+	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
 	}
@@ -872,7 +872,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	return id, info, nil
 }
 
-func (o *snapshotter) identifySnapshotStorageType(id string, info snapshots.Info) (storageType, error) {
+func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string, info snapshots.Info) (storageType, error) {
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
 		_, hasBDBlobSize := info.Labels[labelKeyOverlayBDBlobSize]
 		_, hasBDBlobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
@@ -885,31 +885,22 @@ func (o *snapshotter) identifySnapshotStorageType(id string, info snapshots.Info
 
 	}
 
+	// check overlaybd.commit
 	filePath := o.magicFilePath(id)
-
-	f, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return storageTypeNormal, nil
-		}
-		return storageTypeUnknown, errors.Wrapf(err, "failed to open %s", filePath)
+	st, err := o.identifyLocalStorageType(filePath)
+	if err == nil {
+		return st, nil
 	}
+	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
 
-	const overlaybdHeaderSize = 32
-	data := make([]byte, overlaybdHeaderSize)
-
-	_, err = f.Read(data)
-	f.Close()
-	if err != nil {
-		return storageTypeUnknown, errors.Wrapf(err, "failed to read %s", filePath)
+	// check writable data file
+	filePath = o.tgtOverlayBDWritableDataPath(id)
+	st, err = o.identifyLocalStorageType(filePath)
+	if err != nil && os.IsNotExist(err) {
+		return storageTypeNormal, nil
 	}
-
-	if isZfileHeader(data) {
-		return storageTypeLocalBlock, nil
-	}
-	return storageTypeNormal, nil
+	return st, err
 }
-
 func (o *snapshotter) snPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id)
 }
@@ -961,6 +952,27 @@ func (o *snapshotter) tgtOverlayBDWritableDataPath(id string) string {
 // Close closes the snapshotter
 func (o *snapshotter) Close() error {
 	return o.ms.Close()
+}
+
+func (o *snapshotter) identifyLocalStorageType(filePath string) (storageType, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return storageTypeUnknown, err
+	}
+
+	const overlaybdHeaderSize = 32
+	data := make([]byte, overlaybdHeaderSize)
+
+	_, err = f.Read(data)
+	f.Close()
+	if err != nil {
+		return storageTypeUnknown, errors.Wrapf(err, "failed to read %s", filePath)
+	}
+
+	if isZfileHeader(data) {
+		return storageTypeLocalBlock, nil
+	}
+	return storageTypeNormal, nil
 }
 
 func isZfileHeader(header []byte) bool {
