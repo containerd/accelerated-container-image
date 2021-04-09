@@ -16,29 +16,27 @@ Unlike other lightweight apps such as busybox, WordPress image contains a lot of
 
 ## Steps
 
-We provide a setup script to measure the Process Available Time and Service Available Time of WordPress app. Before start, please make sure port 80 is not occupied in your host.
+We provide a setup script to measure the service available time of WordPress app. Before start, please make sure port 80 is not occupied in your host.
 
-Use the clean script to stop running containers and remove images.
+Use the clean script to stop running containers, remove images and drop local cache.
 
 ```bash
 cd script/performance/
 
+./clean-env.sh
 time ./setup-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2_obd
-./clean-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2_obd
 
+./clean-env.sh
 time ./setup-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2
-./clean-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2
 ```
 
 ## Performance results
 
-| Image Format | Process Available Time | Service Available Time |
-| :----: | :----: | :----: |
-| **overlaybd** | 2.606s | 4.080s |
-| **standard tarball** | 12.752s | 17.203s |
+| **Image Format** | **Service Available Time** |
+| :----: | :----: |
+| overlaybd | 6.433s |
+| standard tarball | 15.341s |
 
-Conclusion: Accelerated Container Image's overlaybd format outperforms standard OCI tarball image in terms of container start-up speed.
+Note: The prefetch feature is enabled.
 
-## Further actions
-
-We will introduce a new performance improvement based on prefetch technology in the next major release. The time cost will continue to decrease to approximately 50%.
+Conclusion: Overlaybd outperforms standard OCI tarball in terms of cold start time (without local cache).

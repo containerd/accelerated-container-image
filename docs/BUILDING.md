@@ -12,6 +12,7 @@ This doc includes:
 ## Requirements
 
 * Install Go >= 1.15.x
+* Install runc >= 1.0
 * Install containerd >= 1.4.x
   * See [Downloads at containerd.io](https://containerd.io/downloads/).
 
@@ -56,7 +57,7 @@ EOF
 
 ```bash
 # run snapshotter plugin
-sudo bin/snapshotter
+sudo bin/overlaybd-snapshotter
 
 # restart containerd
 sudo systemctl restart containerd
