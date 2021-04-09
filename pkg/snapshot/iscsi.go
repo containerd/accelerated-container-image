@@ -237,7 +237,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		return errors.Wrapf(err, "failed to get info for snapshot %s", key)
 	}
 
-	stype, err := o.identifySnapshotStorageType(id, info)
+	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return errors.Wrapf(err, "failed to identify storage of snapshot %s", key)
 	}
@@ -253,6 +253,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		if err != nil {
 			return err
 		}
+		configJSON.RepoBlobURL = parentConfJSON.RepoBlobURL
 		configJSON.Lowers = parentConfJSON.Lowers
 	}
 
