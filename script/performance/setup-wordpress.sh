@@ -16,8 +16,6 @@ while true; do
         fi
 done
 
-echo "Process Available"
-
-wget -q -t 1000 --waitretry=0.2 -w 0 --retry-connrefused -O /dev/null http://127.0.0.1/wp-admin/setup-config.php
+wget -q -t 1000 --waitretry=0.1 -w 0 --retry-connrefused -O /dev/null http://127.0.0.1/wp-admin/setup-config.php
 
 echo "Service Available"
