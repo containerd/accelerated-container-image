@@ -15,13 +15,9 @@ This doc includes:
 
 ### Overlaybd
 
-Check the overlaybd backing-store of tgt.
+Check whether the `overlaybd-tcmu` is running.
 
-```bash
-sudo tgtadm --lld iscsi --mode system --op show | grep -B 5 overlaybd
-```
-
-If there is no overlaybd backing-store, please checkout [overlaybd](https://github.com/alibaba/overlaybd).
+For any problems, please checkout [overlaybd](https://github.com/alibaba/overlaybd).
 
 ### Proxy overlaybd snapshotter
 

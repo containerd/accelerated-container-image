@@ -48,7 +48,7 @@ const (
 	storageTypeNormal
 
 	// storageTypeLocalBlock means that the unpacked layer data is in
-	// OverlayBD format for iscsi backing store.
+	// Overlaybd format.
 	storageTypeLocalBlock
 
 	// storageTypeRemoteBlock means that there is no unpacked layer data.
@@ -136,7 +136,7 @@ type Opt func(config *SnapshotterConfig) error
 //    # overlayFS plugin, which means that it can support normal OCI image.
 //    #
 //    # If the pull job doesn't support `containerd.io/snapshot.ref` and `containerd.io/snapshot/image-ref`,
-//    # the snapshotter will use localBD mode to support the blob data in OverlayBD
+//    # the snapshotter will use localBD mode to support the blob data in overlaybd
 //    # format. The ${ID}/fs will be empty and the real file data will be placed
 //    # in the ${ID}/block/mountpoint. It is the same to the remoteBD mode.
 //    #
@@ -145,19 +145,14 @@ type Opt func(config *SnapshotterConfig) error
 //      |   |_ fs/               # lowerdir or upperdir
 //      |   |_ work/             # workdir
 //      |   |_ block/            # iscsi-target block
-//      |      |_ config.v1.json     # config for OverlayBD backing store in open-iscsi
-//      |      |_ init-debug.log     # shows the debug log when creating open-iscsi target
-//      |      |_ mountpoint         # the block device will mount on this if the snapshot is based on OverlayBD
+//      |      |_ config.v1.json     # config for overlaybd target
+//      |      |_ init-debug.log     # shows the debug log when creating iscsi target
+//      |      |_ mountpoint         # the block device will mount on this if the snapshot is based on overlaybd
 //      |      |_ writable_data      # exists if the block is writable in active snapshotter
 //      |      |_ writable_index     # exists if the block is writable in active snapshotter
 //      |
 //      |_ ...
 //
-//    # iscsiconfd stores the open-iscsi target conf(s).
-//    #
-//    - iscsiconfd/
-//      |_ ${namespace}--${versionID}--${snapshotKey}-${snapshotID}.conf
-//      |_ ...
 //
 //    # metadata.db is managed by github.com/containerd/containerd/snapshots/storage
 //    # based on boltdb.
@@ -190,10 +185,6 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 	}
 
 	if err := os.Mkdir(filepath.Join(root, "snapshots"), 0700); err != nil && !os.IsExist(err) {
-		return nil, err
-	}
-
-	if err := os.Mkdir(filepath.Join(root, "iscsiconfd"), 0700); err != nil && !os.IsExist(err) {
 		return nil, err
 	}
 
@@ -326,14 +317,6 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 				return nil, err
 			}
 
-			defer func() {
-				if retErr != nil && !errdefs.IsAlreadyExists(retErr) {
-					if rerr := os.Remove(o.tgtTargetConfPath(id, targetRef)); rerr != nil {
-						log.G(ctx).WithError(rerr).Warn("failed to cleanup")
-					}
-				}
-			}()
-
 			rollback = false
 			if err := t.Commit(); err != nil {
 				return nil, err
@@ -375,8 +358,8 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 			defer func() {
 				if retErr != nil && writableBD {
-					if rerr := mount.Unmount(o.tgtTargetMountpoint(obdID), 0); rerr != nil {
-						log.G(ctx).WithError(rerr).Warnf("failed to umount writable block %s", o.tgtTargetMountpoint(obdID))
+					if rerr := mount.Unmount(o.overlaybdMountpoint(obdID), 0); rerr != nil {
+						log.G(ctx).WithError(rerr).Warnf("failed to umount writable block %s", o.overlaybdMountpoint(obdID))
 					}
 				}
 			}()
@@ -560,9 +543,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			}
 
 			// clean up the temporary data
-			os.Remove(o.tgtOverlayBDWritableDataPath(id))
-			os.Remove(o.tgtOverlayBDWritableIndexPath(id))
-			os.Remove(o.tgtTargetConfPath(id, key))
+			os.Remove(o.overlaybdWritableDataPath(id))
+			os.Remove(o.overlaybdWritableIndexPath(id))
 		}()
 
 		opts = append(opts, snapshots.WithLabels(map[string]string{LabelLocalOverlayBDPath: o.magicFilePath(id)}))
@@ -643,11 +625,6 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
 			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 		}
-
-		targetConfPath := o.tgtTargetConfPath(id, key)
-		if err := os.Remove(targetConfPath); err != nil && !os.IsNotExist(err) {
-			return errors.Wrapf(err, "failed to delete target config(path=%s) for snapshot %s", targetConfPath, key)
-		}
 	}
 
 	defer func() {
@@ -717,7 +694,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(s storage.Snapshot, writableBD boo
 	if writableBD {
 		return []mount.Mount{
 			{
-				Source: o.tgtTargetMountpoint(s.ID),
+				Source: o.overlaybdMountpoint(s.ID),
 				Type:   "bind",
 				Options: []string{
 					"rw",
@@ -741,7 +718,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(s storage.Snapshot, writableBD boo
 	} else if len(s.ParentIDs) == 1 {
 		return []mount.Mount{
 			{
-				Source: o.tgtTargetMountpoint(s.ParentIDs[0]),
+				Source: o.overlaybdMountpoint(s.ParentIDs[0]),
 				Type:   "bind",
 				Options: []string{
 					"ro",
@@ -751,7 +728,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(s storage.Snapshot, writableBD boo
 		}
 	}
 
-	options = append(options, fmt.Sprintf("lowerdir=%s", o.tgtTargetMountpoint(s.ParentIDs[0])))
+	options = append(options, fmt.Sprintf("lowerdir=%s", o.overlaybdMountpoint(s.ParentIDs[0])))
 	return []mount.Mount{
 		{
 			Type:    "overlay",
@@ -894,13 +871,14 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
 
 	// check writable data file
-	filePath = o.tgtOverlayBDWritableDataPath(id)
+	filePath = o.overlaybdWritableDataPath(id)
 	st, err = o.identifyLocalStorageType(filePath)
 	if err != nil && os.IsNotExist(err) {
 		return storageTypeNormal, nil
 	}
 	return st, err
 }
+
 func (o *snapshotter) snPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id)
 }
@@ -917,35 +895,23 @@ func (o *snapshotter) magicFilePath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "fs", "overlaybd.commit")
 }
 
-func (o *snapshotter) tgtTargetConfPath(id string, key string) string {
-	name := strings.Replace(key, ":", "-", -1)
-	name = strings.Replace(name, "/", "--", -1)
-	return filepath.Join(o.root, "iscsiconfd", fmt.Sprintf("%s-%s.conf", name, id))
-}
-
-func (o *snapshotter) tgtTargetIqn(id string, key string) string {
-	name := strings.Replace(key, ":", "-", -1)
-	name = strings.Replace(name, "/", "--", -1)
-	return fmt.Sprintf("iqn.alibabacloud.overlaybd:%s.%s", name, id)
-}
-
-func (o *snapshotter) tgtTargetMountpoint(id string) string {
+func (o *snapshotter) overlaybdMountpoint(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "mountpoint")
 }
 
-func (o *snapshotter) tgtOverlayBDConfPath(id string) string {
+func (o *snapshotter) overlaybdConfPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "config.v1.json")
 }
 
-func (o *snapshotter) tgtOverlayBDInitDebuglogPath(id string) string {
+func (o *snapshotter) overlaybdInitDebuglogPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "init-debug.log")
 }
 
-func (o *snapshotter) tgtOverlayBDWritableIndexPath(id string) string {
+func (o *snapshotter) overlaybdWritableIndexPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "writable_index")
 }
 
-func (o *snapshotter) tgtOverlayBDWritableDataPath(id string) string {
+func (o *snapshotter) overlaybdWritableDataPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "writable_data")
 }
 
@@ -969,13 +935,13 @@ func (o *snapshotter) identifyLocalStorageType(filePath string) (storageType, er
 		return storageTypeUnknown, errors.Wrapf(err, "failed to read %s", filePath)
 	}
 
-	if isZfileHeader(data) {
+	if isOverlaybdFileHeader(data) {
 		return storageTypeLocalBlock, nil
 	}
 	return storageTypeNormal, nil
 }
 
-func isZfileHeader(header []byte) bool {
+func isOverlaybdFileHeader(header []byte) bool {
 	magic0 := *(*uint64)(unsafe.Pointer(&header[0]))
 	magic1 := *(*uint64)(unsafe.Pointer(&header[8]))
 	magic2 := *(*uint64)(unsafe.Pointer(&header[16]))

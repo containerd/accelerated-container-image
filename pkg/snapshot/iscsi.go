@@ -29,8 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alibaba/accelerated-container-image/pkg/iscsi"
-
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/reference"
@@ -42,18 +40,19 @@ import (
 )
 
 const (
-	// tgt related
-	tgtBackingStoreOverlayBD = "overlaybd"
+	maxAttachAttempts = 50
 
-	defaultInitiatorAddress = "127.0.0.1"
-	defaultInitiatorPort    = "3260"
-	defaultPortal           = defaultInitiatorAddress + ":" + defaultInitiatorPort
+	// hba number used to create tcmu devices in configfs
+	// all overlaybd devices are configured in /sys/kernel/config/target/core/user_999999999/
+	// devices ares identified by their snID /sys/kernel/config/target/core/user_999999999/dev_$snID
+	obdHbaNum = 999999999
 
-	maxAttachAttempts      = 10
-	defaultRollbackTimeout = 30 * time.Second
+	// Naa preffix for loopback devices in configfs
+	// for example snID 128, the loopback device config in /sys/kernel/config/target/loopback/naa.1990000000000128
+	obdLoopNaaPreffix = 199
 )
 
-// OverlayBDBSConfig is the config of OverlayBD backing store in open-iscsi target.
+// OverlayBDBSConfig is the config of overlaybd target.
 type OverlayBDBSConfig struct {
 	RepoBlobURL string                   `json:"repoBlobUrl"`
 	Lowers      []OverlayBDBSConfigLower `json:"lowers"`
@@ -76,34 +75,43 @@ type OverlayBDBSConfigUpper struct {
 
 // unmountAndDetachBlockDevice
 func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) error {
-	mountPoint := o.tgtTargetMountpoint(snID)
+	mountPoint := o.overlaybdMountpoint(snID)
 	if err := mount.UnmountAll(mountPoint, 0); err != nil {
 		return errors.Wrapf(err, "failed to umount %s", mountPoint)
 	}
 
-	// logout portal
-	targetIqn := o.tgtTargetIqn(snID, snKey)
-	out, err := exec.CommandContext(ctx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "--logout").CombinedOutput()
+	loopDevID := o.overlaybdLoopbackDeviceID(snID)
+	lunPath := o.overlaybdLoopbackDeviceLunPath(loopDevID)
+	linkPath := path.Join(lunPath, "dev_"+snID)
+
+	err := os.RemoveAll(linkPath)
 	if err != nil {
-		exiterr, ok := err.(*exec.ExitError)
-		if !ok || iscsi.Errno(exiterr.ExitCode()) != iscsi.ENOOBJSFOUND {
-			return errors.Wrapf(err, "failed to logout a portal on a target %s: %s", targetIqn, out)
-		}
+		return errors.Wrapf(err, "failed to remove loopback link %s", linkPath)
 	}
 
-	// delete the portal
-	out, err = exec.CommandContext(ctx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "-o", "delete").CombinedOutput()
+	err = os.RemoveAll(lunPath)
 	if err != nil {
-		exiterr, ok := err.(*exec.ExitError)
-		if !ok || iscsi.Errno(exiterr.ExitCode()) != iscsi.ENOOBJSFOUND {
-			return errors.Wrapf(err, "failed to delete a portal on a target %s: %s", targetIqn, out)
-		}
+		return errors.Wrapf(err, "failed to remove loopback lun %s", lunPath)
 	}
 
-	// delete the target
-	out, err = exec.CommandContext(ctx, "tgt-admin", "--delete", targetIqn).CombinedOutput()
+	loopDevPath := o.overlaybdLoopbackDevicePath(loopDevID)
+	tpgtPath := path.Join(loopDevPath, "tpgt_1")
+
+	err = os.RemoveAll(tpgtPath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to delete target %s: %s", targetIqn, out)
+		return errors.Wrapf(err, "failed to remove loopback tgpt %s", tpgtPath)
+	}
+
+	err = os.RemoveAll(loopDevPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to remove loopback dir %s", loopDevPath)
+	}
+
+	targetPath := o.overlaybdTargetPath(snID)
+
+	err = os.RemoveAll(targetPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to remove target dir %s", targetPath)
 	}
 	return nil
 }
@@ -112,125 +120,138 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
 func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, snKey string, writable bool) (retErr error) {
-	if err := lookup(o.tgtTargetMountpoint(snID)); err == nil {
+	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
 	}
 
-	// If the target already exists, it won't be processed, see man TGT-ADMIN(8)
-	targetConfPath := o.tgtTargetConfPath(snID, snKey)
-	out, err := exec.CommandContext(ctx, "tgt-admin", "-e", "-c", targetConfPath).CombinedOutput()
+	targetPath := o.overlaybdTargetPath(snID)
+	err := os.MkdirAll(targetPath, 0700)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create target dir for %s", targetPath)
+	}
+
+	defer func() {
+		if retErr != nil {
+			rerr := os.RemoveAll(targetPath)
+			if rerr != nil {
+				log.G(ctx).WithError(rerr).Warnf("failed to clean target dir %s", targetPath)
+			}
+		}
+	}()
+
+	err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd//%s", o.overlaybdConfPath(snID))), 0666)
+	if err != nil {
+		return errors.Wrapf(err, "failed to write target config for %s", targetPath)
+	}
+
+	err = ioutil.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
 	if err != nil {
 		// read the init-debug.log for readable
-		debugLogPath := o.tgtOverlayBDInitDebuglogPath(snID)
+		debugLogPath := o.overlaybdInitDebuglogPath(snID)
 		if data, derr := ioutil.ReadFile(debugLogPath); derr == nil {
-			return errors.Wrapf(err, "failed to create target by tgt-admin: %s, more detail in %s", out, data)
+			return errors.Errorf("failed to enable target for %s, %s", targetPath, data)
 		}
-		return errors.Wrapf(err, "failed to create target by tgt-admin: %s", out)
+		return errors.Wrapf(err, "failed to enable target for %s", targetPath)
 	}
 
-	targetIqn := o.tgtTargetIqn(snID, snKey)
+	loopDevID := o.overlaybdLoopbackDeviceID(snID)
+	loopDevPath := o.overlaybdLoopbackDevicePath(loopDevID)
+
+	err = os.MkdirAll(loopDevPath, 0700)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create loopback dir %s", loopDevPath)
+	}
+
+	tpgtPath := path.Join(loopDevPath, "tpgt_1")
+	lunPath := o.overlaybdLoopbackDeviceLunPath(loopDevID)
+	err = os.MkdirAll(lunPath, 0700)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create loopback lun dir %s", lunPath)
+	}
+
 	defer func() {
 		if retErr != nil {
-			deferCtx, deferCancel := rollbackContext()
-			defer deferCancel()
+			rerr := os.RemoveAll(lunPath)
+			if rerr != nil {
+				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback lun %s", lunPath)
+			}
 
-			out, err = exec.CommandContext(ctx, "tgt-admin", "--delete", targetIqn).CombinedOutput()
-			if err != nil {
-				log.G(deferCtx).WithError(err).Warnf("failed to rollback target by tgt-admin: %s", out)
+			rerr = os.RemoveAll(tpgtPath)
+			if rerr != nil {
+				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback tpgt %s", tpgtPath)
+			}
+
+			rerr = os.RemoveAll(loopDevPath)
+			if rerr != nil {
+				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback dir %s", loopDevPath)
 			}
 		}
 	}()
 
-	// Add a portal on a target
-	out, err = exec.CommandContext(ctx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "-o", "new").CombinedOutput()
+	nexusPath := path.Join(tpgtPath, "nexus")
+	err = ioutil.WriteFile(nexusPath, ([]byte)(loopDevID), 0666)
 	if err != nil {
-		return errors.Wrapf(err, "failed to add a portal on a target %s: %s", targetIqn, out)
+		return errors.Wrapf(err, "failed to write loopback nexus %s", nexusPath)
 	}
-	defer func() {
-		// rollback the portal
-		if retErr != nil {
-			deferCtx, deferCancel := rollbackContext()
-			defer deferCancel()
 
-			out, err = exec.CommandContext(deferCtx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "-o", "delete").CombinedOutput()
+	linkPath := path.Join(lunPath, "dev_"+snID)
+	err = os.Symlink(targetPath, linkPath)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create loopback link %s", linkPath)
+	}
+
+	defer func() {
+		if retErr != nil {
+			rerr := os.RemoveAll(linkPath)
 			if err != nil {
-				log.G(deferCtx).WithError(err).Warnf("failed to rollback a portal on a target %s: %s", targetIqn, out)
+				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback link %s", linkPath)
 			}
 		}
 	}()
 
-	// Login a portal on a target
-	out, err = exec.CommandContext(ctx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "--login").CombinedOutput()
+	devAddressPath := path.Join(tpgtPath, "address")
+	bytes, err := ioutil.ReadFile(devAddressPath)
 	if err != nil {
-		exiterr, ok := err.(*exec.ExitError)
-		if !ok || iscsi.Errno(exiterr.ExitCode()) != iscsi.ESESSEXISTS {
-			return errors.Wrapf(err, "failed to login a portal on a target %s: %s", targetIqn, out)
-		}
+		return errors.Wrapf(err, "failed to read loopback address for %s", devAddressPath)
 	}
-	defer func() {
-		// NOTE(fuweid): Basically, do login only once. The rollback doesn't impact other running portal.
-		if retErr != nil {
-			deferCtx, deferCancel := rollbackContext()
-			defer deferCancel()
-
-			out, err = exec.CommandContext(deferCtx, "iscsiadm", "-m", "node", "-p", defaultPortal, "-T", targetIqn, "--logout").CombinedOutput()
-			if err != nil {
-				log.G(deferCtx).WithError(err).Warnf("failed to rollback to logout on a target %s: %s", targetIqn, out)
-			}
-		}
-	}()
-
-	// Find the session and hostNumber mapping
-	hostToSessionID, err := iscsi.GetISCSIHostSessionMapForTarget(targetIqn, defaultPortal)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get hostNumber->SessionID mapping for %s", targetIqn)
-	}
-
-	if len(hostToSessionID) != 1 {
-		return errors.Errorf("unexpected hostNumber->SessionID mapping result %v for %s", hostToSessionID, targetIqn)
-	}
+	deviceNumber := strings.TrimSuffix(string(bytes), "\n")
 
 	// The device doesn't show up instantly. Need retry here.
 	var lastErr error = nil
-	var mountPoint = o.tgtTargetMountpoint(snID)
-	for i := 1; i <= maxAttachAttempts; i++ {
-		for hostNumber, sessionIDs := range hostToSessionID {
-			if len(sessionIDs) != 1 {
-				return errors.Errorf("unexpected hostNumber->SessionID mapping result %v for %s", hostToSessionID, targetIqn)
-			}
+	for retry := 0; retry < maxAttachAttempts; retry++ {
+		devDirs, err := ioutil.ReadDir(o.scsiBlockDevicePath(deviceNumber))
+		if err != nil {
+			lastErr = err
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		if len(devDirs) == 0 {
+			lastErr = errors.Errorf("empty device found")
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
 
-			// Assume that both channelID and targetID are zero.
-			devices, err := iscsi.GetDevicesForTarget(targetIqn, hostNumber, sessionIDs[0], 0, 0)
-			if err != nil {
-				return err
-			}
-
-			if len(devices) != 1 {
-				lastErr = errors.Errorf("unexpected devices %v for %s", devices, targetIqn)
-				break
-			}
+		for _, dev := range devDirs {
+			device := fmt.Sprintf("/dev/%s", dev.Name())
+			var mountPoint = o.overlaybdMountpoint(snID)
 
 			var mflag uintptr = unix.MS_RDONLY
 			if writable {
 				mflag = 0
 			}
 
-			// TODO(fuweid): how to support multiple filesystem?
-			if err := unix.Mount(devices[0], mountPoint, "ext4", mflag, ""); err != nil {
-				return errors.Wrapf(err, "failed to mount the device %s on %s", devices[0], mountPoint)
+			if err := unix.Mount(device, mountPoint, "ext4", mflag, ""); err != nil {
+				lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
+				time.Sleep(10 * time.Millisecond)
+				break // retry
 			}
-			lastErr = nil
+			return nil
 		}
-
-		if lastErr == nil {
-			break
-		}
-		time.Sleep(1 * time.Second)
 	}
 	return lastErr
 }
 
-// constructOverlayBDSpec generates the config spec for OverlayBD backing store.
+// constructOverlayBDSpec generates the config spec for overlaybd target.
 func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, writable bool) error {
 	id, info, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
@@ -244,7 +265,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 	configJSON := OverlayBDBSConfig{
 		Lowers:     []OverlayBDBSConfigLower{},
-		ResultFile: o.tgtOverlayBDInitDebuglogPath(id),
+		ResultFile: o.overlaybdInitDebuglogPath(id),
 	}
 
 	// load the parent's config and reuse the lowerdir
@@ -300,21 +321,21 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		configJSON.Upper = OverlayBDBSConfigUpper{
-			Index: o.tgtOverlayBDWritableIndexPath(id),
-			Data:  o.tgtOverlayBDWritableDataPath(id),
+			Index: o.overlaybdWritableIndexPath(id),
+			Data:  o.overlaybdWritableDataPath(id),
 		}
 	}
-	return o.atomicWriteBackingStoreAndTargetConfig(ctx, id, key, configJSON)
+	return o.atomicWriteOverlaybdTargetConfig(ctx, id, key, configJSON)
 }
 
-// loadBackingStoreConfig loads OverlayBD backing store config.
+// loadBackingStoreConfig loads overlaybd target config.
 func (o *snapshotter) loadBackingStoreConfig(ctx context.Context, snKey string) (*OverlayBDBSConfig, error) {
 	id, _, _, err := storage.GetInfo(ctx, snKey)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to get info of snapshot %s", snKey)
 	}
 
-	confPath := o.tgtOverlayBDConfPath(id)
+	confPath := o.overlaybdConfPath(id)
 	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read config(path=%s) of snapshot %s", confPath, snKey)
@@ -342,22 +363,18 @@ func (o *snapshotter) constructImageBlobURL(ref string) (string, error) {
 	return "https://" + path.Join(host, "v2", repo) + "/blobs", nil
 }
 
-// atomicWriteBackingStoreAndTargetConfig
-func (o *snapshotter) atomicWriteBackingStoreAndTargetConfig(ctx context.Context, snID string, snKey string, configJSON OverlayBDBSConfig) error {
+// atomicWriteOverlaybdTargetConfig
+func (o *snapshotter) atomicWriteOverlaybdTargetConfig(ctx context.Context, snID string, snKey string, configJSON OverlayBDBSConfig) error {
 	data, err := json.Marshal(configJSON)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal %+v configJSON into JSON", configJSON)
 	}
 
-	confPath := o.tgtOverlayBDConfPath(snID)
+	confPath := o.overlaybdConfPath(snID)
 	if err := continuity.AtomicWriteFile(confPath, data, 0600); err != nil {
-		return errors.Wrapf(err, "failed to commit the OverlayBD config on %s", confPath)
+		return errors.Wrapf(err, "failed to commit the overlaybd config on %s", confPath)
 	}
-
-	confDataStr := generateTargetConfInXML(o.tgtTargetIqn(snID, snKey), confPath)
-	targetConfPath := o.tgtTargetConfPath(snID, snKey)
-	return errors.Wrapf(continuity.AtomicWriteFile(targetConfPath, []byte(confDataStr), 0600),
-		"failed to commit the target config on %s", targetConfPath)
+	return nil
 }
 
 // prepareWritableOverlaybd
@@ -366,8 +383,8 @@ func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string)
 
 	// TODO(fuweid): 256GB can be configurable?
 	out, err := exec.CommandContext(ctx, binpath,
-		o.tgtOverlayBDWritableDataPath(snID),
-		o.tgtOverlayBDWritableIndexPath(snID), "64").CombinedOutput()
+		o.overlaybdWritableDataPath(snID),
+		o.overlaybdWritableIndexPath(snID), "64").CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
 	}
@@ -380,8 +397,8 @@ func (o *snapshotter) commitWritableOverlaybd(ctx context.Context, snID string) 
 	tmpPath := filepath.Join(o.root, "snapshots", snID, "block", ".commit-before-zfile")
 
 	out, err := exec.CommandContext(ctx, binpath,
-		o.tgtOverlayBDWritableDataPath(snID),
-		o.tgtOverlayBDWritableIndexPath(snID), tmpPath).CombinedOutput()
+		o.overlaybdWritableDataPath(snID),
+		o.overlaybdWritableIndexPath(snID), tmpPath).CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to commit writable overlaybd: %s", out)
 	}
@@ -398,16 +415,25 @@ func (o *snapshotter) commitWritableOverlaybd(ctx context.Context, snID string) 
 	return nil
 }
 
-// generateTargetConfInXML
-func generateTargetConfInXML(targetIqn string, configPath string) string {
-	const fmtTargetConf = `<target %q>
-   <backing-store %s>
-      bs-type %s
-   </backing-store>
-   initiator-address %s
-</target>
-`
-	return fmt.Sprintf(fmtTargetConf, targetIqn, configPath, tgtBackingStoreOverlayBD, defaultInitiatorAddress)
+func (o *snapshotter) overlaybdTargetPath(id string) string {
+	return fmt.Sprintf("/sys/kernel/config/target/core/user_%d/dev_%s", obdHbaNum, id)
+}
+
+func (o *snapshotter) overlaybdLoopbackDeviceID(id string) string {
+	paddings := strings.Repeat("0", 13-len(id))
+	return fmt.Sprintf("naa.%d%s%s", obdLoopNaaPreffix, paddings, id)
+}
+
+func (o *snapshotter) overlaybdLoopbackDevicePath(id string) string {
+	return fmt.Sprintf("/sys/kernel/config/target/loopback/%s", id)
+}
+
+func (o *snapshotter) overlaybdLoopbackDeviceLunPath(id string) string {
+	return fmt.Sprintf("/sys/kernel/config/target/loopback/%s/tpgt_1/lun/lun_0", id)
+}
+
+func (o *snapshotter) scsiBlockDevicePath(deviceNumber string) string {
+	return fmt.Sprintf("/sys/class/scsi_device/%s:0/device/block", deviceNumber)
 }
 
 // TODO: use device number to check?
@@ -423,8 +449,4 @@ func lookup(dir string) error {
 		return errors.Errorf("failed to find the mount info for %q", dir)
 	}
 	return nil
-}
-
-func rollbackContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.TODO(), defaultRollbackTimeout)
 }
