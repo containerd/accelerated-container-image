@@ -39,13 +39,13 @@ And we provide `ctr` subcommand `rpull` as plugin to use feature to support pull
 
 ```bash
 # you will see that the rpull doesn't pull layer data.
-sudo bin/ctr rpull overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1_obd
+sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd
 ```
 
 And start a container based on this image.
 
 ```bash
-$ sudo ctr run --net-host --snapshotter=overlaybd --rm -t overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1_obd demo
+$ sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo
 1:C 03 Mar 2021 04:39:31.804 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
 1:C 03 Mar 2021 04:39:31.804 # Redis version=6.2.1, bits=64, commit=00000000, modified=0, pid=1, just started
 1:C 03 Mar 2021 04:39:31.804 # Warning: no config file specified, using the default config. In order to specify a config file use redis-server /path/to/redis.conf
@@ -91,10 +91,10 @@ Overlaybd image convertor helps to convert a normal image to overlaybd-format re
 
 ```bash
 # pull the source image
-sudo ctr content fetch overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1
+sudo ctr content fetch registry.hub.docker.com/library/redis:6.2.1
 
 # convert
-sudo bin/ctr obdconv overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/redis:6.2.1 localhost:5000/redis:6.2.1_obd
+sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 localhost:5000/redis:6.2.1_obd
 
 # run
 sudo ctr run --net-host --snapshotter=overlaybd --rm -t localhost:5000/redis:6.2.1_obd demo
