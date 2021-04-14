@@ -31,5 +31,5 @@ echo "Clean registry cache and page cache ..."
 sudo rm -rf /opt/overlaybd/registry_cache/*
 sudo bash -c 'echo 1 > /proc/sys/vm/drop_caches'
 
-echo "Restarting tgtd ..."
-sudo systemctl restart tgtd
+echo "Restarting overlaybd backstore ..."
+sudo systemctl restart overlaybd-tcmu
