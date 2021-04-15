@@ -90,6 +90,9 @@ const (
 	//
 	// NOTE: The annotation is part of image layer blob's descriptor.
 	labelKeyOverlayBDBlobSize = "containerd.io/snapshot/overlaybd/blob-size"
+
+	// Top layer is the last element in chain, and it contains necessary metadata to interact with overlaybd backstore.
+	labelKeyIsTopLayer = "containerd.io/snapshot/overlaybd/is-top-layer"
 )
 
 // interface
@@ -299,8 +302,8 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		return nil, err
 	}
 
-	// NOTE: If the image is in overlaybd format, the baselayer will be
-	// the metadata(in small size) and should not be fetched on-demand.
+	// If the image is in overlaybd format, its layers only contain small metadata,
+	// which is saved in snapshot dir. This part code is only for Pull.
 	if targetRef, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
 		stype, err := o.identifySnapshotStorageType(ctx, id, info)
 		if err != nil {
@@ -327,9 +330,9 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	}
 
 	stype := storageTypeNormal
-
-	// if parent is not empty, try to attach and mount block device
 	_, writableBD := info.Labels[LabelSupportWritableOverlayBD]
+
+	// If Preparing for rootfs (Run), try to attach and mount block device
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok && parent != "" {
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
 		if err != nil {
@@ -616,12 +619,13 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return err
 	}
 
+	isTopLayer := info.Labels[labelKeyIsTopLayer]
 	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
 	}
 
-	if stype != storageTypeNormal {
+	if stype != storageTypeNormal && isTopLayer == "yes" {
 		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
 			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 		}

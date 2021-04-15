@@ -115,7 +115,7 @@ var convertCommand = cli.Command{
 			return errors.Wrapf(err, "failed to read manifest")
 		}
 
-		baseLayer, err := loadCommittedSnapshotterInContent(ctx, cs, context.String("basepath"))
+		baseLayer, err := loadCommittedSnapshotterInContent(ctx, cs, context.String("basepath"), false)
 		if err != nil {
 			return errors.Wrap(err, "failed to load baselayer into content.Store")
 		}
@@ -262,17 +262,17 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 		}
 	)
 
-	var sendToContentStore = func(ctx context.Context, snID string) (layer, error) {
+	var sendToContentStore = func(ctx context.Context, snID string, isTopLayer bool) (layer, error) {
 		info, err := sn.Stat(ctx, snID)
 		if err != nil {
 			return emptyLayer, err
 		}
 
 		commitPath := info.Labels["containerd.io/snapshot/overlaybd.localcommitpath"]
-		return loadCommittedSnapshotterInContent(ctx, cs, commitPath)
+		return loadCommittedSnapshotterInContent(ctx, cs, commitPath, isTopLayer)
 	}
 
-	commitLayers[0], err = sendToContentStore(ctx, lastParentID)
+	commitLayers[0], err = sendToContentStore(ctx, lastParentID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -286,9 +286,10 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 
 		idxI := idx + 1
 		snID := lastParentID
+		isTopLayer := idx == len(srcDescs)-1
 		eg.Go(func() error {
 			var err error
-			commitLayers[idxI], err = sendToContentStore(ctx, snID)
+			commitLayers[idxI], err = sendToContentStore(ctx, snID, isTopLayer)
 			return err
 		})
 	}
@@ -380,7 +381,7 @@ func applyOCIV1LayerInZfile(
 }
 
 // loadCommittedSnapshotterInContent uploads the commit data in content.Store service.
-func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, commitPath string) (layer, error) {
+func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, commitPath string, isTopLayer bool) (layer, error) {
 	labels := map[string]string{
 		"containerd.io/snapshot/overlaybd/build.layer-from": commitPath,
 	}
@@ -490,7 +491,7 @@ func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, co
 		annoOverlayBDBlobSize   = "containerd.io/snapshot/overlaybd/blob-size"
 	)
 
-	return layer{
+	retLayer := layer{
 		desc: ocispec.Descriptor{
 			MediaType: mediatype,
 			Digest:    dig,
@@ -501,7 +502,11 @@ func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, co
 			},
 		},
 		diffID: uncompressedDigest,
-	}, nil
+	}
+	if isTopLayer {
+		retLayer.desc.Annotations["containerd.io/snapshot/overlaybd/is-top-layer"] = "yes"
+	}
+	return retLayer, nil
 }
 
 func detectCompression(f *os.File) (io.Reader, compression.Compression, error) {
