@@ -90,6 +90,16 @@ const (
 	//
 	// NOTE: The annotation is part of image layer blob's descriptor.
 	labelKeyOverlayBDBlobSize = "containerd.io/snapshot/overlaybd/blob-size"
+
+	// labelKeyAccelerationLayer is the annotation key in the manifest to indicate
+	// whether a top layer is acceleration layer or not.
+	labelKeyAccelerationLayer = "containerd.io/snapshot/overlaybd/acceleration-layer"
+
+	// labelKeyRecordTrace tells snapshotter to record trace
+	labelKeyRecordTrace = "containerd.io/snapshot/overlaybd/record-trace"
+
+	// labelKeyRecordTracePath is the the file path to record trace
+	labelKeyRecordTracePath = "containerd.io/snapshot/overlaybd/record-trace-path"
 )
 
 // interface
@@ -214,7 +224,6 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 	if err != nil {
 		return snapshots.Info{}, err
 	}
-
 	return info, nil
 }
 
@@ -303,14 +312,38 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	// Return ErrAlreadyExists to skip pulling and unpacking layer. See https://github.com/containerd/containerd/blob/master/docs/remote-snapshotter.md#snapshotter-apis-for-querying-remote-snapshots
 	// This part code is only for Pull.
 	if targetRef, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
+
+		// Acceleration layer will not use remote snapshot. It still needs containerd to pull,
+		// unpack blob and commit snapshot. So return a normal mount point here.
+		isAccelLayer := info.Labels[labelKeyAccelerationLayer]
+		if isAccelLayer == "yes" {
+			parentID, _, _, err := storage.GetInfo(ctx, parent)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
+			}
+			if err := o.constructSpecForAccelLayer(id, parentID); err != nil {
+				return nil, errors.Wrapf(err, "constructSpecForAccelLayer failed: id %s", id)
+			}
+			rollback = false
+			if err := t.Commit(); err != nil {
+				return nil, err
+			}
+			return []mount.Mount{{
+				Source: o.upperPath(id),
+				Type:   "bind",
+				Options: []string{
+					"rw",
+					"bind",
+				}},
+			}, nil
+		}
+
 		stype, err := o.identifySnapshotStorageType(ctx, id, info)
 		if err != nil {
 			return nil, err
 		}
-
 		if stype == storageTypeRemoteBlock {
-			id, _, err = o.commit(ctx, targetRef, key, opts...)
-			if err != nil {
+			if _, _, err = o.commit(ctx, targetRef, key, opts...); err != nil {
 				return nil, err
 			}
 
@@ -343,17 +376,37 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
-			obdID, obdName := parentID, parentInfo.Name
 			if writableBD {
-				obdID, obdName = id, key
-
-				if err := o.constructOverlayBDSpec(ctx, obdName, writableBD); err != nil {
+				if err := o.constructOverlayBDSpec(ctx, key, writableBD); err != nil {
 					return nil, err
 				}
 			}
 
-			if err := o.attachAndMountBlockDevice(ctx, obdID, obdName, writableBD); err != nil {
-				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
+			parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
+			needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
+			recordTracePath := info.Labels[labelKeyRecordTracePath]
+			if parentIsAccelLayer {
+				// If parent is already an acceleration layer, there is certainly no need to record trace.
+				// Just mark this layer to get accelerated (trace replay)
+				err = o.updateSpec(parentID, true, "")
+			} else if needRecordTrace && recordTracePath != "" {
+				err = o.updateSpec(parentID, false, recordTracePath)
+			} else {
+				// For the compatibility of images which have no accel layer
+				err = o.updateSpec(parentID, false, "")
+			}
+			if err != nil {
+				return nil, errors.Wrapf(err, "updateSpec failed for snapshot %s", parentID)
+			}
+
+			var obdID string
+			if writableBD {
+				obdID = id
+			} else {
+				obdID = parentID
+			}
+			if err = o.attachAndMountBlockDevice(ctx, obdID, writableBD); err != nil {
+				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", obdID)
 			}
 
 			defer func() {
@@ -433,9 +486,7 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
-			obdID, obdName := parentID, parentInfo.Name
-
-			if err := o.attachAndMountBlockDevice(ctx, obdID, obdName, false); err != nil {
+			if err := o.attachAndMountBlockDevice(ctx, parentID, false); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
 			}
 		default:

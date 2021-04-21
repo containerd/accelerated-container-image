@@ -32,6 +32,7 @@ func init() {
 var pluginCmds = []cli.Command{
 	rpullCommand,
 	convertCommand,
+	recordTraceCommand,
 }
 
 func main() {

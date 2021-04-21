@@ -58,10 +58,12 @@ const (
 
 // OverlayBDBSConfig is the config of overlaybd target.
 type OverlayBDBSConfig struct {
-	RepoBlobURL string                   `json:"repoBlobUrl"`
-	Lowers      []OverlayBDBSConfigLower `json:"lowers"`
-	Upper       OverlayBDBSConfigUpper   `json:"upper"`
-	ResultFile  string                   `json:"resultFile"`
+	RepoBlobURL       string                   `json:"repoBlobUrl"`
+	Lowers            []OverlayBDBSConfigLower `json:"lowers"`
+	Upper             OverlayBDBSConfigUpper   `json:"upper"`
+	ResultFile        string                   `json:"resultFile"`
+	AccelerationLayer bool                     `json:"accelerationLayer,omitempty"`
+	RecordTracePath   string                   `json:"recordTracePath,omitempty"`
 }
 
 // OverlayBDBSConfigLower
@@ -123,7 +125,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, snKey string, writable bool) (retErr error) {
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable bool) (retErr error) {
 	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
 	}
@@ -143,8 +145,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 		}
 	}()
 
-	err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd//%s", o.overlaybdConfPath(snID))), 0666)
-	if err != nil {
+	if err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID))), 0666); err != nil {
 		return errors.Wrapf(err, "failed to write target dev_config for %s", targetPath)
 	}
 
@@ -257,7 +258,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 			markFile, err := os.Create(o.overlaybdBackstoreMarkFile(snID))
 			if err != nil {
-				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snKey)
+				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snID)
 			}
 			_ = markFile.Close()
 			return nil
@@ -285,7 +286,12 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 	// load the parent's config and reuse the lowerdir
 	if info.Parent != "" {
-		parentConfJSON, err := o.loadBackingStoreConfig(ctx, info.Parent)
+		parentID, _, _, err := storage.GetInfo(ctx, info.Parent)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get info for parent snapshot %s", info.Parent)
+		}
+
+		parentConfJSON, err := o.loadBackingStoreConfig(parentID)
 		if err != nil {
 			return err
 		}
@@ -340,20 +346,43 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			Data:  o.overlaybdWritableDataPath(id),
 		}
 	}
-	return o.atomicWriteOverlaybdTargetConfig(ctx, id, key, configJSON)
+	return o.atomicWriteOverlaybdTargetConfig(id, &configJSON)
+}
+
+func (o *snapshotter) constructSpecForAccelLayer(id, parentID string) error {
+	config, err := o.loadBackingStoreConfig(parentID)
+	if err != nil {
+		return err
+	}
+	accelLayerLower := OverlayBDBSConfigLower{Dir: o.upperPath(id)}
+	config.Lowers = append(config.Lowers, accelLayerLower)
+	return o.atomicWriteOverlaybdTargetConfig(id, config)
+}
+
+func (o *snapshotter) updateSpec(snID string, isAccelLayer bool, recordTracePath string) error {
+	bsConfig, err := o.loadBackingStoreConfig(snID)
+	if err != nil {
+		return err
+	}
+	if isAccelLayer == bsConfig.AccelerationLayer &&
+		(recordTracePath == bsConfig.RecordTracePath && recordTracePath == "") {
+		// No need to update
+		return nil
+	}
+	bsConfig.RecordTracePath = recordTracePath
+	bsConfig.AccelerationLayer = isAccelLayer
+	if err = o.atomicWriteOverlaybdTargetConfig(snID, bsConfig); err != nil {
+		return err
+	}
+	return nil
 }
 
 // loadBackingStoreConfig loads overlaybd target config.
-func (o *snapshotter) loadBackingStoreConfig(ctx context.Context, snKey string) (*OverlayBDBSConfig, error) {
-	id, _, _, err := storage.GetInfo(ctx, snKey)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get info of snapshot %s", snKey)
-	}
-
-	confPath := o.overlaybdConfPath(id)
+func (o *snapshotter) loadBackingStoreConfig(snID string) (*OverlayBDBSConfig, error) {
+	confPath := o.overlaybdConfPath(snID)
 	data, err := ioutil.ReadFile(confPath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read config(path=%s) of snapshot %s", confPath, snKey)
+		return nil, errors.Wrapf(err, "failed to read config(path=%s) of snapshot %s", confPath, snID)
 	}
 
 	var configJSON OverlayBDBSConfig
@@ -379,7 +408,7 @@ func (o *snapshotter) constructImageBlobURL(ref string) (string, error) {
 }
 
 // atomicWriteOverlaybdTargetConfig
-func (o *snapshotter) atomicWriteOverlaybdTargetConfig(ctx context.Context, snID string, snKey string, configJSON OverlayBDBSConfig) error {
+func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *OverlayBDBSConfig) error {
 	data, err := json.Marshal(configJSON)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal %+v configJSON into JSON", configJSON)

@@ -53,10 +53,9 @@ import (
 )
 
 var (
-	emptyString      string
-	emptyDesc        ocispec.Descriptor
-	emptyLayer       layer
-	emptyCompression compression.Compression
+	emptyString string
+	emptyDesc   ocispec.Descriptor
+	emptyLayer  layer
 
 	convSnapshotNameFormat = "overlaybd-conv-%s"
 	convLeaseNameFormat    = convSnapshotNameFormat
@@ -115,7 +114,9 @@ var convertCommand = cli.Command{
 			return errors.Wrapf(err, "failed to read manifest")
 		}
 
-		baseLayer, err := loadCommittedSnapshotterInContent(ctx, cs, context.String("basepath"))
+		loader := newContentLoader(false, contentFile{
+			context.String("basepath"), "overlaybd.commit"})
+		baseLayer, err := loader.Load(ctx, cs)
 		if err != nil {
 			return errors.Wrap(err, "failed to load baselayer into content.Store")
 		}
@@ -141,6 +142,103 @@ var convertCommand = cli.Command{
 type layer struct {
 	desc   ocispec.Descriptor
 	diffID digest.Digest
+}
+
+// contentLoader can load multiple files into content.Store service, and return an oci.v1.tar layer.
+func newContentLoader(isAccelLayer bool, files ...contentFile) *contentLoader {
+	return &contentLoader{
+		files:        files,
+		isAccelLayer: isAccelLayer,
+	}
+}
+
+type contentFile struct {
+	srcFilePath string
+	dstFileName string
+}
+
+type contentLoader struct {
+	files        []contentFile
+	isAccelLayer bool
+}
+
+func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l layer, err error) {
+	const (
+		annoOverlayBDBlobDigest  = "containerd.io/snapshot/overlaybd/blob-digest"
+		annoOverlayBDBlobSize    = "containerd.io/snapshot/overlaybd/blob-size"
+		annoKeyAccelerationLayer = "containerd.io/snapshot/overlaybd/acceleration-layer"
+		labelBuildLayerFrom      = "containerd.io/snapshot/overlaybd/build.layer-from"
+	)
+
+	refName := fmt.Sprintf(convContentNameFormat, uniquePart())
+	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
+	if err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
+	}
+	defer contentWriter.Close()
+
+	srcPathList := make([]string, 0)
+	digester := digest.Canonical.Digester()
+	countWriter := &writeCountWrapper{w: io.MultiWriter(contentWriter, digester.Hash())}
+	tarWriter := tar.NewWriter(countWriter)
+
+	for _, loader := range loader.files {
+		srcPathList = append(srcPathList, loader.srcFilePath)
+		srcFile, err := os.Open(loader.srcFilePath)
+		if err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.srcFilePath)
+		}
+		defer srcFile.Close()
+
+		fi, err := os.Stat(loader.srcFilePath)
+		if err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.srcFilePath)
+		}
+
+		if err := tarWriter.WriteHeader(&tar.Header{
+			Name:     loader.dstFileName,
+			Mode:     0444,
+			Size:     fi.Size(),
+			Typeflag: tar.TypeReg,
+		}); err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
+		}
+
+		if _, err := io.Copy(tarWriter, bufio.NewReader(srcFile)); err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to copy IO")
+		}
+	}
+
+	if err = tarWriter.Close(); err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to close tar file")
+	}
+
+	labels := map[string]string{
+		labelBuildLayerFrom: strings.Join(srcPathList, ","),
+	}
+
+	if err := contentWriter.Commit(ctx, countWriter.c, digester.Digest(), content.WithLabels(labels)); err != nil {
+		if !errdefs.IsAlreadyExists(err) {
+			return emptyLayer, errors.Wrapf(err, "failed to commit content")
+		}
+	}
+
+	l = layer{
+		desc: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeImageLayer,
+			Digest:    digester.Digest(),
+			Size:      countWriter.c,
+			Annotations: map[string]string{
+				annoOverlayBDBlobDigest: digester.Digest().String(),
+				annoOverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
+			},
+		},
+		diffID: digester.Digest(),
+	}
+	if loader.isAccelLayer {
+		l.desc.Annotations[annoKeyAccelerationLayer] = "yes"
+	}
+	return l, nil
 }
 
 func commitOverlaybdImage(ctx context.Context, cs content.Store, srcManifest ocispec.Manifest, committedLayers []layer) (_ ocispec.Descriptor, err0 error) {
@@ -268,8 +366,10 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 			return emptyLayer, err
 		}
 
-		commitPath := info.Labels["containerd.io/snapshot/overlaybd.localcommitpath"]
-		return loadCommittedSnapshotterInContent(ctx, cs, commitPath)
+		loader := newContentLoader(false, contentFile{
+			info.Labels["containerd.io/snapshot/overlaybd.localcommitpath"],
+			"overlaybd.commit"})
+		return loader.Load(ctx, cs)
 	}
 
 	commitLayers[0], err = sendToContentStore(ctx, lastParentID)
@@ -377,140 +477,6 @@ func applyOCIV1LayerInZfile(
 
 	rollback = err != nil
 	return commitID, nil
-}
-
-// loadCommittedSnapshotterInContent uploads the commit data in content.Store service.
-func loadCommittedSnapshotterInContent(ctx context.Context, cs content.Store, commitPath string) (layer, error) {
-	labels := map[string]string{
-		"containerd.io/snapshot/overlaybd/build.layer-from": commitPath,
-	}
-
-	basef, err := os.Open(commitPath)
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to locate commit data from %s", commitPath)
-	}
-	defer basef.Close()
-
-	refName := fmt.Sprintf(convContentNameFormat, uniquePart())
-	cw, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
-	if err != nil {
-		return emptyLayer, errors.Wrap(err, "failed to open writer")
-	}
-	defer cw.Close()
-
-	buf, comp, err := detectCompression(basef)
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to locate commit data from %s", commitPath)
-	}
-
-	digester := digest.Canonical.Digester()
-	size := int64(0)
-
-	var (
-		uncompressedDigest digest.Digest
-		mediatype          = ocispec.MediaTypeImageLayer
-	)
-	switch comp {
-	case compression.Gzip:
-		mediatype = ocispec.MediaTypeImageLayerGzip
-
-		uncompressed := digest.Canonical.Digester()
-
-		pipeR, pipeW := io.Pipe()
-		errCh := make(chan error, 1)
-
-		go func() (retErr error) {
-			defer func() {
-				errCh <- retErr
-				close(errCh)
-			}()
-
-			dc, err := compression.DecompressStream(pipeR)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(uncompressed.Hash(), dc)
-			return err
-		}()
-
-		size, err = io.Copy(io.MultiWriter(cw, digester.Hash()), io.TeeReader(buf, pipeW))
-		if err != nil {
-			return emptyLayer, errors.Wrap(err, "failed to copy")
-		}
-
-		pipeW.Close()
-		if err := <-errCh; err != nil {
-			return emptyLayer, errors.Wrap(err, "failed to get uncompressed digest")
-		}
-		uncompressedDigest = uncompressed.Digest()
-	case compression.Uncompressed:
-		// FIXME(fuweid):
-		//
-		// by default, the base layer is in gzip format. For uncompressed
-		// data, we assume that it is in zfile format which need be wrapped
-		// by tar.
-		fi, err := os.Stat(commitPath)
-		if err != nil {
-			return emptyLayer, err
-		}
-
-		wc := &writeCountWrapper{w: io.MultiWriter(cw, digester.Hash())}
-		wcw := tar.NewWriter(wc)
-		if err := wcw.WriteHeader(&tar.Header{
-			Name:     "overlaybd.commit",
-			Mode:     0444,
-			Size:     fi.Size(),
-			Typeflag: tar.TypeReg,
-		}); err != nil {
-			return emptyLayer, err
-		}
-
-		if _, err := io.Copy(wcw, buf); err != nil {
-			return emptyLayer, err
-		}
-
-		if err := wcw.Close(); err != nil {
-			return emptyLayer, err
-		}
-
-		size = wc.c
-		uncompressedDigest = digester.Digest()
-	default:
-	}
-
-	dig := digester.Digest()
-	if err := cw.Commit(ctx, size, dig, content.WithLabels(labels)); err != nil {
-		if !errdefs.IsAlreadyExists(err) {
-			return emptyLayer, errors.Wrapf(err, "failed commit")
-		}
-	}
-
-	var (
-		annoOverlayBDBlobDigest = "containerd.io/snapshot/overlaybd/blob-digest"
-		annoOverlayBDBlobSize   = "containerd.io/snapshot/overlaybd/blob-size"
-	)
-
-	return layer{
-		desc: ocispec.Descriptor{
-			MediaType: mediatype,
-			Digest:    dig,
-			Size:      size,
-			Annotations: map[string]string{
-				annoOverlayBDBlobDigest: dig.String(),
-				annoOverlayBDBlobSize:   fmt.Sprintf("%v", size),
-			},
-		},
-		diffID: uncompressedDigest,
-	}, nil
-}
-
-func detectCompression(f *os.File) (io.Reader, compression.Compression, error) {
-	buf := bufio.NewReader(f)
-	bs, err := buf.Peek(10)
-	if err != nil && err != io.EOF {
-		return nil, emptyCompression, err
-	}
-	return buf, compression.DetectCompression(bs), nil
 }
 
 func ensureImageExist(ctx context.Context, cli *containerd.Client, imageName string) (containerd.Image, error) {
