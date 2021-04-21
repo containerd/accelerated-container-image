@@ -299,8 +299,9 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		return nil, err
 	}
 
-	// NOTE: If the image is in overlaybd format, the baselayer will be
-	// the metadata(in small size) and should not be fetched on-demand.
+	// If the layer is in overlaybd format, construct backstore spec and saved it into snapshot dir.
+	// Return ErrAlreadyExists to skip pulling and unpacking layer. See https://github.com/containerd/containerd/blob/master/docs/remote-snapshotter.md#snapshotter-apis-for-querying-remote-snapshots
+	// This part code is only for Pull.
 	if targetRef, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
 		stype, err := o.identifySnapshotStorageType(ctx, id, info)
 		if err != nil {
@@ -323,13 +324,12 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 			}
 			return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", targetRef)
 		}
-		// back to normal handling
 	}
 
 	stype := storageTypeNormal
-
-	// if parent is not empty, try to attach and mount block device
 	_, writableBD := info.Labels[LabelSupportWritableOverlayBD]
+
+	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok && parent != "" {
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
 		if err != nil {
@@ -622,8 +622,12 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	}
 
 	if stype != storageTypeNormal {
-		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
-			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
+		if err == nil {
+			err = o.unmountAndDetachBlockDevice(ctx, id, key)
+			if err != nil {
+				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+			}
 		}
 	}
 
@@ -913,6 +917,10 @@ func (o *snapshotter) overlaybdWritableIndexPath(id string) string {
 
 func (o *snapshotter) overlaybdWritableDataPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "writable_data")
+}
+
+func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
 }
 
 // Close closes the snapshotter

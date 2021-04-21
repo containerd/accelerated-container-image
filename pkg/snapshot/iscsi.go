@@ -245,6 +245,12 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 				time.Sleep(10 * time.Millisecond)
 				break // retry
 			}
+
+			markFile, err := os.Create(o.overlaybdBackstoreMarkFile(snID))
+			if err != nil {
+				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snKey)
+			}
+			_ = markFile.Close()
 			return nil
 		}
 	}
