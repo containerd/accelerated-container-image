@@ -47,9 +47,13 @@ const (
 	// devices ares identified by their snID /sys/kernel/config/target/core/user_999999999/dev_$snID
 	obdHbaNum = 999999999
 
-	// Naa preffix for loopback devices in configfs
+	// Naa prefix for loopback devices in configfs
 	// for example snID 128, the loopback device config in /sys/kernel/config/target/loopback/naa.1990000000000128
-	obdLoopNaaPreffix = 199
+	obdLoopNaaPrefix = 199
+
+	// param used to restrict tcmu devices mmap memory size for iSCSI data.
+	// it is worked by setting max_data_area_mb for devices in configfs.
+	obdMaxDataAreaMB = 4
 )
 
 // OverlayBDBSConfig is the config of overlaybd target.
@@ -141,7 +145,12 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 	err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd//%s", o.overlaybdConfPath(snID))), 0666)
 	if err != nil {
-		return errors.Wrapf(err, "failed to write target config for %s", targetPath)
+		return errors.Wrapf(err, "failed to write target dev_config for %s", targetPath)
+	}
+
+	err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
+	if err != nil {
+		return errors.Wrapf(err, "failed to write target max_data_area_mb for %s", targetPath)
 	}
 
 	err = ioutil.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
@@ -427,7 +436,7 @@ func (o *snapshotter) overlaybdTargetPath(id string) string {
 
 func (o *snapshotter) overlaybdLoopbackDeviceID(id string) string {
 	paddings := strings.Repeat("0", 13-len(id))
-	return fmt.Sprintf("naa.%d%s%s", obdLoopNaaPreffix, paddings, id)
+	return fmt.Sprintf("naa.%d%s%s", obdLoopNaaPrefix, paddings, id)
 }
 
 func (o *snapshotter) overlaybdLoopbackDevicePath(id string) string {
