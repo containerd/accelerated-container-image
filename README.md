@@ -5,7 +5,7 @@ Accelerated Container Image is an open-source implementation of paper ["DADI: Bl
 DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features,
 and has been widely used in Alibaba and Alibaba Cloud, and already supported by Alibaba Cloud Registry (ACR), and helps Alibaba Cloud function compute enter the Forrester leader quadrant.
 
-At the heart of the acceleration is overlaybd, which provides a merged view of a sequence of block-based layers as an iSCSI device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
+At the heart of the acceleration is overlaybd, which is a new remote image format based on block device. Overlaybd backstore provides a merged view of a sequence of block-based layers in userspace and outputs as an iSCSI device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
 It can be used for container acceleration by supporting fetching image data on-demand without downloading and unpacking the whole image before a container running. With overlaybd image format, we can cold start a container instantly.
 
 The key features are:
@@ -16,7 +16,7 @@ The key features are:
 
 * **High Reliability**
 
-    Overlaybd outputs block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes.
+    Overlaybd outputs virtual block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes.
 
 * **Native Support for Writable**
 
@@ -26,7 +26,7 @@ The key features are:
 
 * [overlaybd](https://github.com/alibaba/overlaybd)
 
-    Overlaybd provides a merged view of block-based layer sequence as an iSCSI device. It works as a TCMU server in user space.
+    Overlaybd provides a merged view of block-based layer sequence as an virtual block device in user space.
 
 * overlaybd-snapshotter
 
@@ -36,7 +36,7 @@ The key features are:
 
 ## Getting Started
 
-* See how to setup overlaybd TCMU server at [README](https://github.com/alibaba/overlaybd).
+* See how to setup overlaybd backstore at [README](https://github.com/alibaba/overlaybd).
 
 * See how to build snaphshotter and ctr plugin components at [BUILDING](docs/BUILDING.md).
 
@@ -50,7 +50,7 @@ The key features are:
 
 With OCI image spec, an image layer blob is saved as a tarball on the registry, describing the [changeset](https://github.com/opencontainers/image-spec/blob/v1.0.1/layer.md#change-types) based on it's previous layer. However, tarball is not designed to be seekable and random access is not supported. Complete downloading of all blobs is always necessary before bringing up a container.
 
-An overlaybd blob is a collection of modified data blocks under the filesystem and corresponding to the files added, modified or deleted by the layer. The overlaybd iSCSI backstore is used to provide the merged view of layers and provides a virtual block device through iSCSI protocol through TCMU or tgt. Filesystem is mounted on top of the device and an overlaybd blob can be accessed randomly and supports on-demond reading natively.
+An overlaybd blob is a collection of modified data blocks under the filesystem and corresponding to the files added, modified or deleted by the layer. The overlaybd backstore is used to provide the merged view of layers and provides a virtual block device. Filesystem is mounted on top of the device and an overlaybd blob can be accessed randomly and supports on-demond reading natively.
 
 ![image data flow](docs/images/image-flow.jpg "image data flow")
 
@@ -58,9 +58,9 @@ The raw data of block differences, together with an index to the raw data, const
 
 Zfile is a new compression file format to support seekable decompression, which can reduce storage and transmission costs. And also the checksum information to protect against data corruptions for on-demand reading is stored in Zfile. In order to be compatible with existing registries and container engines, Zfile is wrapped by a tar file, which has only one Zfile inside.
 
-![io-path](docs/images/io-path.jpg "io-path")
+![io-path](docs/images/io-path.png "io-path")
 
-Overlaybd connects with applications through a filesystem mounted on an iSCSI block device. Overlaybd is agnostic to the choice of filesystem so users can select one that best fits their needs. I/O requests go from applications to a regular filesystem such as ext4. From there they go to iSCSI device and then to the user space overlaybd backstore (TCMU or tgt). Backend read operations are always on layer files. Some of the layer files may have already been downloaded, so these reads would hit local filesystem. Other reads will be directed to registry. Write and trim operations are handled by overlaybd backstore which writes the data and index files of the writable layer to the local file system. For more details, see the [paper](https://www.usenix.org/conference/atc20/presentation/li-huiba).
+Overlaybd connects with applications through a filesystem mounted on an virtual block device. Overlaybd is agnostic to the choice of filesystem so users can select one that best fits their needs. I/O requests go from applications to a regular filesystem such as ext4. From there they go to the loopback iSCSI device (through TCM_loopback) and then to the user space overlaybd backstore (through TCMU). Backend read operations are always on layer files. Some of the layer files may have already been downloaded, so these reads would hit local filesystem. Other reads will be directed to registry, or hit the registry cache. Write and trim operations are handled by overlaybd backstore which writes the data and index files of the writable layer to the local file system. For more details, see the [paper](https://www.usenix.org/conference/atc20/presentation/li-huiba).
 
 ## Licenses
 
