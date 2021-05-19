@@ -1,4 +1,4 @@
-## Overview
+## Prefetch - Overview
 
 Cache has been playing an important role in the whole architecture of ACI's [I/O flow](docs/images/image-flow.jpg "image data flow"). When there is no cache (container cold start), however, the backend storage engine will still need to visit Registry frequently, and temporarily.
 
@@ -22,11 +22,11 @@ Trace is stored as an independent image layer, and MUST always be the uppermost 
 
 ### Record
 
-Recording is to run a container based on the target image, persist I/O records during startup, and then dump them into a trace blob. The trace blob will be chained, and become the top layer.
+Recording is to run a temporary container based on the target image, persist I/O records during startup, and then dump them into a trace blob. The trace blob will be chained, and become the top layer.
 
 Recording functionality SHOULD be integrated into container's build (compose) system, and MUST have a parameter to indicate how long the user wishes to record. After timeout, the build system MUST stop the running container, so the recording terminates as well.
 
-It is user's responsibility to ensure the container is idempotent or stateless, in other words, it SHOULD be able to start anywhere and anytime without causing unexpected consequences.
+The container could be either stateless or stateful. CNI is enabled by default to provide an isolated network, so that the recording container is unlikely to cause unexpected consequences in production environment.
 
 When building a new image from a base image, the old trace layer (if exists in the base image) MUST be removed. New trace layer might be added later, if recording is desired.
 
@@ -57,5 +57,5 @@ Measure the service available time (in seconds) of a Wordpress container. The te
 
 | | **With cache** | **Without cache (cold start)** |
 | :----: | :----: | :----: |
-| **With trace layer** | 4.981s | 15.253s |
-| **Without trace layer** | 5.259s | 60.511s |
+| **With trace prefetch** | 4.981s | 15.253s |
+| **Without trace prefetch** | 5.259s | 60.511s |
