@@ -3,8 +3,10 @@ module github.com/alibaba/accelerated-container-image
 go 1.15
 
 require (
+	github.com/containerd/console v1.0.1
 	github.com/containerd/containerd v1.5.0-beta.3
 	github.com/containerd/continuity v0.0.0-20210208174643-50096c924a4e
+	github.com/containerd/go-cni v1.0.2
 	github.com/containerd/go-runc v0.0.0-20201020171139-16b287bc67d0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.4.0

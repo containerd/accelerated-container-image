@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/console"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	ctrcontent "github.com/containerd/containerd/cmd/ctr/commands/content"
@@ -43,6 +44,7 @@ import (
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/go-cni"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -52,8 +54,37 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var (
+const (
 	uniqueObjectFormat = "record-trace-%d-%s"
+	networkNamespace   = "record-trace"
+	namespacePath      = "/var/run/netns/" + networkNamespace
+	cniConf            = `{
+  "cniVersion": "0.4.0",
+  "name": "record-trace-cni",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "r-trace-br0",
+      "isGateway": false,
+      "ipMasq": true,
+      "promiscMode": true,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [
+          [{
+            "subnet": "10.99.0.0/16"
+          }],
+          [{
+            "subnet": "2001:4860:4860::/64"
+          }]
+        ],
+        "routes": [
+        ]
+      }
+    }
+  ]
+}
+`
 )
 
 var recordTraceCommand = cli.Command{
@@ -92,9 +123,22 @@ var recordTraceCommand = cli.Command{
 			Usage: "Set the max concurrent downloads for each pull",
 			Value: 8,
 		},
+		cli.BoolFlag{
+			Name:  "tty,t",
+			Usage: "allocate a TTY for the container",
+		},
+		cli.BoolFlag{
+			Name:  "disable-network-isolation",
+			Usage: "Do not use cni to provide network isolation, default is false",
+		},
+		cli.StringFlag{
+			Name:  "cni-plugin-dir",
+			Usage: "cni plugin dir",
+			Value: "/opt/cni/bin/",
+		},
 	},
 
-	Action: func(cliCtx *cli.Context) error {
+	Action: func(cliCtx *cli.Context) (err error) {
 		// Create client
 		client, ctx, cancel, err := commands.NewClient(cliCtx)
 		if err != nil {
@@ -102,6 +146,15 @@ var recordTraceCommand = cli.Command{
 		}
 		defer cancel()
 		cs := client.ContentStore()
+
+		var con console.Console
+		if cliCtx.Bool("tty") {
+			con = console.Current()
+			defer con.Reset()
+			if err := con.SetRaw(); err != nil {
+				return err
+			}
+		}
 
 		// Validate arguments
 		ref := cliCtx.Args().Get(0)
@@ -177,6 +230,22 @@ var recordTraceCommand = cli.Command{
 		}
 		defer deleteLease(ctx)
 
+		// Create isolated network
+		if !cliCtx.Bool("disable-network-isolation") {
+			cniObj, err := createIsolatedNetwork(cliCtx)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if nextErr := cniObj.Remove(ctx, networkNamespace, namespacePath); err == nil && nextErr != nil {
+					err = errors.Wrapf(nextErr, "failed to teardown network")
+				}
+			}()
+			if _, err = cniObj.Setup(ctx, networkNamespace, namespacePath); err != nil {
+				return errors.Wrapf(err, "failed to setup network for namespace")
+			}
+		}
+
 		// Create container and run task
 		container, err := createContainer(ctx, client, cliCtx, image, traceFile)
 		if err != nil {
@@ -184,11 +253,17 @@ var recordTraceCommand = cli.Command{
 		}
 		defer container.Delete(ctx, containerd.WithSnapshotCleanup)
 
-		task, err := tasks.NewTask(ctx, client, container, "", nil, false, "", nil)
+		task, err := tasks.NewTask(ctx, client, container, "", con, false, "", nil)
 		if err != nil {
 			return err
 		}
 		defer task.Delete(ctx)
+
+		if cliCtx.Bool("tty") {
+			if err := tasks.HandleConsoleResize(ctx, task, con); err != nil {
+				return errors.Wrapf(err, "failed to resize console")
+			}
+		}
 
 		var statusC <-chan containerd.ExitStatus
 		if statusC, err = task.Wait(ctx); err != nil {
@@ -202,7 +277,9 @@ var recordTraceCommand = cli.Command{
 
 		// Start a thread to watch timeout and signals, and control the termination of recording
 		recordingStopped := make(chan bool)
-		go recordingControl(ctx, cliCtx, task, traceFile, recordingStopped)
+		if !cliCtx.Bool("tty") {
+			go recordingControl(ctx, cliCtx, task, traceFile, recordingStopped)
+		}
 
 		// Wait task stopped
 		status := <-statusC
@@ -215,7 +292,9 @@ var recordTraceCommand = cli.Command{
 		}
 
 		// Wait control thread stopped
-		<-recordingStopped
+		if !cliCtx.Bool("tty") {
+			<-recordingStopped
+		}
 
 		// Load trace file into content, and generate an acceleration layer
 		loader := newContentLoader(true, contentFile{traceFile, "trace"})
@@ -394,6 +473,17 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 	cOpts = append(cOpts, withNewSnapshot(key, image, cliCtx.String("snapshotter"), traceFile))
 	cOpts = append(cOpts, containerd.WithImageStopSignal(image, "SIGTERM"))
 
+	if !cliCtx.Bool("disable-network-isolation") {
+		opts = append(opts, oci.WithLinuxNamespace(specs.LinuxNamespace{
+			Type: specs.NetworkNamespace,
+			Path: namespacePath,
+		}))
+	}
+
+	if cliCtx.Bool("tty") {
+		opts = append(opts, oci.WithTTY)
+	}
+
 	if len(args) > 0 {
 		opts = append(opts, oci.WithProcessArgs(args...))
 	}
@@ -411,6 +501,20 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 		return nil, err
 	}
 	return container, nil
+}
+
+func createIsolatedNetwork(cliCtx *cli.Context) (cni.CNI, error) {
+	cniObj, err := cni.New(
+		cni.WithMinNetworkCount(2),
+		cni.WithPluginDir([]string{cliCtx.String("cni-plugin-dir")}),
+	)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to initialize cni library")
+	}
+	if err = cniObj.Load(cni.WithConfListBytes([]byte(cniConf)), cni.WithLoNetwork); err != nil {
+		return nil, errors.Wrapf(err, "failed to load cni conf")
+	}
+	return cniObj, nil
 }
 
 func withNewSnapshot(key string, img containerd.Image, snapshotter, traceFile string) containerd.NewContainerOpts {

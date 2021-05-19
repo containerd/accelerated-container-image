@@ -182,13 +182,20 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 	countWriter := &writeCountWrapper{w: io.MultiWriter(contentWriter, digester.Hash())}
 	tarWriter := tar.NewWriter(countWriter)
 
+	openedSrcFile := make([]*os.File, 0)
+	defer func() {
+		for _, each := range openedSrcFile {
+			_ = each.Close()
+		}
+	}()
+
 	for _, loader := range loader.files {
 		srcPathList = append(srcPathList, loader.srcFilePath)
 		srcFile, err := os.Open(loader.srcFilePath)
 		if err != nil {
 			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.srcFilePath)
 		}
-		defer srcFile.Close()
+		openedSrcFile = append(openedSrcFile, srcFile)
 
 		fi, err := os.Stat(loader.srcFilePath)
 		if err != nil {
