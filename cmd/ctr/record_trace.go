@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -504,6 +505,12 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 }
 
 func createIsolatedNetwork(cliCtx *cli.Context) (cni.CNI, error) {
+	lookupCmd := fmt.Sprintf("ip netns list | grep %s", networkNamespace)
+	if err := exec.Command("bash", "-c", lookupCmd).Run(); err != nil {
+		if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
+			return nil, errors.Wrapf(err, "failed to add netns")
+		}
+	}
 	cniObj, err := cni.New(
 		cni.WithMinNetworkCount(2),
 		cni.WithPluginDir([]string{cliCtx.String("cni-plugin-dir")}),
