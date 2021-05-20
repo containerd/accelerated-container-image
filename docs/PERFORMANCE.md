@@ -1,12 +1,10 @@
 # Performance
 
-This document aims to compare the start-up speed between Accelerated Container Image and standard OCI tarball image.
+This document aims to compare the startup speed between Accelerated Container Image and standard OCI tar image.
 
 ## Environment
 
-Two WordPress images, served on Aliyun ACR (image registry service).
-
-One is in overlaybd format, the other is in standard OCI format.
+Two WordPress images: one is in overlaybd format, the other is in standard OCI tar format.
 
 ## Why WordPress?
 
@@ -24,10 +22,10 @@ Use the clean script to stop running containers, remove images and drop local ca
 cd script/performance/
 
 ./clean-env.sh
-time ./setup-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2_obd
+time ./setup-wordpress.sh registry.hub.docker.com/overlaybd/wordpress:5.7.0_obd
 
 ./clean-env.sh
-time ./setup-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example/wordpress:5.6.2
+time ./setup-wordpress.sh registry.hub.docker.com/overlaybd/wordpress:5.7.0
 ```
 
 ## Performance results
@@ -35,6 +33,8 @@ time ./setup-wordpress.sh overlaybd-registry.cn-hangzhou.cr.aliyuncs.com/example
 | **Image Format** | **Service Available Time** |
 | :----: | :----: |
 | overlaybd | 6.433s |
-| standard tarball | 15.341s |
+| OCI tar | 15.341s |
 
-Conclusion: Overlaybd outperforms standard OCI tarball in terms of cold start time (without local cache).
+Conclusion: Overlaybd format outperforms OCI tar format at startup speed.
+
+Note: The [prefetch](https://github.com/alibaba/accelerated-container-image/blob/main/docs/trace-prefetch.md) feature is enabled.
