@@ -362,7 +362,7 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 
 		opts = []snapshots.Opt{
 			snapshots.WithLabels(map[string]string{
-				"containerd.io/snapshot/overlaybd.writable": "from-ctr-build",
+				"containerd.io/snapshot/overlaybd.writable": "dir",
 			}),
 		}
 	)

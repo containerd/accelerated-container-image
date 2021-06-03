@@ -81,16 +81,26 @@ type OverlayBDBSConfigUpper struct {
 
 // unmountAndDetachBlockDevice
 func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) error {
-	mountPoint := o.overlaybdMountpoint(snID)
-	if err := mount.UnmountAll(mountPoint, 0); err != nil {
-		return errors.Wrapf(err, "failed to umount %s", mountPoint)
+
+	_, info, _, err := storage.GetInfo(ctx, snKey)
+	if err != nil {
+		return errors.Wrapf(err, "can't get snapshot info.")
+	}
+	writeType := o.getWritableType(ctx, info)
+
+	if writeType == rwDir {
+		mountPoint := o.overlaybdMountpoint(snID)
+		log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
+		if err := mount.UnmountAll(mountPoint, 0); err != nil {
+			return errors.Wrapf(err, "failed to umount %s", mountPoint)
+		}
 	}
 
 	loopDevID := o.overlaybdLoopbackDeviceID(snID)
 	lunPath := o.overlaybdLoopbackDeviceLunPath(loopDevID)
 	linkPath := path.Join(lunPath, "dev_"+snID)
 
-	err := os.RemoveAll(linkPath)
+	err = os.RemoveAll(linkPath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to remove loopback link %s", linkPath)
 	}
@@ -125,7 +135,8 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable bool) (retErr error) {
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable int) (retErr error) {
+
 	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
 	}
@@ -246,21 +257,21 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 			var mountPoint = o.overlaybdMountpoint(snID)
 
 			var mflag uintptr = unix.MS_RDONLY
-			if writable {
+			if writable != roDir {
 				mflag = 0
 			}
-
-			if err := unix.Mount(device, mountPoint, "ext4", mflag, ""); err != nil {
-				lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
-				time.Sleep(10 * time.Millisecond)
-				break // retry
+			if writable != rwDev {
+				if err := unix.Mount(device, mountPoint, "ext4", mflag, ""); err != nil {
+					lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
+					time.Sleep(10 * time.Millisecond)
+					break // retry
+				}
 			}
-
-			markFile, err := os.Create(o.overlaybdBackstoreMarkFile(snID))
-			if err != nil {
+			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
+			if err := ioutil.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
 				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snID)
 			}
-			_ = markFile.Close()
+			log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
 			return nil
 		}
 	}
