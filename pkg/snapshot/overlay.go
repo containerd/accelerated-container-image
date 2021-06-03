@@ -730,9 +730,9 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return errors.Wrap(err, "failed to remove")
 	}
 
-	// if err := os.RemoveAll(o.snPath(id)); err != nil && !os.IsNotExist(err) {
-	// 	return err
-	// }
+	if err := os.RemoveAll(o.snPath(id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 
 	rollback = false
 	return t.Commit()
