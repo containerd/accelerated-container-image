@@ -150,6 +150,9 @@ var recordTraceCommand = cli.Command{
 
 		var con console.Console
 		if cliCtx.Bool("tty") {
+			if cliCtx.Uint("time") != 0 {
+				return errors.New("Cannot assign tty and time at the same time")
+			}
 			con = console.Current()
 			defer con.Reset()
 			if err := con.SetRaw(); err != nil {
@@ -276,26 +279,26 @@ var recordTraceCommand = cli.Command{
 		}
 		fmt.Println("Task is running ...")
 
-		// Start a thread to watch timeout and signals, and control the termination of recording
-		recordingStopped := make(chan bool)
+		timer := time.NewTimer(time.Duration(cliCtx.Uint("time")) * time.Second)
+		stopControl := make(chan bool)
+
+		// Start a thread to watch timeout and signals
 		if !cliCtx.Bool("tty") {
-			go recordingControl(ctx, cliCtx, task, traceFile, recordingStopped)
+			go watchThread(ctx, timer, task, stopControl)
 		}
 
 		// Wait task stopped
 		status := <-statusC
-		code, _, err := status.Result()
-		if err != nil {
-			return err
-		}
-		if code != 0 {
-			return cli.NewExitError("", int(code))
+		if _, _, err := status.Result(); err != nil {
+			return errors.Wrapf(err, "failed to get exit status")
 		}
 
-		// Wait control thread stopped
-		if !cliCtx.Bool("tty") {
-			<-recordingStopped
+		if timer.Stop() {
+			stopControl <- true
+			fmt.Println("Task finished before timeout ...")
 		}
+
+		collectTrace(traceFile)
 
 		// Load trace file into content, and generate an acceleration layer
 		loader := newContentLoader(true, contentFile{traceFile, "trace"})
@@ -322,38 +325,20 @@ var recordTraceCommand = cli.Command{
 	},
 }
 
-func recordingControl(ctx context.Context, cliCtx *cli.Context, task containerd.Task, traceFile string, recordingStopped chan bool) {
-	lockFile := traceFile + ".lock"
-	okFile := traceFile + ".ok"
-	signalCancel := make(chan bool)
-
+func watchThread(ctx context.Context, timer *time.Timer, task containerd.Task, stopControl chan bool) {
 	// Allow termination by user signals
-	sigc := registerSignals(ctx, task, signalCancel)
+	sigChan := registerSignals(ctx, task, stopControl)
 
 	select {
-	case <-signalCancel:
+	case <-stopControl:
 		break
-	case <-time.After(time.Duration(cliCtx.Uint("time")) * time.Second):
+	case <-timer.C:
 		fmt.Println("Timeout, stop recording ...")
 		break
 	}
 
-	signal.Stop(sigc)
-	close(sigc)
-
-	if err := os.Remove(lockFile); err != nil && !os.IsNotExist(err) {
-		fmt.Printf("Remove lock file %s failed: %v\n", lockFile, err)
-		return
-	}
-
-	for {
-		time.Sleep(time.Second)
-		if _, err := os.Stat(okFile); err == nil {
-			fmt.Printf("Found OK file %s, recording finished\n", okFile)
-			_ = os.Remove(okFile)
-			break
-		}
-	}
+	signal.Stop(sigChan)
+	close(sigChan)
 
 	st, err := task.Status(ctx)
 	if err != nil {
@@ -364,8 +349,24 @@ func recordingControl(ctx context.Context, cliCtx *cli.Context, task containerd.
 			fmt.Printf("Failed to kill task: %v\n", err)
 		}
 	}
+}
 
-	recordingStopped <- true
+func collectTrace(traceFile string) {
+	lockFile := traceFile + ".lock"
+	okFile := traceFile + ".ok"
+	if err := os.Remove(lockFile); err != nil && !os.IsNotExist(err) {
+		fmt.Printf("Remove lock file %s failed: %v\n", lockFile, err)
+		return
+	}
+
+	for {
+		time.Sleep(time.Second)
+		if _, err := os.Stat(okFile); err == nil {
+			fmt.Printf("Found OK file, trace is available now at %s\n", traceFile)
+			_ = os.Remove(okFile)
+			break
+		}
+	}
 }
 
 func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
