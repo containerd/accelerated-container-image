@@ -280,11 +280,11 @@ var recordTraceCommand = cli.Command{
 		fmt.Println("Task is running ...")
 
 		timer := time.NewTimer(time.Duration(cliCtx.Uint("time")) * time.Second)
-		stopControl := make(chan bool)
+		watchStop := make(chan bool)
 
 		// Start a thread to watch timeout and signals
 		if !cliCtx.Bool("tty") {
-			go watchThread(ctx, timer, task, stopControl)
+			go watchThread(ctx, timer, task, watchStop)
 		}
 
 		// Wait task stopped
@@ -294,7 +294,7 @@ var recordTraceCommand = cli.Command{
 		}
 
 		if timer.Stop() {
-			stopControl <- true
+			watchStop <- true
 			fmt.Println("Task finished before timeout ...")
 		}
 
@@ -325,12 +325,16 @@ var recordTraceCommand = cli.Command{
 	},
 }
 
-func watchThread(ctx context.Context, timer *time.Timer, task containerd.Task, stopControl chan bool) {
+func watchThread(ctx context.Context, timer *time.Timer, task containerd.Task, watchStop chan bool) {
 	// Allow termination by user signals
-	sigChan := registerSignals(ctx, task, stopControl)
+	sigStop := make(chan bool)
+	sigChan := registerSignals(ctx, task, sigStop)
 
 	select {
-	case <-stopControl:
+	case <-sigStop:
+		timer.Stop()
+		break
+	case <-watchStop:
 		break
 	case <-timer.C:
 		fmt.Println("Timeout, stop recording ...")
@@ -559,7 +563,7 @@ func uniqueObjectString() string {
 	return fmt.Sprintf(uniqueObjectFormat, t.Unix(), hex.EncodeToString(b[:]))
 }
 
-func registerSignals(ctx context.Context, task containerd.Task, timeoutChan chan bool) chan os.Signal {
+func registerSignals(ctx context.Context, task containerd.Task, sigStop chan bool) chan os.Signal {
 	sigc := make(chan os.Signal, 128)
 	signal.Notify(sigc)
 	go func() {
@@ -568,7 +572,7 @@ func registerSignals(ctx context.Context, task containerd.Task, timeoutChan chan
 				continue
 			}
 			if s == unix.SIGTERM || s == unix.SIGINT {
-				timeoutChan <- true
+				sigStop <- true
 			}
 			// Forward all signals to task
 			if err := task.Kill(ctx, s.(syscall.Signal)); err != nil {
