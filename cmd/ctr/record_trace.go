@@ -56,9 +56,7 @@ import (
 )
 
 const (
-	uniqueObjectFormat = "record-trace-%d-%s"
-	networkNamespace   = "record-trace"
-	namespacePath      = "/var/run/netns/" + networkNamespace
+	uniqueObjectFormat = "record-trace-%s-%s"
 	cniConf            = `{
   "cniVersion": "0.4.0",
   "name": "record-trace-cni",
@@ -86,6 +84,11 @@ const (
   ]
 }
 `
+)
+
+var (
+	networkNamespace string
+	namespacePath    string
 )
 
 var recordTraceCommand = cli.Command{
@@ -236,6 +239,16 @@ var recordTraceCommand = cli.Command{
 
 		// Create isolated network
 		if !cliCtx.Bool("disable-network-isolation") {
+			networkNamespace = uniqueObjectString()
+			namespacePath = "/var/run/netns/" + networkNamespace
+			if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
+				return errors.Wrapf(err, "failed to add netns")
+			}
+			defer func() {
+				if nextErr := exec.Command("ip", "netns", "delete", networkNamespace).Run(); err == nil && nextErr != nil {
+					err = errors.Wrapf(err, "failed to delete netns")
+				}
+			}()
 			cniObj, err := createIsolatedNetwork(cliCtx)
 			if err != nil {
 				return err
@@ -510,12 +523,6 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 }
 
 func createIsolatedNetwork(cliCtx *cli.Context) (cni.CNI, error) {
-	lookupCmd := fmt.Sprintf("ip netns list | grep %s", networkNamespace)
-	if err := exec.Command("bash", "-c", lookupCmd).Run(); err != nil {
-		if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
-			return nil, errors.Wrapf(err, "failed to add netns")
-		}
-	}
 	cniObj, err := cni.New(
 		cni.WithMinNetworkCount(2),
 		cni.WithPluginDir([]string{cliCtx.String("cni-plugin-dir")}),
@@ -557,10 +564,10 @@ func withNewSnapshot(key string, img containerd.Image, snapshotter, traceFile st
 }
 
 func uniqueObjectString() string {
-	t := time.Now()
-	var b [3]byte
+	now := time.Now()
+	var b [2]byte
 	rand.Read(b[:])
-	return fmt.Sprintf(uniqueObjectFormat, t.Unix(), hex.EncodeToString(b[:]))
+	return fmt.Sprintf(uniqueObjectFormat, now.Format("20060102150405"), hex.EncodeToString(b[:]))
 }
 
 func registerSignals(ctx context.Context, task containerd.Task, sigStop chan bool) chan os.Signal {
