@@ -30,7 +30,7 @@ sudo ctr plugin ls | grep overlaybd
 sudo ctr snapshot --snapshotter overlaybd ls
 ```
 
-If there is no overlaybd plugin, please checkout the section [Proxy snapshotter plugin config](#proxy-snapshotter-plugin-config).
+If there is no overlaybd plugin, please checkout [BUILDING](BUILDING.md).
 
 ## Ondemand Pulling Image
 
