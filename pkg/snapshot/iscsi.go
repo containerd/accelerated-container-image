@@ -322,7 +322,16 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		blobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
-		blobPrefixURL, err := o.constructImageBlobURL(info.Labels[labelKeyImageRef])
+		ref, hasRef := info.Labels[labelKeyImageRef]
+		if !hasRef {
+			criRef, hasCriRef := info.Labels[labelKeyCriImageRef]
+			if !hasCriRef {
+				return errors.Errorf("no image-ref label")
+			}
+			ref = criRef
+		}
+
+		blobPrefixURL, err := o.constructImageBlobURL(ref)
 		if err != nil {
 			return errors.Wrapf(err, "failed to construct image blob prefix url for snapshot %s", key)
 		}

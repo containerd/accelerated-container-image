@@ -40,7 +40,7 @@ The key features are:
 
 * See how to build snaphshotter and ctr plugin components at [BUILDING](docs/BUILDING.md).
 
-* After build or install, see our [EXAMPLES](docs/EXAMPLES.md) about how to run an accelerated container.
+* After build or install, see our [EXAMPLES](docs/EXAMPLES.md) about how to run an accelerated container. see [EXAMPLES_CRI](docs/EXAMPLES_CRI.md) if you run containers by k8s/cri.
 
 * See the [PERFORMANCE](docs/PERFORMANCE.md) test about the acceleration.
 

@@ -100,6 +100,9 @@ const (
 
 	// labelKeyRecordTracePath is the the file path to record trace
 	labelKeyRecordTracePath = "containerd.io/snapshot/overlaybd/record-trace-path"
+
+	// labelKeyCriImageRef is thr image-ref from cri
+	labelKeyCriImageRef = "containerd.io/snapshot/cri.image-ref"
 )
 
 // interface
@@ -966,9 +969,11 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
 		_, hasBDBlobSize := info.Labels[labelKeyOverlayBDBlobSize]
 		_, hasBDBlobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
+		_, hasRef := info.Labels[labelKeyImageRef]
+		_, hasCriRef := info.Labels[labelKeyCriImageRef]
 
 		if hasBDBlobSize && hasBDBlobDigest {
-			if _, ok := info.Labels[labelKeyImageRef]; ok {
+			if hasRef || hasCriRef {
 				return storageTypeRemoteBlock, nil
 			}
 		}
