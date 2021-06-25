@@ -811,6 +811,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 				Type:   "ext4",
 				Options: []string{
 					"rw",
+					"discard",
 				},
 			},
 		}, nil

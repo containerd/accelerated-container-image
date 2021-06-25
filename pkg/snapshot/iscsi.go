@@ -261,7 +261,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 				mflag = 0
 			}
 			if writable != rwDev {
-				if err := unix.Mount(device, mountPoint, "ext4", mflag, ""); err != nil {
+				if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
 					lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
 					time.Sleep(10 * time.Millisecond)
 					break // retry
