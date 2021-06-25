@@ -88,7 +88,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	}
 	writeType := o.getWritableType(ctx, info)
 
-	if writeType == rwDir {
+	if writeType != rwDev {
 		mountPoint := o.overlaybdMountpoint(snID)
 		log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
 		if err := mount.UnmountAll(mountPoint, 0); err != nil {
