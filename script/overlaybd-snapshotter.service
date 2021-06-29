@@ -1,0 +1,22 @@
+[Unit]
+Description=overlaybd-snapshotter service
+After=network.target
+Before=local-fs-pre.target shutdown.target
+DefaultDependencies=no
+Conflicts=shutdown.target
+
+[Service]
+LimitNOFILE=1048576
+LimitCORE=infinity
+Type=simple
+
+ExecStart=/opt/overlaybd/snapshotter/overlaybd-snapshotter
+
+GuessMainPID=no
+Restart=always
+RestartSec=1s
+KillMode=process
+OOMScoreAdjust=-999
+
+[Install]
+WantedBy=multi-user.target
