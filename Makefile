@@ -1,5 +1,5 @@
 # used to install binaries
-DESTDIR=/usr/local/bin
+SN_DESTDIR=/opt/overlaybd/snapshotter
 
 # command
 COMMANDS=overlaybd-snapshotter ctr
@@ -21,9 +21,8 @@ bin/%: cmd/% force
 	@GOOS=linux go build -o $@ ./$<
 
 install: ## install binaries from bin
-	@mkdir -p $(DESTDIR)
-	@install $(BINARIES) $(DESTDIR)
-
+	@mkdir -p ${SN_DESTDIR}
+	@install $(BINARIES) $(SN_DESTDIR)
 test: ## run tests that require root
 	@go test ${GO_TESTFLAGS} ${GO_PACKAGES} -test.root
 
