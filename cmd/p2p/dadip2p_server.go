@@ -45,16 +45,16 @@ var (
 	root       arrayFlags
 	port       int
 	prefetch   int
-	cachesize  int64
-	maxentry   int64
+	cacheSize  int64
+	maxEntry   int64
 	loglevel   string
 	media      string
-	nodeip     string
-	detectaddr string
+	nodeIP     string
+	detectAddr string
 )
 
-func getOutbondIP() net.IP {
-	conn, err := net.Dial("udp", detectaddr)
+func getOutboundIP() net.IP {
+	conn, err := net.Dial("udp", detectAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,11 +67,11 @@ func getOutbondIP() net.IP {
 
 func init() {
 	flag.Var(&root, "r", "Root list")
-	flag.StringVar(&nodeip, "h", "", "Current node IP Address")
-	flag.StringVar(&detectaddr, "d", "8.8.8.8:80", "Address for detecting current node address")
+	flag.StringVar(&nodeIP, "h", "", "Current node IP Address")
+	flag.StringVar(&detectAddr, "d", "8.8.8.8:80", "Address for detecting current node address")
 	flag.IntVar(&port, "p", 19145, "Listening port")
-	flag.Int64Var(&cachesize, "m", 8*1024*1024*1024, "Cache size")
-	flag.Int64Var(&maxentry, "e", 1*1024*1024*1024, "Max cache entry")
+	flag.Int64Var(&cacheSize, "m", 8*1024*1024*1024, "Cache size")
+	flag.Int64Var(&maxEntry, "e", 1*1024*1024*1024, "Max cache entry")
 	flag.IntVar(&prefetch, "pre", 64, "Prefetch workers")
 	flag.StringVar(&loglevel, "l", "info", "Log level, debug | info | warn | error | panic")
 	flag.StringVar(&media, "c", "/tmp/cache", "Cache media path")
@@ -92,8 +92,8 @@ func main() {
 		log.Info("P2P Agent")
 	}
 	cache := p2p.NewCachePool(&p2p.CacheConfig{
-		MaxEntry:   maxentry,
-		CacheSize:  cachesize,
+		MaxEntry:   maxEntry,
+		CacheSize:  cacheSize,
 		CacheMedia: media,
 	})
 	hp := p2p.NewHostPicker(root, cache)
@@ -103,11 +103,11 @@ func main() {
 		APIKey:          "dadip2p",
 		PrefetchWorkers: prefetch,
 	})
-	if nodeip == "" {
-		nodeip = getOutbondIP().String()
+	if nodeIP == "" {
+		nodeIP = getOutboundIP().String()
 	}
 	server := p2p.NewP2PServer(&p2p.ServerConfig{
-		MyAddr: fmt.Sprintf("http://%s:%d", nodeip, port),
+		MyAddr: fmt.Sprintf("http://%s:%d", nodeIP, port),
 		Fs:     fs,
 		APIKey: "dadip2p",
 	})

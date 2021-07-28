@@ -27,11 +27,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const cacheblocksize int = 1 * 1024 * 1024
+const cacheBlockSize int = 1 * 1024 * 1024
 
 // RemoteFetcher is interface for fetching source data via remote access
 type RemoteFetcher interface {
-	// PRead like method to fetch file data starts from offset, length as `len(buf)`
+	// PreadRemote PRead like method to fetch file data starts from offset, length as `len(buf)`
 	PreadRemote(buf []byte, offset int64) (int, error)
 	// FstatRemote get file length by remote
 	FstatRemote() (int64, error)
@@ -54,18 +54,18 @@ func (f *remoteSource) PreadRemote(buff []byte, offset int64) (int, error) {
 	if upperHost != "" {
 		url = fmt.Sprintf("%s/%s/%s", upperHost, f.apikey, fn)
 	}
-	nreq, err := http.NewRequest("GET", url, nil)
+	newReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return -1, err
 	}
 	for k, vv := range f.req.Header {
 		vv2 := make([]string, len(vv))
 		copy(vv2, vv)
-		nreq.Header[k] = vv2
+		newReq.Header[k] = vv2
 	}
-	nreq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, int64(len(buff))+offset-1))
-	log.Infof("Fetching remote %s %s ", fn, nreq.Header.Get("Range"))
-	resp, err := http.DefaultClient.Do(nreq)
+	newReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, int64(len(buff))+offset-1))
+	log.Infof("Fetching remote %s %s ", fn, newReq.Header.Get("Range"))
+	resp, err := http.DefaultClient.Do(newReq)
 	if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 206) {
 		log.Error(resp, err)
 		return 0, FetchFailure{resp, err}
@@ -76,7 +76,7 @@ func (f *remoteSource) PreadRemote(buff []byte, offset int64) (int, error) {
 	} else {
 		source = "origin"
 	}
-	log.Infof("Got remote %s %s from %s ", fn, nreq.Header.Get("Range"), source)
+	log.Infof("Got remote %s %s from %s ", fn, newReq.Header.Get("Range"), source)
 	return io.ReadFull(resp.Body, buff)
 }
 
@@ -92,18 +92,18 @@ func (f FetchFailure) Error() string {
 
 func (f *remoteSource) FstatRemote() (int64, error) {
 	url := f.req.URL.String()
-	nreq, err := http.NewRequest("GET", url, nil)
+	newReq, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return 0, FetchFailure{nil, err}
 	}
 	for k, vs := range f.req.Header {
 		for _, v := range vs {
-			nreq.Header.Add(k, v)
+			newReq.Header.Add(k, v)
 		}
 	}
-	nreq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", 0, 0))
-	nreq.Header.Del("X-P2P-Agent")
-	resp, err := http.DefaultClient.Do(nreq)
+	newReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", 0, 0))
+	newReq.Header.Del("X-P2P-Agent")
+	resp, err := http.DefaultClient.Do(newReq)
 	if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 206) {
 		return 0, FetchFailure{resp, err}
 	}
@@ -165,12 +165,12 @@ func (r *PFile) Seek(offset int64, whence int) (int64, error) {
 
 // ReadAt like pread
 func (r *PFile) ReadAt(buff []byte, offset int64) (int, error) {
-	fsize, err := r.Fstat()
+	fileSize, err := r.Fstat()
 	if err != nil {
 		return 0, err
 	}
-	left := alignDown(offset, int64(cacheblocksize))
-	supposeLen := int(min64(int64(cacheblocksize), fsize-left))
+	left := alignDown(offset, int64(cacheBlockSize))
+	supposeLen := int(min64(int64(cacheBlockSize), fileSize-left))
 	retry := false
 again:
 	data, err := r.fs.cache.GetOrRefill(r.path, left, supposeLen, func() ([]byte, error) {
@@ -196,7 +196,7 @@ again:
 	pos := int(offset - left)
 	ret := min(len(buff), len(data)-pos)
 	ret = copy(buff[:ret], data[pos:pos+ret])
-	if offset+int64(len(buff)) > fsize {
+	if offset+int64(len(buff)) > fileSize {
 		err = io.EOF
 	}
 	return ret, err
@@ -205,11 +205,11 @@ again:
 // Prefetch launch prefetcher
 func (r *PFile) Prefetch(offset int64, count int64) {
 	go func() {
-		fsize, err := r.Fstat()
+		fileSize, err := r.Fstat()
 		if err != nil {
 			return
 		}
-		for seg := range NewRangeSplit(offset, cacheblocksize, count, fsize).AllParts() {
+		for seg := range NewRangeSplit(offset, cacheBlockSize, count, fileSize).AllParts() {
 			r.fs.preTask <- prefetchTask{
 				fn:     r.path,
 				rf:     r.Source,
@@ -245,13 +245,13 @@ type FS struct {
 	preTask      chan prefetchTask
 }
 
-// Open a pfile object
+// Open a p2pFile object
 func (fs FS) Open(path string, req *http.Request) (*PFile, error) {
 	file := PFile{path, fs, 0, 0, newRemoteSource(req, fs.hp, fs.apikey)}
-	fsize, err := file.Source.FstatRemote()
-	file.size = fsize
+	fileSize, err := file.Source.FstatRemote()
+	file.size = fileSize
 	if fs.prefetchable {
-		file.Prefetch(0, fsize)
+		file.Prefetch(0, fileSize)
 	}
 	return &file, err
 }
@@ -268,7 +268,7 @@ func (fs FS) Stat(path string, req *http.Request) (int64, error) {
 func (fs FS) prefetcher() {
 	go func() {
 		for seg := range fs.preTask {
-			fs.cache.GetOrRefill(seg.fn, seg.offset, seg.count, func() ([]byte, error) {
+			if _, err := fs.cache.GetOrRefill(seg.fn, seg.offset, seg.count, func() ([]byte, error) {
 				data := make([]byte, seg.count)
 				ret, err := seg.rf.PreadRemote(data, seg.offset)
 				if err != nil && err != io.EOF {
@@ -277,7 +277,9 @@ func (fs FS) prefetcher() {
 					return data, io.ErrUnexpectedEOF
 				}
 				return data, nil
-			})
+			}); err != nil {
+				log.Warnf("GetOrRefill %s fail!", seg.fn)
+			}
 		}
 	}()
 }

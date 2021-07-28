@@ -51,9 +51,7 @@ type fileCachePoolImpl struct {
 	media string
 }
 
-func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int,
-	fetch func() ([]byte, error),
-) ([]byte, error) {
+func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fetch func() ([]byte, error)) ([]byte, error) {
 	key := filepath.Join(c.media, path, strconv.FormatInt(offset, 10))
 	item, err := c.cache.GetOrSet(key, func(key string) (*fileCacheItem, error) {
 		return newFileCacheItem(key, int64(count), fetch)

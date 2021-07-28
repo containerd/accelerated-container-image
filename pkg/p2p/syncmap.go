@@ -240,20 +240,22 @@ func (m *lruSyncMapCache) Expire() {
 }
 
 type fileCacheItem struct {
-	key   string
-	fsize int64
-	file  *os.File
-	lock  sync.RWMutex
+	key      string
+	fileSize int64
+	file     *os.File
+	lock     sync.RWMutex
 }
 
 func (f *fileCacheItem) Drop() {
 	f.lock.Lock()
 	defer f.lock.Unlock()
-	os.Remove(f.file.Name())
+	if err := os.Remove(f.file.Name()); err != nil {
+		log.Warnf("File %s remove error!", f.file.Name())
+	}
 }
 
 func (f *fileCacheItem) Size() int64 {
-	return f.fsize
+	return f.fileSize
 }
 
 func (f *fileCacheItem) Key() string {
@@ -302,7 +304,7 @@ func writeAll(file *os.File, buff []byte) (int, error) {
 	return offset, err
 }
 
-func newFileCacheItem(key string, fsize int64, read func() ([]byte, error)) (*fileCacheItem, error) {
+func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (*fileCacheItem, error) {
 	err := os.MkdirAll(path.Dir(key), 0755)
 	if err != nil {
 		return nil, err
@@ -312,25 +314,32 @@ func newFileCacheItem(key string, fsize int64, read func() ([]byte, error)) (*fi
 		return nil, err
 	}
 	info, err := file.Stat()
-	if info.Size() != fsize {
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() != fileSize {
 		buffer, err := read()
-		if err == nil && int64(len(buffer)) != fsize {
+		if err == nil && int64(len(buffer)) != fileSize {
 			err = io.ErrUnexpectedEOF
 		}
 		if err != nil {
-			os.Remove(file.Name())
+			if err := os.Remove(file.Name()); err != nil {
+				log.Warnf("File %s remove error!", file.Name())
+			}
 			return nil, err
 		}
 		l, err := writeAll(file, buffer)
-		if err == nil && int64(l) != fsize {
+		if err == nil && int64(l) != fileSize {
 			err = io.ErrUnexpectedEOF
 		}
 		if err != nil {
-			os.Remove(file.Name())
+			if err := os.Remove(file.Name()); err != nil {
+				log.Warnf("File %s remove error!", file.Name())
+			}
 			return nil, err
 		}
 	}
-	item := &fileCacheItem{key: key, fsize: fsize, file: file}
+	item := &fileCacheItem{key: key, fileSize: fileSize, file: file}
 	return item, err
 }
 
