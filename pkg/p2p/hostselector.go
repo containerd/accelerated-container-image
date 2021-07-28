@@ -29,7 +29,7 @@ type HostPicker interface {
 	// returns empty stream shows data should fetch from source
 	// non-empty string present upstream p2p host
 	GetHost(url string) string
-	// SetHost stores query url matching source
+	// PutHost stores query url matching source
 	PutHost(url string, source string)
 	// ResetHost clear up url matched source if exists
 	ResetHost(url string)

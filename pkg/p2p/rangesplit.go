@@ -25,7 +25,7 @@ type RangeSplit struct {
 	size   int64
 }
 
-// RangeSegment segment information for splitted range
+// RangeSegment segment information for split range
 type RangeSegment struct {
 	Index  int64
 	Offset int64
@@ -65,14 +65,14 @@ func min(x, y int) int {
 	return y
 }
 
-// AllParts provides a channel as iteratable object to range segments
+// AllParts provides a channel as iterable object to range segments
 func (r RangeSplit) AllParts() chan RangeSegment {
 	ch := make(chan RangeSegment)
 	go func() {
 		for i := alignDown(r.offset, int64(r.step)); i < r.size; i += int64(r.step) {
-			absoffset := max64(i, r.offset)
-			seg := RangeSegment{Index: i, Offset: absoffset - i}
-			seg.Count = int(min64(i+int64(r.step), r.size) - absoffset)
+			absOffset := max64(i, r.offset)
+			seg := RangeSegment{Index: i, Offset: absOffset - i}
+			seg.Count = int(min64(i+int64(r.step), r.size) - absOffset)
 			if seg.Count > 0 {
 				ch <- seg
 			}

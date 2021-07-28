@@ -91,7 +91,7 @@ func (s Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 	}
 	proxyClient, _, err := h.Hijack()
 	if err != nil {
-		http.Error(w, "Webserver failted to hijacking", http.StatusInternalServerError)
+		http.Error(w, "Webserver failed to hijacking", http.StatusInternalServerError)
 		return
 	}
 	log.Debugf("Accepting CONNECT to %s", host)
@@ -100,9 +100,9 @@ func (s Server) connectHandler(w http.ResponseWriter, req *http.Request) {
 	go copyAndClose(proxyClient.(*net.TCPConn), targetSiteCon.(*net.TCPConn))
 }
 
-func (s Server) redirectHandler(w http.ResponseWriter, req *http.Request, rehost string, url string) {
+func (s Server) redirectHandler(w http.ResponseWriter, req *http.Request, redirectHost string, url string) {
 	http.Redirect(w, req,
-		fmt.Sprintf("%s/%s/%s", rehost, s.config.APIKey, url),
+		fmt.Sprintf("%s/%s/%s", redirectHost, s.config.APIKey, url),
 		http.StatusTemporaryRedirect)
 }
 
@@ -131,27 +131,27 @@ func (s Server) p2pHandler(w http.ResponseWriter, req *http.Request) {
 	agents := strings.Split(req.Header.Get("X-P2P-Agent"), " ")
 	agent := agents[len(agents)-1]
 	fn := req.URL.Path[len(s.config.APIKey)+2:]
-	url := fmt.Sprintf("%s?%s", fn, req.URL.RawQuery)
+	reqURL := fmt.Sprintf("%s?%s", fn, req.URL.RawQuery)
 	if len(agent) > 0 {
 		if accepted, redirect := s.cm.TryAccept(fn, agent); !accepted {
 			log.Infof("Request for %s from %s redirected to %s", fn, agent, redirect)
-			s.redirectHandler(w, req, redirect, url)
+			s.redirectHandler(w, req, redirect, reqURL)
 			return
 		}
 		log.Infof("Accept child %s for %s", agent, fn)
 	}
-	nreq, err := http.NewRequest("GET", url, nil)
+	newReq, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {
 		panic(err)
 	}
 	for k, vs := range req.Header {
 		for _, v := range vs {
-			nreq.Header.Add(k, v)
+			newReq.Header.Add(k, v)
 		}
 	}
-	nreq.Header.Add("X-P2P-Agent", s.config.MyAddr)
-	log.Debug("Cache Request ", fn, url, nreq.Header.Get("X-P2P-Agent"), nreq.Header.Get("Range"))
-	file, err := s.config.Fs.Open(fn, nreq)
+	newReq.Header.Add("X-P2P-Agent", s.config.MyAddr)
+	log.Debug("Cache Request ", fn, reqURL, newReq.Header.Get("X-P2P-Agent"), newReq.Header.Get("Range"))
+	file, err := s.config.Fs.Open(fn, newReq)
 	if err != nil {
 		panic(err)
 	} else {
