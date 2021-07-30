@@ -1,6 +1,6 @@
 # Getting Started
 
-Before checkout the examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/alibaba/overlaybd/README.md) and [BUILDING](BUILDING.md).
+Before checkout the examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/alibaba/overlaybd/blob/main/README.md) and [BUILDING](BUILDING.md).
 
 This doc includes:
 
