@@ -249,6 +249,7 @@ type FS struct {
 func (fs FS) Open(path string, req *http.Request) (*PFile, error) {
 	file := PFile{path, fs, 0, 0, newRemoteSource(req, fs.hp, fs.apikey)}
 	fileSize, err := file.Source.FstatRemote()
+	fs.cache.PutLen(path, fileSize)
 	file.size = fileSize
 	if fs.prefetchable {
 		file.Prefetch(0, fileSize)
