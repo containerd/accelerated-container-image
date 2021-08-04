@@ -17,16 +17,17 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alibaba/accelerated-container-image/pkg/p2p"
-
 	log "github.com/sirupsen/logrus"
 )
 
@@ -42,15 +43,18 @@ func (i *arrayFlags) Set(value string) error {
 }
 
 var (
-	root       arrayFlags
-	port       int
-	prefetch   int
-	cacheSize  int64
-	maxEntry   int64
-	loglevel   string
-	media      string
-	nodeIP     string
-	detectAddr string
+	root           arrayFlags
+	port           int
+	prefetch       int
+	cacheSize      int64
+	maxEntry       int64
+	loglevel       string
+	media          string
+	nodeIP         string
+	detectAddr     string
+	certPath       string
+	certKeyPath    string
+	isGenerateCert bool
 )
 
 func getOutboundIP() net.IP {
@@ -58,11 +62,16 @@ func getOutboundIP() net.IP {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer conn.Close()
-
+	defer func(conn net.Conn) {
+		_ = conn.Close()
+	}(conn)
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
 	return localAddr.IP
+}
+
+func getRealPath(rawPath string) string {
+	realPath, _ := filepath.Abs(rawPath)
+	return realPath
 }
 
 func init() {
@@ -75,10 +84,15 @@ func init() {
 	flag.IntVar(&prefetch, "pre", 64, "Prefetch workers")
 	flag.StringVar(&loglevel, "l", "info", "Log level, debug | info | warn | error | panic")
 	flag.StringVar(&media, "c", "/tmp/cache", "Cache media path")
+	flag.StringVar(&certPath, "cp", "p2pcert.pem", "Certificate path")
+	flag.StringVar(&certKeyPath, "ckp", "p2pcert.key", "Certificate key path")
+	flag.BoolVar(&isGenerateCert, "generate-cert", false, "Is generate certificate flag")
 }
 
 func main() {
 	flag.Parse()
+	certPath = getRealPath(certPath)
+	certKeyPath = getRealPath(certKeyPath)
 	level, err := log.ParseLevel(loglevel)
 	if err != nil {
 		level = log.InfoLevel
@@ -106,10 +120,16 @@ func main() {
 	if nodeIP == "" {
 		nodeIP = getOutboundIP().String()
 	}
-	server := p2p.NewP2PServer(&p2p.ServerConfig{
+	serverHandler := p2p.NewP2PServer(&p2p.ServerConfig{
 		MyAddr: fmt.Sprintf("http://%s:%d", nodeIP, port),
 		Fs:     fs,
 		APIKey: "dadip2p",
 	})
-	http.ListenAndServe(fmt.Sprintf(":%d", port), server)
+	cert := p2p.GetRootCA(certPath, certKeyPath, isGenerateCert)
+	server := &http.Server{
+		Addr:      fmt.Sprintf(":%d", port),
+		Handler:   serverHandler,
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{*cert}},
+	}
+	panic(server.ListenAndServe())
 }
