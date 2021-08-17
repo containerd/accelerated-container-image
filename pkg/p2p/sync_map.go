@@ -191,9 +191,9 @@ func (m *lruSyncMapCache) GetOrSet(key string, creator func(key string) (cacheIt
 		if err != nil {
 			return nil, err
 		}
-		m.s += val.Size()
 		m.lock.Lock()
 		defer m.lock.Unlock()
+		m.s += val.Size()
 		ret := m.l.PushFront(val)
 		return ret, err
 	})
