@@ -142,7 +142,7 @@ func (m *lruSyncMapCache) Del(key string) {
 		v := m.l.Remove(elem.(*list.Element))
 		item := v.(cacheItem)
 		m.s -= item.Size()
-		m.kv.Remove(item.Key())
+		m.kv.Remove(key)
 		item.Drop()
 	}
 }
