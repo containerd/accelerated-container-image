@@ -59,7 +59,7 @@ func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fe
 	if item == nil {
 		return nil, err
 	}
-	return item.Val().([]byte), err
+	return item.Val().([]byte)[:count], err
 }
 
 func (c *fileCachePoolImpl) GetLen(path string) (int64, bool) {
