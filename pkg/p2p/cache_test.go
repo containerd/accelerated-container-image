@@ -89,8 +89,11 @@ func testCacheGetOrRefillHelper(t *testing.T, config *CacheConfig) {
 					Assert.NotEqual(nil, err)
 					Assert.Equal([]byte(nil), res)
 				} else {
-					Assert.Equal(nil, err)
-					Assert.Equal(fileContent[i][offset:offset+size], res)
+					if Assert.Equal(nil, err) {
+						Assert.Equal(fileContent[i][offset:offset+size], res)
+					} else {
+						t.Log(err)
+					}
 				}
 			}(i, j)
 		}
