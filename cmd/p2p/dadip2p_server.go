@@ -18,118 +18,138 @@ package main
 
 import (
 	"crypto/tls"
-	"flag"
 	"fmt"
 	"math/rand"
-	"net"
 	"net/http"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/alibaba/accelerated-container-image/pkg/p2p"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
-
-type arrayFlags []string
-
-func (i *arrayFlags) String() string {
-	return strings.Join(*i, " ")
-}
-
-func (i *arrayFlags) Set(value string) error {
-	*i = append(*i, value)
-	return nil
-}
 
 var (
-	root           arrayFlags
-	port           int
-	prefetch       int
-	cacheSize      int64
-	maxEntry       int64
-	loglevel       string
-	media          string
-	nodeIP         string
-	detectAddr     string
-	certPath       string
-	certKeyPath    string
-	isGenerateCert bool
+	rootCmd = &cobra.Command{
+		Use:   "dadip2p_server",
+		Short: "dadip2p_server",
+		Long:  `dadip2p_server`,
+		Run: func(cmd *cobra.Command, args []string) {
+			checkConfig()
+			execute()
+		},
+	}
+	cfgFile string
 )
 
-func getOutboundIP() net.IP {
-	conn, err := net.Dial("udp", detectAddr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func(conn net.Conn) {
-		_ = conn.Close()
-	}(conn)
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP
-}
-
-func getRealPath(rawPath string) string {
-	realPath, _ := filepath.Abs(rawPath)
-	return realPath
-}
-
 func init() {
-	flag.Var(&root, "r", "Root list")
-	flag.StringVar(&nodeIP, "h", "", "Current node IP Address")
-	flag.StringVar(&detectAddr, "d", "8.8.8.8:80", "Address for detecting current node address")
-	flag.IntVar(&port, "p", 19145, "Listening port")
-	flag.Int64Var(&cacheSize, "m", 8*1024*1024*1024, "Cache size")
-	flag.Int64Var(&maxEntry, "e", 1*1024*1024*1024, "Max cache entry")
-	flag.IntVar(&prefetch, "pre", 64, "Prefetch workers")
-	flag.StringVar(&loglevel, "l", "info", "Log level, debug | info | warn | error | panic")
-	flag.StringVar(&media, "c", "/tmp/cache", "Cache media path")
-	flag.StringVar(&certPath, "cp", "p2pcert.pem", "Certificate path")
-	flag.StringVar(&certKeyPath, "ckp", "p2pcert.key", "Certificate key path")
-	flag.BoolVar(&isGenerateCert, "generate-cert", false, "Is generate certificate flag")
+	rand.Seed(time.Now().Unix())
+	// cfg
+	cobra.OnInitialize(initConfig)
+	rootCmd.Flags().StringVarP(&cfgFile, "cfgFile", "", "dadip2p.yaml", "Config file (default is dadip2p.yaml)")
+	// flag
+	rootCmd.Flags().BoolP("generate-cert", "", false, "Is auto generate cert")
+	bindFlag("CertConfig.GenerateCert", "generate-cert")
+	rootCmd.Flags().StringP("log-level", "l", "info", "Log level, debug | info | warn | error | panic")
+	bindFlag("LogLevel", "log-level")
+	rootCmd.Flags().IntP("port", "p", 19145, "Port")
+	bindFlag("Port", "port")
 }
 
-func main() {
-	flag.Parse()
-	certPath = getRealPath(certPath)
-	certKeyPath = getRealPath(certKeyPath)
-	level, err := log.ParseLevel(loglevel)
-	if err != nil {
-		level = log.InfoLevel
-		log.Warnf("Log level argument %s not recognized", loglevel)
+func bindFlag(configName, flagName string) {
+	if err := viper.BindPFlag(configName, rootCmd.Flags().Lookup(flagName)); err != nil {
+		log.Fatalf("Bind flag error! config name: %s, flag name: %s. %s", configName, flagName, err)
 	}
-	log.SetLevel(level)
-	rand.Seed(time.Now().Unix())
-	if len(root) == 0 {
-		log.Info("P2P Root")
-	} else {
-		log.Info("P2P Agent")
+}
+
+func checkConfig() {
+	// run mode
+	if config.RunMode != "root" && config.RunMode != "agent" {
+		log.Fatalf("Unexpected run mode %s!", config.RunMode)
+	}
+	// prefetch
+	if !config.PrefetchConfig.PrefetchEnable {
+		config.PrefetchConfig.PrefetchThread = 0
+	}
+	// file cache
+	if !config.CacheConfig.FileCacheEnable {
+		config.CacheConfig.FileCacheSize = 0
+	}
+	// memory size
+	if !config.CacheConfig.MemCacheEnable {
+		config.CacheConfig.MemCacheSize = 0
+	}
+	// certificate
+	if config.CertConfig.CertEnable {
+		config.CertConfig.CertPath = p2p.GetRealPath(config.CertConfig.CertPath)
+		config.CertConfig.KeyPath = p2p.GetRealPath(config.CertConfig.KeyPath)
+	}
+	// nodeIP
+	if config.NodeIP == "" {
+		config.NodeIP = p2p.GetOutboundIP(config.DetectAddr).String()
+	}
+}
+
+var config = p2p.DeployConfig{}
+
+func initConfig() {
+	viper.SetConfigFile(cfgFile)
+	viper.AutomaticEnv()
+	if err := viper.ReadInConfig(); err != nil {
+		log.Printf("Read file err! %s", err)
+		return
+	}
+	if err := viper.Unmarshal(&config); err != nil {
+		log.Printf("Unmarshal file err! %s", err)
+		return
+	}
+	log.Println("Using config file:", viper.ConfigFileUsed())
+}
+
+func execute() {
+	switch config.RunMode {
+	case "root":
+		log.Info("Run on P2P Root")
+	case "agent":
+		log.Info("Run on P2P Agent")
 	}
 	cache := p2p.NewCachePool(&p2p.CacheConfig{
-		MaxEntry:   maxEntry,
-		CacheSize:  cacheSize,
-		CacheMedia: media,
+		MaxEntry:   config.CacheConfig.MemCacheSize,
+		CacheSize:  config.CacheConfig.FileCacheSize,
+		CacheMedia: config.CacheConfig.FileCachePath,
 	})
-	hp := p2p.NewHostPicker(root, cache)
+	hp := p2p.NewHostPicker(config.RootList, cache)
 	fs := p2p.NewP2PFS(&p2p.FSConfig{
 		CachePool:       cache,
 		HostPicker:      hp,
 		APIKey:          "dadip2p",
-		PrefetchWorkers: prefetch,
+		PrefetchWorkers: config.PrefetchConfig.PrefetchThread,
 	})
-	if nodeIP == "" {
-		nodeIP = getOutboundIP().String()
+	var myAddr string
+	if config.ServeBySSL {
+		myAddr = fmt.Sprintf("http://%s:%d", config.NodeIP, config.Port)
+	} else {
+		myAddr = fmt.Sprintf("https://%s:%d", config.NodeIP, config.Port)
 	}
 	serverHandler := p2p.NewP2PServer(&p2p.ServerConfig{
-		MyAddr: fmt.Sprintf("http://%s:%d", nodeIP, port),
+		MyAddr: myAddr,
 		Fs:     fs,
 		APIKey: "dadip2p",
 	})
-	cert := p2p.GetRootCA(certPath, certKeyPath, isGenerateCert)
+	var cert []tls.Certificate
+	if config.CertConfig.CertEnable {
+		cert = []tls.Certificate{*p2p.GetRootCA(config.CertConfig.CertPath, config.CertConfig.KeyPath, config.CertConfig.GenerateCert)}
+	}
 	server := &http.Server{
-		Addr:      fmt.Sprintf(":%d", port),
+		Addr:      fmt.Sprintf(":%d", config.Port),
 		Handler:   serverHandler,
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{*cert}},
+		TLSConfig: &tls.Config{Certificates: cert},
 	}
 	panic(server.ListenAndServe())
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatalf("Execute failed! %s", err)
+	}
 }

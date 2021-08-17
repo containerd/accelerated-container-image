@@ -1,0 +1,40 @@
+# Log level, debug | info | warn | error | panic
+LogLevel: "info"
+# Run mode, root | agent
+RunMode: "root"
+# Root list, agent use it to find root
+RootList: [ ]
+# Node IP, outbound ip
+NodeIP: ""
+# DetectAddr, if not set NodeIP, we will use detect addr to get outbound ip
+DetectAddr: "8.8.8.8:80"
+# ServeBySSL, used to determine serve on https
+ServeBySSL: false
+# Port, serve port
+Port: 19145
+# CertConfig
+CertConfig:
+  # CertEnable, used to determine decode https request
+  CertEnable: false
+  # CertPath
+  CertPath: "p2pcert.pem"
+  # KeyPath
+  KeyPath: "p2pcert.key"
+# CacheConfig
+CacheConfig:
+  # FileCacheEnable
+  FileCacheEnable: true
+  # FileCacheSize
+  FileCacheSize: 4294967296 # 4G
+  # FileCachePath
+  FileCachePath: "/tmp/cache"
+  # MemCacheEnable
+  MemCacheEnable: true
+  # MemCacheSize
+  MemCacheSize: 1073741824 # 1G
+# PrefetchConfig
+PrefetchConfig:
+  # PrefetchEnable, used to determine open prefetch
+  PrefetchEnable: true
+  # PrefetchThread
+  PrefetchThread: 64

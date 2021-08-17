@@ -16,10 +16,11 @@ require (
 	github.com/opencontainers/runtime-spec v1.0.3-0.20200929063507-e6143ca7d51d
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.7.0
-	github.com/stretchr/testify v1.7.0 // indirect
+	github.com/spf13/cobra v1.2.1
+	github.com/spf13/viper v1.8.1
 	github.com/urfave/cli v1.22.2
-	golang.org/x/sync v0.0.0-20201207232520-09787c993a3a
-	golang.org/x/sys v0.0.0-20210124154548-22da62e12c0c
-	google.golang.org/grpc v1.34.0
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
+	golang.org/x/sys v0.0.0-20210510120138-977fb7262007
+	google.golang.org/grpc v1.38.0
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 )
