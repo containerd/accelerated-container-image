@@ -126,7 +126,7 @@ func execute() {
 		PrefetchWorkers: config.PrefetchConfig.PrefetchThread,
 	})
 	var myAddr string
-	if config.ServeBySSL {
+	if !config.ServeBySSL {
 		myAddr = fmt.Sprintf("http://%s:%d", config.NodeIP, config.Port)
 	} else {
 		myAddr = fmt.Sprintf("https://%s:%d", config.NodeIP, config.Port)
