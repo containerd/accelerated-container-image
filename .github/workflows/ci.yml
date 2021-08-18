@@ -32,7 +32,7 @@ jobs:
       - name: golangci-lint check
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.36.0
+          version: v1.42.0
           working-directory: src/github.com/alibaba/accelerated-container-image
           args: --timeout=5m
 
@@ -123,6 +123,7 @@ jobs:
         run: |
           echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+#          ./src/github.com/alibaba/accelerated-container-image/pkg/p2p/test/harbor/install.sh
 
       - name: unit test
         working-directory: src/github.com/alibaba/accelerated-container-image

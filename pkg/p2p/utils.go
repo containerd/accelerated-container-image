@@ -17,8 +17,11 @@
 package p2p
 
 import (
+	"fmt"
+	"math/rand"
 	"net"
 	"path/filepath"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -38,4 +41,29 @@ func GetOutboundIP(detectAddr string) net.IP {
 func GetRealPath(rawPath string) string {
 	realPath, _ := filepath.Abs(rawPath)
 	return realPath
+}
+
+func GetRandomString(n int) string {
+	randBytes := make([]byte, n/2)
+	rand.Read(randBytes)
+	return fmt.Sprintf("%x", randBytes)
+}
+
+func IsContain(arr []string, item string) bool {
+	for _, v := range arr {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func CheckTCPConn(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil || conn == nil {
+		log.Infof("Connect to %s failed! %s", address, err)
+		return false
+	}
+	_ = conn.Close()
+	return true
 }

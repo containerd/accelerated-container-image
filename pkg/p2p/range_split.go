@@ -37,28 +37,28 @@ func NewRangeSplit(offset int64, step int, size int64, maxsize int64) RangeSplit
 	if (step & (step - 1)) > 0 {
 		panic(errors.New("step must be power of 2"))
 	}
-	return RangeSplit{offset, step, min64(offset+size, maxsize)}
+	return RangeSplit{offset, step, Min64(offset+size, maxsize)}
 }
 
-func alignDown(x int64, align int64) int64 {
+func AlignDown(x int64, align int64) int64 {
 	return x / align * align
 }
 
-func max64(x, y int64) int64 {
+func Max64(x, y int64) int64 {
 	if x > y {
 		return x
 	}
 	return y
 }
 
-func min64(x, y int64) int64 {
+func Min64(x, y int64) int64 {
 	if x < y {
 		return x
 	}
 	return y
 }
 
-func min(x, y int) int {
+func Min(x, y int) int {
 	if x < y {
 		return x
 	}
@@ -69,10 +69,10 @@ func min(x, y int) int {
 func (r RangeSplit) AllParts() chan RangeSegment {
 	ch := make(chan RangeSegment)
 	go func() {
-		for i := alignDown(r.offset, int64(r.step)); i < r.size; i += int64(r.step) {
-			absOffset := max64(i, r.offset)
+		for i := AlignDown(r.offset, int64(r.step)); i < r.size; i += int64(r.step) {
+			absOffset := Max64(i, r.offset)
 			seg := RangeSegment{Index: i, Offset: absOffset - i}
-			seg.Count = int(min64(i+int64(r.step), r.size) - absOffset)
+			seg.Count = int(Min64(i+int64(r.step), r.size) - absOffset)
 			if seg.Count > 0 {
 				ch <- seg
 			}

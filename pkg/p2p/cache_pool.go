@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 )
 
 // CacheConfig set cache size, entry num and cache media(fs)
@@ -49,17 +50,40 @@ type fileCachePoolImpl struct {
 	cache *fileCacheLRU
 	entry *memCacheLRU
 	media string
+	lock  *sync.Mutex
 }
 
 func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fetch func() ([]byte, error)) ([]byte, error) {
 	key := filepath.Join(c.media, path, strconv.FormatInt(offset, 10))
-	item, err := c.cache.GetOrSet(key, func(key string) (*fileCacheItem, error) {
-		return newFileCacheItem(key, int64(count), fetch)
-	})
-	if item == nil {
-		return nil, err
+	var item *fileCacheItem
+	{
+		c.lock.Lock()
+		defer c.lock.Unlock()
+		var ok bool
+		item, ok = c.cache.Get(key)
+		if !ok {
+			item = &fileCacheItem{}
+			c.cache.Set(key, item)
+		}
 	}
-	return item.Val().([]byte), err
+	var value []byte
+	{
+		item.lock.Lock()
+		defer item.lock.Unlock()
+		if item.file != nil {
+			value = item.Val().([]byte)
+		}
+		if len(value) == 0 {
+			var err error
+			item, err = newFileCacheItem(key, int64(count), fetch)
+			if err != nil {
+				return nil, err
+			}
+			value = item.Val().([]byte)
+			c.cache.Set(key, item)
+		}
+	}
+	return value, nil
 }
 
 func (c *fileCachePoolImpl) GetLen(path string) (int64, bool) {
@@ -106,5 +130,5 @@ func NewCachePool(config *CacheConfig) FileCachePool {
 	if err := os.MkdirAll(media, 0755); err != nil {
 		panic(err)
 	}
-	return &fileCachePoolImpl{newFileCacheLRU(config.CacheSize), newMemCacheLRU(config.MaxEntry), media}
+	return &fileCachePoolImpl{newFileCacheLRU(config.CacheSize), newMemCacheLRU(config.MaxEntry), media, &sync.Mutex{}}
 }
