@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package p2p
+package server
 
 import (
 	"bufio"
@@ -30,17 +30,71 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/cache"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/configure"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/fs"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/hostselector"
+
 	log "github.com/sirupsen/logrus"
 )
 
-// ServerConfig configuration for server
-type ServerConfig struct {
+// Execute used to get server by config, isRun set will start server immediately instead of return a server.
+func Execute(config *configure.DeployConfig, isRun bool) *http.Server {
+	switch config.RunMode {
+	case "root":
+		log.Info("Run on P2P Root")
+	case "agent":
+		log.Info("Run on P2P Agent")
+	}
+	cachePool := cache.NewCachePool(&cache.Config{
+		MaxEntry:   config.CacheConfig.MemCacheSize,
+		CacheSize:  config.CacheConfig.FileCacheSize,
+		CacheMedia: config.CacheConfig.FileCachePath,
+	})
+	hp := hostselector.NewHostPicker(config.RootList, cachePool)
+	p2pFs := fs.NewP2PFS(&fs.Config{
+		CachePool:       cachePool,
+		HostPicker:      hp,
+		APIKey:          "dadip2p",
+		PrefetchWorkers: config.PrefetchConfig.PrefetchThread,
+	})
+	var myAddr string
+	if !config.ServeBySSL {
+		myAddr = fmt.Sprintf("http://%s:%d", config.NodeIP, config.Port)
+	} else {
+		myAddr = fmt.Sprintf("https://%s:%d", config.NodeIP, config.Port)
+	}
+	serverHandler := NewP2PServer(&Config{
+		MyAddr:     myAddr,
+		Fs:         p2pFs,
+		APIKey:     "dadip2p",
+		ProxyHTTPS: config.CertConfig.CertEnable,
+	})
+	var cert []tls.Certificate
+	if config.CertConfig.CertEnable {
+		cert = []tls.Certificate{*GetRootCA(config.CertConfig.CertPath, config.CertConfig.KeyPath, config.CertConfig.GenerateCert)}
+	}
+	server := &http.Server{
+		Addr:      fmt.Sprintf(":%d", config.Port),
+		Handler:   serverHandler,
+		TLSConfig: &tls.Config{Certificates: cert},
+	}
+	if isRun {
+		if err := server.ListenAndServe(); err != nil {
+			log.Fatalf("Server stop! %s", err)
+		}
+	}
+	return server
+}
+
+// Config configuration for server
+type Config struct {
 	// Host address, for P2P route
 	MyAddr string
 	// APIKey as prefix for P2P Access
 	APIKey string
 	// Fs cached remote file system for p2p
-	Fs *FS
+	Fs *fs.P2PFS
 	// IsRoot set if server is root, will not fetch by p2p if it is a root
 	IsRoot bool
 	// ProxyHTTPS set if proxy by https
@@ -49,8 +103,8 @@ type ServerConfig struct {
 
 // Server object for p2p and proxy
 type Server struct {
-	config    *ServerConfig
-	cm        ChildrenManager
+	config    *Config
+	cm        hostselector.ChildrenManager
 	transport *http.Transport
 }
 
@@ -170,19 +224,19 @@ func (s Server) p2pHandler(w http.ResponseWriter, req *http.Request) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error(r)
-			ff := r.(FetchFailure)
-			if ff.err != nil {
-				log.Error("Request failed ", ff.err.Error())
+			ff := r.(fs.FetchFailure)
+			if ff.Err != nil {
+				log.Error("Request failed ", ff.Err)
 				w.WriteHeader(http.StatusInternalServerError)
 			} else {
-				log.Errorf("Request failed %d", ff.resp.StatusCode)
-				for k, vs := range ff.resp.Header {
+				log.Errorf("Request failed %d", ff.Resp.StatusCode)
+				for k, vs := range ff.Resp.Header {
 					for _, v := range vs {
 						w.Header().Add(k, v)
 					}
 				}
-				w.WriteHeader(ff.resp.StatusCode)
-				_, err := io.Copy(w, ff.resp.Body)
+				w.WriteHeader(ff.Resp.StatusCode)
+				_, err := io.Copy(w, ff.Resp.Body)
 				if err != nil {
 					log.Errorf("IO copy fail! %s", err)
 				}
@@ -306,19 +360,13 @@ func (s Server) proxyHTTPSHandler(w *tls.Conn, req *http.Request) error {
 }
 
 // NewP2PServer creator for p2p proxy server
-func NewP2PServer(config *ServerConfig) *Server {
-	if config.APIKey == "" {
-		config.APIKey = "dadip2p"
-	}
-	ret := Server{
+func NewP2PServer(config *Config) *Server {
+	return &Server{
 		config: config,
-		cm:     NewLimitedChildrenManager(2, time.Minute),
+		cm:     hostselector.NewLimitedChildrenManager(2, 1*time.Minute),
 		transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-			MaxIdleConns: 100,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			MaxIdleConns:    100,
 		},
 	}
-	return &ret
 }

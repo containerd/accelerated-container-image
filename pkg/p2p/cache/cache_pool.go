@@ -14,17 +14,19 @@
    limitations under the License.
 */
 
-package p2p
+package cache
 
 import (
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
-// CacheConfig set cache size, entry num and cache media(fs)
-type CacheConfig struct {
+// Config set cache size, entry num and cache media(fs)
+type Config struct {
 	CacheSize  int64
 	MaxEntry   int64
 	CacheMedia string
@@ -50,7 +52,7 @@ type fileCachePoolImpl struct {
 	cache *fileCacheLRU
 	entry *memCacheLRU
 	media string
-	lock  *sync.Mutex
+	lock  sync.Mutex
 }
 
 func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fetch func() ([]byte, error)) ([]byte, error) {
@@ -121,14 +123,14 @@ func (c *fileCachePoolImpl) DelHost(path string) {
 	c.entry.Del(key)
 }
 
-// NewCachePool creator for fileCachePool
-func NewCachePool(config *CacheConfig) FileCachePool {
-	media, err := filepath.Abs(config.CacheMedia)
-	if err != nil {
-		panic(err)
+// NewCachePool creator for FileCachePool
+func NewCachePool(config *Config) FileCachePool {
+	if err := os.MkdirAll(config.CacheMedia, 0755); err != nil {
+		log.Fatalf("Mkdir %s fail! %s", config.CacheMedia, err)
 	}
-	if err := os.MkdirAll(media, 0755); err != nil {
-		panic(err)
+	return &fileCachePoolImpl{
+		cache: newFileCacheLRU(config.CacheSize),
+		entry: newMemCacheLRU(config.MaxEntry),
+		media: config.CacheMedia,
 	}
-	return &fileCachePoolImpl{newFileCacheLRU(config.CacheSize), newMemCacheLRU(config.MaxEntry), media, &sync.Mutex{}}
 }

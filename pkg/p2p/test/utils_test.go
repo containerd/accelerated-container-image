@@ -31,7 +31,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/configure"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/server"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -64,7 +67,7 @@ func TestMain(m *testing.M) {
 }
 
 func startServer(t *testing.T, idx int, runMode string, rootList []string, port int, serveBySSL, proxyHTTPS bool) *http.Server {
-	var config = &p2p.DeployConfig{}
+	var config = &configure.DeployConfig{}
 	config.LogLevel = "debug"
 	config.RunMode = runMode
 	config.RootList = rootList
@@ -83,10 +86,10 @@ func startServer(t *testing.T, idx int, runMode string, rootList []string, port 
 	config.CacheConfig.FileCachePath = fmt.Sprintf("/tmp/cache/%d", idx)
 	config.PrefetchConfig.PrefetchEnable = true
 	config.PrefetchConfig.PrefetchThread = 64
-	p2p.CheckConfig(config)
-	server := p2p.Execute(config, false)
+	configure.CheckConfig(config)
+	proxyServer := server.Execute(config, false)
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
+		if err := proxyServer.ListenAndServe(); err != nil {
 			t.Logf("Server %s on port %d exit! %s", runMode, port, err)
 		}
 	}()
@@ -94,13 +97,13 @@ func startServer(t *testing.T, idx int, runMode string, rootList []string, port 
 	go func() {
 		defer wg.Done()
 		address := fmt.Sprintf("127.0.0.1:%d", port)
-		for !p2p.CheckTCPConn(address) {
+		for !util.CheckTCPConn(address) {
 			t.Logf("Check address %s failed! retry...", address)
 			time.Sleep(time.Second)
 		}
 		t.Logf("Start %s on port %d success!", runMode, port)
 	}()
-	return server
+	return proxyServer
 }
 
 func startServers(t *testing.T, root, agent int, serveBySSL, proxyHTTPS bool) []*http.Server {
@@ -126,7 +129,7 @@ func getData() string {
 	const blockSize = 1024 * 1024
 	length := rand.Intn(4) * blockSize
 	length += rand.Intn(blockSize)
-	return p2p.GetRandomString(length)
+	return util.GetRandomString(length)
 }
 
 // content-length support range
@@ -163,28 +166,28 @@ func httpHandle1(w http.ResponseWriter, r *http.Request) {
 
 func startHTTPServer(t *testing.T, port int, handle func(http.ResponseWriter, *http.Request)) *http.Server {
 	addr := fmt.Sprintf(":%d", port)
-	server := &http.Server{Addr: addr, Handler: http.HandlerFunc(handle)}
+	httpServer := &http.Server{Addr: addr, Handler: http.HandlerFunc(handle)}
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			t.Logf("HTTP server exit! %s", err)
+		if err := httpServer.ListenAndServe(); err != nil {
+			t.Logf("HTTP Server exit! %s", err)
 		}
 	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		address := fmt.Sprintf("127.0.0.1:%d", port)
-		for !p2p.CheckTCPConn(address) {
+		for !util.CheckTCPConn(address) {
 			t.Logf("Check address %s failed! retry...", address)
 			time.Sleep(time.Second)
 		}
-		t.Log("Start HTTP server success!")
+		t.Log("Start HTTP Server success!")
 	}()
-	return server
+	return httpServer
 }
 
 func startHTTPSServer(t *testing.T, port int, handle func(http.ResponseWriter, *http.Request)) *http.Server {
-	p2p.GetRootCA("/tmp/p2pcert.pem", "/tmp/p2pcert.key", true)
-	cert, key := p2p.GenerateCertificate("127.0.0.1")
+	server.GetRootCA("/tmp/p2pcert.pem", "/tmp/p2pcert.key", true)
+	cert, key := server.GenerateCertificate("127.0.0.1")
 	if err := ioutil.WriteFile("/tmp/httpcert.pem", cert, 0644); err != nil {
 		t.Fatalf("Write file httpcert.pem failed! %s", err)
 	}
@@ -192,23 +195,23 @@ func startHTTPSServer(t *testing.T, port int, handle func(http.ResponseWriter, *
 		t.Fatalf("Write file httpcert.key failed! %s", err)
 	}
 	addr := fmt.Sprintf(":%d", port)
-	server := &http.Server{Addr: addr, Handler: http.HandlerFunc(handle)}
+	httpServer := &http.Server{Addr: addr, Handler: http.HandlerFunc(handle)}
 	go func() {
-		if err := server.ListenAndServeTLS("/tmp/httpcert.pem", "/tmp/httpcert.key"); err != nil {
-			t.Logf("HTTPS server exit! %s", err)
+		if err := httpServer.ListenAndServeTLS("/tmp/httpcert.pem", "/tmp/httpcert.key"); err != nil {
+			t.Logf("HTTPS Server exit! %s", err)
 		}
 	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		address := fmt.Sprintf("127.0.0.1:%d", port)
-		for !p2p.CheckTCPConn(address) {
+		for !util.CheckTCPConn(address) {
 			t.Logf("Check address %s failed! retry...", address)
 			time.Sleep(time.Second)
 		}
-		t.Log("Start HTTPS server success!")
+		t.Log("Start HTTPS Server success!")
 	}()
-	return server
+	return httpServer
 }
 
 func startHTTPServers(t *testing.T) []*http.Server {

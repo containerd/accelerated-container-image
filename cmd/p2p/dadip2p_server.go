@@ -20,7 +20,9 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/server"
+
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/configure"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -29,22 +31,23 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:   "dadip2p_server",
-		Short: "dadip2p_server",
-		Long:  `dadip2p_server`,
+		Use:   "dadi-p2p",
+		Short: "Dadi p2p is a file distribution service using P2P protocol.",
+		Long:  `Dadi p2p is a file distribution service using P2P protocol. The main purpose is to accelerate the image's layer download.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			config := p2p.InitConfig(cfgFile)
-			p2p.CheckConfig(config)
-			p2p.Execute(config, true)
+			config := configure.InitConfig(cfgFile)
+			configure.CheckConfig(config)
+			server.Execute(config, true)
 		},
 	}
 	cfgFile string
 )
 
 func init() {
-	rand.Seed(time.Now().Unix())
+	// set seed
+	rand.Seed(time.Now().UnixNano())
 	// cfg
-	rootCmd.Flags().StringVarP(&cfgFile, "cfgFile", "", "dadip2p.yaml", "ServerConfig file (default is dadip2p.yaml)")
+	rootCmd.Flags().StringVarP(&cfgFile, "cfgFile", "c", "dadip2p.yaml", "Config file (default is dadip2p.yaml)")
 	// flag
 	rootCmd.Flags().BoolP("generate-cert", "", false, "Is auto generate cert")
 	bindFlag("CertConfig.GenerateCert", "generate-cert")

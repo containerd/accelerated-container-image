@@ -14,10 +14,9 @@
    limitations under the License.
 */
 
-package p2p
+package cache
 
 import (
-	"container/list"
 	"io"
 	"os"
 	"path"
@@ -27,130 +26,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var fdCnt int32
-
-type cacheItem interface {
-	Key() string
-	Val() interface{}
-	Size() int64
-	Drop()
-}
-
-type lruCache interface {
-	Get(key string) (cacheItem, bool)
-	Set(key string, val cacheItem)
-	GetOrSet(key string, creator func(key string) (cacheItem, error)) (cacheItem, error)
-	Del(key string)
-	Touch(key string)
-	Sum() int64
-	Limit() int64
-	Expire()
-}
-
-type lruSyncMapCache struct {
-	kv       syncMap // map of `*list.Element` stores `CacheItem`
-	l        syncList
-	s, limit int64
-}
-
-func newLRUCache(limit int64) lruCache {
-	fdCnt = 0
-	return &lruSyncMapCache{
-		kv:    &rwSyncMap{kv: make(map[string]*rwSyncMapItem)},
-		l:     &rwSyncList{l: list.New()},
-		limit: limit,
-	}
-}
-
-func (m *lruSyncMapCache) Del(key string) {
-	elem, hit := m.kv.Get(key)
-	if hit {
-		v := m.l.Remove(elem.(*list.Element))
-		item := v.(cacheItem)
-		m.s -= item.Size()
-		m.kv.Remove(key)
-		item.Drop()
-	}
-}
-
-func (m *lruSyncMapCache) Get(key string) (cacheItem, bool) {
-	defer m.Expire()
-	elem, hit := m.kv.Get(key)
-	if hit {
-		m.l.MoveToFront(elem.(*list.Element))
-		return elem.(*list.Element).Value.(cacheItem), true
-	}
-	return nil, false
-}
-
-func (m *lruSyncMapCache) Set(key string, val cacheItem) {
-	defer m.Expire()
-	if val == nil {
-		return
-	}
-	elem, err := m.kv.GetOrSet(key, func(_ string) (interface{}, error) {
-		m.s += val.Size()
-		return m.l.PushFront(val), nil
-	})
-	if err != nil {
-		return
-	}
-	e := elem.(*list.Element)
-	if e.Value != nil {
-		m.s -= e.Value.(cacheItem).Size()
-	}
-	e.Value = val
-	m.s += val.Size()
-	m.l.MoveToFront(e)
-}
-
-func (m *lruSyncMapCache) GetOrSet(key string, creator func(key string) (cacheItem, error)) (cacheItem, error) {
-	defer m.Expire()
-	elem, err := m.kv.GetOrSet(key, func(_ string) (interface{}, error) {
-		val, err := creator(key)
-		if err != nil {
-			return nil, err
-		}
-		m.s += val.Size()
-		ret := m.l.PushFront(val)
-		return ret, err
-	})
-	if err != nil {
-		return nil, err
-	}
-	if elem == nil {
-		log.Fatal("ERROR, err", err)
-	}
-	e := elem.(*list.Element)
-	m.l.MoveToFront(e)
-	return e.Value.(cacheItem), err
-}
-
-func (m *lruSyncMapCache) Touch(key string) {
-	m.Get(key)
-}
-
-func (m *lruSyncMapCache) Sum() int64 {
-	return m.s
-}
-
-func (m *lruSyncMapCache) Limit() int64 {
-	return m.limit
-}
-
-func (m *lruSyncMapCache) Expire() {
-	for m.s > m.limit {
-		front := m.l.Remove(m.l.Front())
-		if front == nil {
-			return
-		}
-		item := front.(cacheItem)
-		m.s -= item.Size()
-		m.kv.Remove(item.Key())
-		item.Drop()
-	}
-}
-
+// fileCacheItem is a cacheItem implementation
 type fileCacheItem struct {
 	key      string
 	fileSize int64
@@ -178,6 +54,7 @@ func (f *fileCacheItem) Key() string {
 	return f.key
 }
 
+// readAllByHead read file content
 func readAllByHead(file *os.File) ([]byte, error) {
 	offset := int64(0)
 	info, err := file.Stat()
@@ -204,6 +81,7 @@ func (f *fileCacheItem) Val() interface{} {
 	return ret
 }
 
+// writeAll write file content
 func writeAll(file *os.File, buff []byte) (int, error) {
 	offset := 0
 	err := file.Truncate(0)
@@ -218,6 +96,7 @@ func writeAll(file *os.File, buff []byte) (int, error) {
 	return offset, err
 }
 
+// newFileCacheItem constructor for fileCacheItem
 func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (*fileCacheItem, error) {
 	err := os.MkdirAll(path.Dir(key), 0755)
 	if err != nil {
@@ -258,10 +137,12 @@ func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (
 	return item, err
 }
 
+// fileCacheLRU file cache used lru policy
 type fileCacheLRU struct {
 	cache lruCache
 }
 
+// newFileCacheLRU constructor for fileCacheLRU
 func newFileCacheLRU(limit int64) *fileCacheLRU {
 	return &fileCacheLRU{newLRUCache(limit)}
 }
@@ -301,77 +182,5 @@ func (c *fileCacheLRU) Expire() {
 }
 
 func (c *fileCacheLRU) Del(key string) {
-	c.cache.Del(key)
-}
-
-type memCacheItem struct {
-	key string
-	val interface{}
-}
-
-func (f *memCacheItem) Drop() {
-}
-
-func (f *memCacheItem) Size() int64 {
-	return 1
-}
-
-func (f *memCacheItem) Key() string {
-	return f.key
-}
-
-func (f *memCacheItem) Val() interface{} {
-	return f.val
-}
-
-func newMemCacheItem(key string, val interface{}) *memCacheItem {
-	return &memCacheItem{key, val}
-}
-
-type memCacheLRU struct {
-	cache lruCache
-}
-
-func newMemCacheLRU(limit int64) *memCacheLRU {
-	return &memCacheLRU{newLRUCache(limit)}
-}
-
-func (c *memCacheLRU) Get(key string) (*memCacheItem, bool) {
-	ret, hit := c.cache.Get(key)
-	if ret == nil {
-		return nil, hit
-	}
-	return ret.(*memCacheItem), true
-}
-
-func (c *memCacheLRU) Set(key string, val *memCacheItem) {
-	c.cache.Set(key, val)
-}
-
-func (c *memCacheLRU) GetOrSet(key string, creator func(key string) (*memCacheItem, error)) (*memCacheItem, error) {
-	ret, err := c.cache.GetOrSet(key, func(key string) (cacheItem, error) { return creator(key) })
-	if ret == nil {
-		return nil, err
-	}
-	return ret.(*memCacheItem), err
-}
-
-func (c *memCacheLRU) Touch(key string) {
-	c.cache.Touch(key)
-}
-
-func (c *memCacheLRU) Sum() int64 {
-	return c.cache.Sum()
-}
-
-func (c *memCacheLRU) Limit() int64 {
-	return c.cache.Limit()
-}
-
-func (c *memCacheLRU) Expire() {
-	c.cache.Expire()
-}
-
-func (c *memCacheLRU) Del(key string) {
 	c.cache.Del(key)
 }

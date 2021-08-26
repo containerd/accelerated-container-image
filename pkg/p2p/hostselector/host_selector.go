@@ -14,12 +14,14 @@
    limitations under the License.
 */
 
-package p2p
+package hostselector
 
 import (
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/cache"
 )
 
 // HostPicker is an interface
@@ -44,7 +46,7 @@ type ChildrenManager interface {
 
 type randomHostPicker struct {
 	roots []string
-	pool  FileCachePool
+	pool  cache.FileCachePool
 }
 
 func (h *randomHostPicker) chooseRoot() string {
@@ -71,7 +73,7 @@ func (h *randomHostPicker) ResetHost(url string) {
 }
 
 // NewHostPicker creator of random host picker
-func NewHostPicker(roots []string, pool FileCachePool) HostPicker {
+func NewHostPicker(roots []string, pool cache.FileCachePool) HostPicker {
 	return &randomHostPicker{roots, pool}
 }
 

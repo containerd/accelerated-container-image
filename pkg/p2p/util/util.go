@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package p2p
+package util
 
 import (
 	"fmt"
@@ -26,6 +26,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// GetOutboundIP use detectAddr to get outbound IP
 func GetOutboundIP(detectAddr string) net.IP {
 	conn, err := net.Dial("udp", detectAddr)
 	if err != nil {
@@ -38,26 +39,23 @@ func GetOutboundIP(detectAddr string) net.IP {
 	return localAddr.IP
 }
 
+// GetRealPath get absolute path from relative
 func GetRealPath(rawPath string) string {
-	realPath, _ := filepath.Abs(rawPath)
+	realPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		log.Fatalf("Get real path fail! %s", err)
+	}
 	return realPath
 }
 
+// GetRandomString get random string
 func GetRandomString(n int) string {
 	randBytes := make([]byte, n/2)
 	rand.Read(randBytes)
 	return fmt.Sprintf("%x", randBytes)
 }
 
-func IsContain(arr []string, item string) bool {
-	for _, v := range arr {
-		if v == item {
-			return true
-		}
-	}
-	return false
-}
-
+// CheckTCPConn will connect to address to check is connect
 func CheckTCPConn(address string) bool {
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
 	if err != nil || conn == nil {
