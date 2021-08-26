@@ -54,9 +54,7 @@ func testGet(t *testing.T, proxyClient *http.Client, reqURL string) {
 	body := []byte(r.(string))
 	if Assert.Equal(len(body), len(proxyBody)) {
 		checkLen := fs.Min(100, len(body))
-		if !Assert.Equal(body[:checkLen], proxyBody[:checkLen]) {
-			t.Fatalf("checkLen: %d", checkLen)
-		}
+		Assert.Equal(body[:checkLen], proxyBody[:checkLen])
 		Assert.Equal(body[len(body)-checkLen:], proxyBody[len(body)-checkLen:])
 	}
 }
@@ -64,7 +62,7 @@ func testGet(t *testing.T, proxyClient *http.Client, reqURL string) {
 var (
 	transportMap = &sync.Map{}
 	rootCAs      *x509.CertPool
-	lock         = &sync.Mutex{}
+	lock         sync.Mutex
 )
 
 func getClient(t *testing.T, proxyAddress string) *http.Client {
