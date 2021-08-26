@@ -64,7 +64,7 @@ func newRemoteSource(req *http.Request, hp hostselector.HostPicker, APIKey strin
 		apikey: APIKey,
 		transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			MaxIdleConns:    100,
+			MaxConnsPerHost: 100,
 		},
 	}
 }

@@ -366,7 +366,7 @@ func NewP2PServer(config *Config) *Server {
 		cm:     hostselector.NewLimitedChildrenManager(2, 1*time.Minute),
 		transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			MaxIdleConns:    100,
+			MaxConnsPerHost: 100,
 		},
 	}
 }
