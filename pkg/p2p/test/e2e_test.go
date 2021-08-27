@@ -29,7 +29,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/fs"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -51,7 +53,7 @@ func testGet(t *testing.T, proxyClient *http.Client, reqURL string) {
 	}
 	body := []byte(r.(string))
 	if Assert.Equal(len(body), len(proxyBody)) {
-		checkLen := p2p.Min(100, len(body))
+		checkLen := fs.Min(100, len(body))
 		if !Assert.Equal(body[:checkLen], proxyBody[:checkLen]) {
 			t.Fatalf("checkLen: %d", checkLen)
 		}
@@ -94,7 +96,7 @@ func getClient(t *testing.T, proxyAddress string) *http.Client {
 
 func testProxy(t *testing.T, serverList, httpServerList, httpsServerList []*http.Server) {
 	for i := 0; i < 10; i++ {
-		filename := p2p.GetRandomString(64)
+		filename := util.GetRandomString(64)
 		for j := 0; j < 10; j++ {
 			wg.Add(1)
 			go func(filename string) {

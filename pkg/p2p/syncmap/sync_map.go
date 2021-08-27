@@ -14,33 +14,42 @@
    limitations under the License.
 */
 
-package p2p
+package syncmap
 
 import (
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
-type syncMap interface {
+// SyncMap is similar as sync.Map and add GetOrSet by creator
+type SyncMap interface {
+	// Get item from SyncMap
 	Get(key string) (interface{}, bool)
+	// Set item to SyncMap
 	Set(key string, val interface{})
+	// GetOrSet get item first, if not found, it will use creator to create one and return
 	GetOrSet(key string, creator func(key string) (interface{}, error)) (interface{}, error)
+	// Remove item from SyncMap
 	Remove(key string)
 }
 
+// rwSyncMapItem is RwSyncMap item
 type rwSyncMapItem struct {
 	val interface{}
 	mtx sync.RWMutex
 }
 
-type rwSyncMap struct {
-	syncMap
+// RwSyncMap is a SyncMap implementation
+type RwSyncMap struct {
 	kv   map[string]*rwSyncMapItem
 	lock sync.RWMutex
 }
 
-func (m *rwSyncMap) Get(key string) (interface{}, bool) {
+// NewSyncMap constructor for SyncMap
+func NewSyncMap() SyncMap {
+	return &RwSyncMap{kv: make(map[string]*rwSyncMapItem)}
+}
+
+func (m *RwSyncMap) Get(key string) (interface{}, bool) {
 	m.lock.RLock()
 	val, hit := m.kv[key]
 	m.lock.RUnlock()
@@ -55,7 +64,7 @@ func (m *rwSyncMap) Get(key string) (interface{}, bool) {
 	return val.val, true
 }
 
-func (m *rwSyncMap) Set(key string, val interface{}) {
+func (m *RwSyncMap) Set(key string, val interface{}) {
 	if val == nil {
 		return
 	}
@@ -64,18 +73,15 @@ func (m *rwSyncMap) Set(key string, val interface{}) {
 	m.kv[key] = &rwSyncMapItem{val: val}
 }
 
-func (m *rwSyncMap) Remove(key string) {
+func (m *RwSyncMap) Remove(key string) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	delete(m.kv, key)
 }
 
-func (m *rwSyncMap) GetOrSet(key string, creator func(key string) (interface{}, error)) (interface{}, error) {
+func (m *RwSyncMap) GetOrSet(key string, creator func(key string) (interface{}, error)) (interface{}, error) {
 	ret, hit := m.Get(key)
 	if hit {
-		if ret == nil {
-			log.Fatal("Store nil")
-		}
 		return ret, nil
 	}
 	m.lock.Lock()

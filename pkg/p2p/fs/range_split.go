@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package p2p
+package fs
 
 import "errors"
 
@@ -32,7 +32,7 @@ type RangeSegment struct {
 	Count  int
 }
 
-// NewRangeSplit creator for RangeSplit
+// NewRangeSplit is creator for RangeSplit
 func NewRangeSplit(offset int64, step int, size int64, maxsize int64) RangeSplit {
 	if (step & (step - 1)) > 0 {
 		panic(errors.New("step must be power of 2"))
@@ -40,6 +40,7 @@ func NewRangeSplit(offset int64, step int, size int64, maxsize int64) RangeSplit
 	return RangeSplit{offset, step, Min64(offset+size, maxsize)}
 }
 
+// AlignDown will align down the x by align
 func AlignDown(x int64, align int64) int64 {
 	return x / align * align
 }

@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package p2p
+package server
 
 import (
 	"crypto/rand"
@@ -28,15 +28,18 @@ import (
 	"net"
 	"time"
 
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/syncmap"
+
 	log "github.com/sirupsen/logrus"
 )
 
 var (
 	defaultRootCA  *x509.Certificate
 	defaultRootKey *rsa.PrivateKey
-	CACache        = &rwSyncMap{kv: make(map[string]*rwSyncMapItem)}
+	CACache        = syncmap.NewSyncMap()
 )
 
+// GetRootCA get root CA, if not found will create
 func GetRootCA(certPath, certKeyPath string, isGenerateCert bool) *tls.Certificate {
 	success, cert, key := loadRootCA(certPath, certKeyPath)
 	if !success {
@@ -57,6 +60,7 @@ func GetRootCA(certPath, certKeyPath string, isGenerateCert bool) *tls.Certifica
 	return &keyPair
 }
 
+// loadRootCA load root CA from disk
 func loadRootCA(certPath, certKeyPath string) (bool, []byte, []byte) {
 	cert, err := ioutil.ReadFile(certPath)
 	if err != nil {
@@ -71,12 +75,13 @@ func loadRootCA(certPath, certKeyPath string) (bool, []byte, []byte) {
 	return true, cert, key
 }
 
+// generateRootCA generate root CA
 func generateRootCA() ([]byte, []byte) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		log.Fatalf("Generate private key fail! %s", err)
 	}
-	template := CertificateTemplate(true, "dadip2p")
+	template := certificateTemplate(true, "dadip2p")
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
 	if err != nil {
 		log.Fatalf("Create Root CA fail! %s", err)
@@ -86,6 +91,7 @@ func generateRootCA() ([]byte, []byte) {
 	return cert, key
 }
 
+// saveRootCA save root CA to disk
 func saveRootCA(cert, key []byte, certPath, certKeyPath string) {
 	if err := ioutil.WriteFile(certPath, cert, 0755); err != nil {
 		log.Fatalf("Save Root CA %s fail! %s", certPath, err)
@@ -95,6 +101,7 @@ func saveRootCA(cert, key []byte, certPath, certKeyPath string) {
 	}
 }
 
+// parserRootCA parser root CA
 func parserRootCA(cert, key []byte) {
 	certBlock, _ := pem.Decode(cert)
 	keyBlock, _ := pem.Decode(key)
@@ -113,12 +120,14 @@ func parserRootCA(cert, key []byte) {
 	}
 }
 
+// generateTLSConfig generate tls config from host
 func generateTLSConfig(host string) *tls.Config {
 	return &tls.Config{
 		Certificates: []tls.Certificate{*getCertificate(host)},
 	}
 }
 
+// getCertificate get certificate from host
 func getCertificate(host string) *tls.Certificate {
 	cert, _ := CACache.GetOrSet(host, func(key string) (interface{}, error) {
 		keyPair, err := tls.X509KeyPair(GenerateCertificate(key))
@@ -131,8 +140,9 @@ func getCertificate(host string) *tls.Certificate {
 	return cert.(*tls.Certificate)
 }
 
+// GenerateCertificate generate certificate from host
 func GenerateCertificate(host string) ([]byte, []byte) {
-	template := CertificateTemplate(false, host)
+	template := certificateTemplate(false, host)
 	derBytes, err := x509.CreateCertificate(rand.Reader, template, defaultRootCA, &defaultRootKey.PublicKey, defaultRootKey)
 	if err != nil {
 		log.Fatalf("Create certificate fail! %s", err)
@@ -142,7 +152,8 @@ func GenerateCertificate(host string) ([]byte, []byte) {
 	return cert, key
 }
 
-func CertificateTemplate(isCA bool, host string) *x509.Certificate {
+// certificateTemplate template for generate certificate
+func certificateTemplate(isCA bool, host string) *x509.Certificate {
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{

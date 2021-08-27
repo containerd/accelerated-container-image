@@ -14,45 +14,55 @@
    limitations under the License.
 */
 
-package p2p
+package synclist
 
 import (
 	"container/list"
 	"sync"
 )
 
-type syncList interface {
+// SyncList is thread(routine) safe list
+type SyncList interface {
+	// PushFront push value to list front and return list.Element
 	PushFront(v interface{}) *list.Element
+	// Remove the list.Element
 	Remove(e *list.Element) interface{}
+	// MoveToFront move the list.Element to list front
 	MoveToFront(e *list.Element)
+	// Front get the list front
 	Front() *list.Element
 }
 
-type rwSyncList struct {
-	syncList
+// RwSyncList is a SyncList implementation
+type RwSyncList struct {
 	l    *list.List
 	lock sync.RWMutex
 }
 
-func (m *rwSyncList) PushFront(item interface{}) *list.Element {
+// NewSyncList constructor for SyncList
+func NewSyncList() SyncList {
+	return &RwSyncList{l: list.New()}
+}
+
+func (m *RwSyncList) PushFront(item interface{}) *list.Element {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return m.l.PushFront(item)
 }
 
-func (m *rwSyncList) Remove(e *list.Element) interface{} {
+func (m *RwSyncList) Remove(e *list.Element) interface{} {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	return m.l.Remove(e)
 }
 
-func (m *rwSyncList) MoveToFront(e *list.Element) {
+func (m *RwSyncList) MoveToFront(e *list.Element) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.l.MoveToFront(e)
 }
 
-func (m *rwSyncList) Front() *list.Element {
+func (m *RwSyncList) Front() *list.Element {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	return m.l.Front()
