@@ -87,7 +87,7 @@ func getClient(t *testing.T, proxyAddress string) *http.Client {
 		TLSClientConfig: &tls.Config{
 			RootCAs: rootCAs,
 		},
-		MaxIdleConns: 100,
+		MaxConnsPerHost: 100,
 	})
 	return &http.Client{
 		Transport: proxyTransport.(*http.Transport),
