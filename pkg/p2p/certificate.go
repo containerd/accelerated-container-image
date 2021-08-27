@@ -34,7 +34,7 @@ import (
 var (
 	defaultRootCA  *x509.Certificate
 	defaultRootKey *rsa.PrivateKey
-	CACache        = make(map[string]*tls.Certificate)
+	CACache        = &rwSyncMap{kv: make(map[string]*rwSyncMapItem)}
 )
 
 func GetRootCA(certPath, certKeyPath string, isGenerateCert bool) *tls.Certificate {
@@ -120,16 +120,15 @@ func generateTLSConfig(host string) *tls.Config {
 }
 
 func getCertificate(host string) *tls.Certificate {
-	cert, ok := CACache[host]
-	if ok {
-		return cert
-	}
-	keyPair, err := tls.X509KeyPair(GenerateCertificate(host))
-	if err != nil {
-		log.Fatalf("Parser certificate fail! %s", err)
-	}
-	CACache[host] = &keyPair
-	return &keyPair
+	cert, _ := CACache.GetOrSet(host, func(key string) (interface{}, error) {
+		keyPair, err := tls.X509KeyPair(GenerateCertificate(key))
+		if err != nil {
+			log.Errorf("Parser certificate fail! %s", err)
+			return nil, err
+		}
+		return &keyPair, nil
+	})
+	return cert.(*tls.Certificate)
 }
 
 func GenerateCertificate(host string) ([]byte, []byte) {

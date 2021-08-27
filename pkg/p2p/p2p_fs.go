@@ -17,12 +17,14 @@
 package p2p
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -38,13 +40,21 @@ type RemoteFetcher interface {
 }
 
 type remoteSource struct {
-	req    *http.Request
-	hp     HostPicker
-	apikey string
+	req       *http.Request
+	hp        HostPicker
+	apikey    string
+	transport *http.Transport
 }
 
 func newRemoteSource(req *http.Request, hp HostPicker, APIKey string) RemoteFetcher {
-	return &remoteSource{req, hp, APIKey}
+	return &remoteSource{
+		req, hp, APIKey, &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+			MaxIdleConns: 100,
+		},
+	}
 }
 
 func (f *remoteSource) PreadRemote(buff []byte, offset int64) (int, error) {
@@ -64,8 +74,12 @@ func (f *remoteSource) PreadRemote(buff []byte, offset int64) (int, error) {
 		newReq.Header[k] = vv2
 	}
 	newReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", offset, int64(len(buff))+offset-1))
-	log.Infof("Fetching remote %s %s ", fn, newReq.Header.Get("Range"))
-	resp, err := http.DefaultClient.Do(newReq)
+	log.Infof("Fetching remote %s %s", fn, newReq.Header.Get("Range"))
+	client := http.Client{
+		Transport: f.transport,
+		Timeout:   10 * time.Second,
+	}
+	resp, err := client.Do(newReq)
 	if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 206) {
 		log.Error(resp, err)
 		return 0, FetchFailure{resp, err}
@@ -103,7 +117,11 @@ func (f *remoteSource) FstatRemote() (int64, error) {
 	}
 	newReq.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", 0, 0))
 	newReq.Header.Del("X-P2P-Agent")
-	resp, err := http.DefaultClient.Do(newReq)
+	client := http.Client{
+		Transport: f.transport,
+		Timeout:   10 * time.Second,
+	}
+	resp, err := client.Do(newReq)
 	if err != nil || (resp.StatusCode != 200 && resp.StatusCode != 206) {
 		return 0, FetchFailure{resp, err}
 	}
@@ -169,8 +187,8 @@ func (r *PFile) ReadAt(buff []byte, offset int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	left := alignDown(offset, int64(cacheBlockSize))
-	supposeLen := int(min64(int64(cacheBlockSize), fileSize-left))
+	left := AlignDown(offset, int64(cacheBlockSize))
+	supposeLen := int(Min64(int64(cacheBlockSize), fileSize-left))
 	retry := false
 again:
 	data, err := r.fs.cache.GetOrRefill(r.path, left, supposeLen, func() ([]byte, error) {
@@ -194,7 +212,7 @@ again:
 		return 0, err
 	}
 	pos := int(offset - left)
-	ret := min(len(buff), len(data)-pos)
+	ret := Min(len(buff), len(data)-pos)
 	ret = copy(buff[:ret], data[pos:pos+ret])
 	if offset+int64(len(buff)) > fileSize {
 		err = io.EOF
@@ -279,7 +297,7 @@ func (fs FS) prefetcher() {
 				}
 				return data, nil
 			}); err != nil {
-				log.Warnf("GetOrRefill %s fail!", seg.fn)
+				log.Warnf("GetOrRefill %s fail! %s", seg.fn, err)
 			}
 		}
 	}()

@@ -43,6 +43,8 @@ type ServerConfig struct {
 	Fs *FS
 	// IsRoot set if server is root, will not fetch by p2p if it is a root
 	IsRoot bool
+	// ProxyHTTPS set if proxy by https
+	ProxyHTTPS bool
 }
 
 // Server object for p2p and proxy
@@ -54,8 +56,12 @@ type Server struct {
 
 // ServeHTTP as HTTP handler
 func (s Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.Method == http.MethodConnect { //https
-		s.httpsHandler(w, req)
+	if req.Method == http.MethodConnect {
+		if s.config.ProxyHTTPS {
+			s.httpsHandler(w, req)
+		} else {
+			s.connectHandler(w, req)
+		}
 	} else {
 		s.httpHandler(w, req)
 	}
@@ -116,6 +122,48 @@ func (s Server) httpsHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+}
+
+func (s Server) connectHandler(w http.ResponseWriter, req *http.Request) {
+	host := req.URL.Host
+	if match, err := regexp.MatchString(`.*:\d+`, host); !match && err == nil {
+		host += ":80"
+	}
+	targetSiteCon, err := net.Dial("tcp", host)
+	if err != nil {
+		log.Error("Failed to connect ", host)
+		http.Error(w, "Connect fail!", http.StatusNotFound)
+		return
+	}
+	h, ok := w.(http.Hijacker)
+	if !ok {
+		log.Error("Failed get client connection")
+		http.Error(w, "Webserver failed to hijacking", http.StatusInternalServerError)
+		return
+	}
+	proxyClient, _, err := h.Hijack()
+	if err != nil {
+		http.Error(w, "Webserver failed to hijacking", http.StatusInternalServerError)
+		return
+	}
+	log.Debugf("Accepting CONNECT to %s", host)
+	if _, err := proxyClient.Write([]byte("HTTP/1.0 200 OK\r\n\r\n")); err != nil {
+		log.Errorf("")
+	}
+	go copyAndClose(targetSiteCon.(*net.TCPConn), proxyClient.(*net.TCPConn))
+	go copyAndClose(proxyClient.(*net.TCPConn), targetSiteCon.(*net.TCPConn))
+}
+
+type closableReadWriter interface {
+	net.Conn
+	CloseWrite() error
+	CloseRead() error
+}
+
+func copyAndClose(dst closableReadWriter, src closableReadWriter) {
+	_, _ = io.Copy(dst, src)
+	_ = src.CloseRead()
+	_ = dst.CloseWrite()
 }
 
 func (s Server) p2pHandler(w http.ResponseWriter, req *http.Request) {
@@ -236,14 +284,17 @@ func (s Server) proxyHTTPHandler(w http.ResponseWriter, req *http.Request) error
 	if err != nil {
 		return err
 	}
-	log.Warnf("Proxy to %s", u)
 	proxy := httputil.NewSingleHostReverseProxy(u)
+	proxy.Transport = s.transport
 	proxy.ServeHTTP(w, req)
 	return nil
 }
 
 func (s Server) proxyHTTPSHandler(w *tls.Conn, req *http.Request) error {
 	resp, err := s.transport.RoundTrip(req)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if err != nil {
 		return err
 	}
@@ -251,7 +302,6 @@ func (s Server) proxyHTTPSHandler(w *tls.Conn, req *http.Request) error {
 	if err != nil {
 		return err
 	}
-	_ = resp.Body.Close()
 	return nil
 }
 
@@ -261,9 +311,14 @@ func NewP2PServer(config *ServerConfig) *Server {
 		config.APIKey = "dadip2p"
 	}
 	ret := Server{
-		config:    config,
-		cm:        NewLimitedChildrenManager(2, time.Minute),
-		transport: new(http.Transport),
+		config: config,
+		cm:     NewLimitedChildrenManager(2, time.Minute),
+		transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+			MaxIdleConns: 100,
+		},
 	}
 	return &ret
 }
