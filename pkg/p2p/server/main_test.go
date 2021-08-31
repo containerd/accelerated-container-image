@@ -14,22 +14,17 @@
    limitations under the License.
 */
 
-package test
+package server
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p/server"
-
 	log "github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
 )
 
 func setup() {
@@ -40,8 +35,8 @@ func setup() {
 }
 
 func teardown() {
-	if err := os.RemoveAll(server.Media); err != nil {
-		fmt.Printf("Remove %s failed! %s", server.Media, err)
+	if err := os.RemoveAll(Media); err != nil {
+		fmt.Printf("Remove %s failed! %s", Media, err)
 	}
 }
 
@@ -51,21 +46,4 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	teardown()
 	os.Exit(code)
-}
-
-func TestDockerPull(t *testing.T) {
-	Assert := assert.New(t)
-	serverList := server.StartServers(1, 2, true, true)
-	for _, p2pServer := range serverList {
-		port, _ := strconv.Atoi(p2pServer.Addr[1:])
-		port += 100
-		server.ConfigureDocker(fmt.Sprintf(":%d", port))
-		_, code := server.ExecuteCmd(true, "docker", "pull", "wordpress")
-		Assert.Equal(0, code)
-		server.ExecuteCmd(true, "docker", "rmi", "-f", "wordpress")
-		server.ExecuteCmd(true, "docker", "image", "prune", "-f")
-	}
-	for _, p2pServer := range serverList {
-		_ = p2pServer.Shutdown(context.TODO())
-	}
 }

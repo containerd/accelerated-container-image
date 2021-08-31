@@ -14,9 +14,13 @@
    limitations under the License.
 */
 
-package fs
+package rangesplit
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
+)
 
 // RangeSplit utility for split range into segments
 type RangeSplit struct {
@@ -37,7 +41,7 @@ func NewRangeSplit(offset int64, step int, size int64, maxsize int64) RangeSplit
 	if (step & (step - 1)) > 0 {
 		panic(errors.New("step must be power of 2"))
 	}
-	return RangeSplit{offset, step, Min64(offset+size, maxsize)}
+	return RangeSplit{offset, step, util.Min64(offset+size, maxsize)}
 }
 
 // AlignDown will align down the x by align
@@ -45,35 +49,14 @@ func AlignDown(x int64, align int64) int64 {
 	return x / align * align
 }
 
-func Max64(x, y int64) int64 {
-	if x > y {
-		return x
-	}
-	return y
-}
-
-func Min64(x, y int64) int64 {
-	if x < y {
-		return x
-	}
-	return y
-}
-
-func Min(x, y int) int {
-	if x < y {
-		return x
-	}
-	return y
-}
-
 // AllParts provides a channel as iterable object to range segments
 func (r RangeSplit) AllParts() chan RangeSegment {
 	ch := make(chan RangeSegment)
 	go func() {
 		for i := AlignDown(r.offset, int64(r.step)); i < r.size; i += int64(r.step) {
-			absOffset := Max64(i, r.offset)
+			absOffset := util.Max64(i, r.offset)
 			seg := RangeSegment{Index: i, Offset: absOffset - i}
-			seg.Count = int(Min64(i+int64(r.step), r.size) - absOffset)
+			seg.Count = int(util.Min64(i+int64(r.step), r.size) - absOffset)
 			if seg.Count > 0 {
 				ch <- seg
 			}

@@ -14,29 +14,28 @@
    limitations under the License.
 */
 
-package test
+package cache
 
 import (
 	"math/rand"
 	"runtime"
 	"testing"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p/cache"
-	"github.com/alibaba/accelerated-container-image/pkg/p2p/fs"
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/rangesplit"
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func testCacheGetOrRefillHelper(t *testing.T, config *cache.Config) {
+func testCacheGetOrRefillHelper(t *testing.T, config *Config) {
 	t.Helper()
 	Assert := assert.New(t)
-	c := cache.NewCachePool(config)
+	c := NewCachePool(config)
 	for i := 0; i < 100; i++ {
 		fileName := util.GetRandomString(10)
-		fileContent := []byte(getData())
+		fileContent := []byte(GetData())
 		for j := 0; j < 10; j++ {
-			for seg := range fs.NewRangeSplit(0, 128*1024, int64(len(fileContent)), int64(len(fileContent))).AllParts() {
+			for seg := range rangesplit.NewRangeSplit(0, 128*1024, int64(len(fileContent)), int64(len(fileContent))).AllParts() {
 				wg.Add(1)
 				go func(offset int64, size int) {
 					defer wg.Done()
@@ -45,7 +44,7 @@ func testCacheGetOrRefillHelper(t *testing.T, config *cache.Config) {
 					})
 					if Assert.Equal(nil, err) && Assert.Equal(size, len(res)) {
 						expected := fileContent[offset : offset+int64(size)]
-						checkLen := fs.Min(100, size)
+						checkLen := util.Min(100, size)
 						Assert.Equal(expected[:checkLen], res[:checkLen])
 						Assert.Equal(expected[len(res)-checkLen:], res[len(res)-checkLen:])
 					}
@@ -58,17 +57,16 @@ func testCacheGetOrRefillHelper(t *testing.T, config *cache.Config) {
 }
 
 func TestCacheGetOrRefill(t *testing.T) {
-	testCacheGetOrRefillHelper(t, &cache.Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &cache.Config{CacheSize: 90 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &cache.Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &cache.Config{CacheSize: 1 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &cache.Config{CacheSize: 0, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 0, MaxEntry: 0, CacheMedia: media})
 }
 
-func testCacheGetPutHostHelper(t *testing.T, config *cache.Config) {
+func testCacheGetPutHostHelper(t *testing.T, config *Config) {
 	t.Helper()
 	Assert := assert.New(t)
-	c := cache.NewCachePool(config)
+	c := NewCachePool(config)
 	for i := 0; i < 1000; i++ {
 		wg.Add(1)
 		go func() {
@@ -98,13 +96,13 @@ func testCacheGetPutHostHelper(t *testing.T, config *cache.Config) {
 }
 
 func TestCacheGetPutHost(t *testing.T) {
-	testCacheGetPutHostHelper(t, &cache.Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutHostHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }
 
-func testCacheGetPutLengthHelper(t *testing.T, config *cache.Config) {
+func testCacheGetPutLengthHelper(t *testing.T, config *Config) {
 	t.Helper()
 	Assert := assert.New(t)
-	c := cache.NewCachePool(config)
+	c := NewCachePool(config)
 	for i := 0; i < 1000; i++ {
 		wg.Add(1)
 		go func() {
@@ -128,5 +126,5 @@ func testCacheGetPutLengthHelper(t *testing.T, config *cache.Config) {
 }
 
 func TestCacheGetPutLength(t *testing.T) {
-	testCacheGetPutLengthHelper(t, &cache.Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutLengthHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }

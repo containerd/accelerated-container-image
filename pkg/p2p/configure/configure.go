@@ -27,81 +27,96 @@ import (
 
 // DeployConfig is server config
 type DeployConfig struct {
-	LogLevel       string
+	LogLevel    string
+	APIKey      string
+	ProxyConfig ProxyConfig
+	P2PConfig   P2PConfig
+}
+
+type ProxyConfig struct {
+	Port       int
+	ProxyHTTPS bool
+	CertConfig CertConfig
+}
+
+type P2PConfig struct {
 	RunMode        string
 	RootList       []string
 	NodeIP         string
 	DetectAddr     string
 	ServeBySSL     bool
 	Port           int
-	CertConfig     DeployCertConfig
-	CacheConfig    DeployCacheConfig
-	PrefetchConfig DeployPrefetchConfig
+	MyAddr         string // not in yaml
+	CacheConfig    CacheConfig
+	PrefetchConfig PrefetchConfig
 }
 
-type DeployCertConfig struct {
-	CertEnable   bool
-	GenerateCert bool
+type CertConfig struct {
+	GenerateCert bool // not in yaml
 	CertPath     string
 	KeyPath      string
 }
 
-type DeployCacheConfig struct {
-	FileCacheEnable bool
-	FileCacheSize   int64
-	FileCachePath   string
-	MemCacheEnable  bool
-	MemCacheSize    int64
+type CacheConfig struct {
+	FileCacheSize int64
+	FileCachePath string
+	MemCacheSize  int64
 }
 
-type DeployPrefetchConfig struct {
+type PrefetchConfig struct {
 	PrefetchEnable bool
 	PrefetchThread int
 }
 
 // CheckConfig used to check config and fix some configuration
 func CheckConfig(config *DeployConfig) {
-	// run mode
-	if config.RunMode != "root" && config.RunMode != "agent" {
-		log.Fatalf("Unexpected run mode %s!", config.RunMode)
+	// deploy
+	{
+		// log level
+		level, err := log.ParseLevel(config.LogLevel)
+		if err != nil {
+			log.Warnf("Log level %s parse fail! Use info level instead.", config.LogLevel)
+			level = log.InfoLevel
+		}
+		log.SetLevel(level)
 	}
-	// prefetch
-	if !config.PrefetchConfig.PrefetchEnable {
-		config.PrefetchConfig.PrefetchThread = 0
+	// proxy
+	{
+		// cert
+		if config.ProxyConfig.ProxyHTTPS {
+			config.ProxyConfig.CertConfig.CertPath = util.GetRealPath(config.ProxyConfig.CertConfig.CertPath)
+			config.ProxyConfig.CertConfig.KeyPath = util.GetRealPath(config.ProxyConfig.CertConfig.KeyPath)
+		}
 	}
-	// file cache
-	if !config.CacheConfig.FileCacheEnable {
-		config.CacheConfig.FileCacheSize = 0
-	}
-	// memory size
-	if !config.CacheConfig.MemCacheEnable {
-		config.CacheConfig.MemCacheSize = 0
-	}
-	// certificate
-	if config.CertConfig.CertEnable {
-		config.CertConfig.CertPath = util.GetRealPath(config.CertConfig.CertPath)
-		config.CertConfig.KeyPath = util.GetRealPath(config.CertConfig.KeyPath)
-	}
-	// cache media
-	if config.CacheConfig.FileCacheEnable {
-		config.CacheConfig.FileCachePath = util.GetRealPath(config.CacheConfig.FileCachePath)
-	}
-	// nodeIP
-	if config.NodeIP == "" {
-		config.NodeIP = util.GetOutboundIP(config.DetectAddr).String()
-	}
-	// log
-	level, err := log.ParseLevel(config.LogLevel)
-	if err != nil {
-		level = log.InfoLevel
-	}
-	log.SetLevel(level)
-	// root list
-	for idx := range config.RootList {
-		if !config.ServeBySSL {
-			config.RootList[idx] = fmt.Sprintf("http://%s", config.RootList[idx])
+	// p2p
+	{
+		// run mode
+		if config.P2PConfig.RunMode != "root" && config.P2PConfig.RunMode != "agent" {
+			log.Fatalf("Unexpected run mode %s!", config.P2PConfig.RunMode)
+		}
+		// prefetch
+		if !config.P2PConfig.PrefetchConfig.PrefetchEnable {
+			config.P2PConfig.PrefetchConfig.PrefetchThread = 0
+		}
+		// cache
+		config.P2PConfig.CacheConfig.FileCachePath = util.GetRealPath(config.P2PConfig.CacheConfig.FileCachePath)
+		// nodeIP
+		if config.P2PConfig.NodeIP == "" {
+			config.P2PConfig.NodeIP = util.GetOutboundIP(config.P2PConfig.DetectAddr).String()
+		}
+		// my addr
+		if !config.P2PConfig.ServeBySSL {
+			config.P2PConfig.MyAddr = fmt.Sprintf("http://%s:%d", config.P2PConfig.NodeIP, config.P2PConfig.Port)
 		} else {
-			config.RootList[idx] = fmt.Sprintf("https://%s", config.RootList[idx])
+			config.P2PConfig.MyAddr = fmt.Sprintf("https://%s:%d", config.P2PConfig.NodeIP, config.P2PConfig.Port)
+		}
+		// root list
+		for idx := range config.P2PConfig.RootList {
+			if !config.P2PConfig.ServeBySSL {
+				config.P2PConfig.RootList[idx] = fmt.Sprintf("http://%s", config.P2PConfig.RootList[idx])
+			} else {
+				config.P2PConfig.RootList[idx] = fmt.Sprintf("https://%s", config.P2PConfig.RootList[idx])
+			}
 		}
 	}
 }

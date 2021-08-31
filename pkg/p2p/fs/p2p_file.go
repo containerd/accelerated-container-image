@@ -19,6 +19,10 @@ package fs
 import (
 	"io"
 
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
+
+	"github.com/alibaba/accelerated-container-image/pkg/p2p/rangesplit"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -70,8 +74,8 @@ func (r *P2PFile) ReadAt(buff []byte, offset int64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	left := AlignDown(offset, int64(cacheBlockSize))
-	supposeLen := int(Min64(int64(cacheBlockSize), fileSize-left))
+	left := rangesplit.AlignDown(offset, int64(cacheBlockSize))
+	supposeLen := int(util.Min64(int64(cacheBlockSize), fileSize-left))
 	retry := false
 again:
 	data, err := r.fs.cache.GetOrRefill(r.path, left, supposeLen, func() ([]byte, error) {
@@ -95,7 +99,7 @@ again:
 		return 0, err
 	}
 	pos := int(offset - left)
-	ret := Min(len(buff), len(data)-pos)
+	ret := util.Min(len(buff), len(data)-pos)
 	ret = copy(buff[:ret], data[pos:pos+ret])
 	if offset+int64(len(buff)) > fileSize {
 		err = io.EOF
@@ -110,7 +114,7 @@ func (r *P2PFile) Prefetch(offset int64, count int64) {
 		if err != nil {
 			return
 		}
-		for seg := range NewRangeSplit(offset, cacheBlockSize, count, fileSize).AllParts() {
+		for seg := range rangesplit.NewRangeSplit(offset, cacheBlockSize, count, fileSize).AllParts() {
 			r.fs.preTask <- prefetchTask{
 				fn:     r.path,
 				rf:     r.Source,
