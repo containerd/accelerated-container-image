@@ -253,7 +253,6 @@ func configureCA(t *testing.T) {
 	} else {
 		t.Fatalf("Unknown system!")
 	}
-
 }
 
 func configureDocker(t *testing.T, proxyAddress string) {
