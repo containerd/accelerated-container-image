@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package server
+package certificate
 
 import (
 	"crypto/rand"
@@ -28,15 +28,12 @@ import (
 	"net"
 	"time"
 
-	"github.com/alibaba/accelerated-container-image/pkg/p2p/syncmap"
-
 	log "github.com/sirupsen/logrus"
 )
 
 var (
 	defaultRootCA  *x509.Certificate
 	defaultRootKey *rsa.PrivateKey
-	CACache        = syncmap.NewSyncMap()
 )
 
 // GetRootCA get root CA, if not found will create
@@ -118,26 +115,6 @@ func parserRootCA(cert, key []byte) {
 	if defaultRootKey, err = x509.ParsePKCS1PrivateKey(keyBlock.Bytes); err != nil {
 		log.Fatalf("Parser Root CA key fail! %s", err)
 	}
-}
-
-// generateTLSConfig generate tls config from host
-func generateTLSConfig(host string) *tls.Config {
-	return &tls.Config{
-		Certificates: []tls.Certificate{*getCertificate(host)},
-	}
-}
-
-// getCertificate get certificate from host
-func getCertificate(host string) *tls.Certificate {
-	cert, _ := CACache.GetOrSet(host, func(key string) (interface{}, error) {
-		keyPair, err := tls.X509KeyPair(GenerateCertificate(key))
-		if err != nil {
-			log.Errorf("Parser certificate fail! %s", err)
-			return nil, err
-		}
-		return &keyPair, nil
-	})
-	return cert.(*tls.Certificate)
 }
 
 // GenerateCertificate generate certificate from host

@@ -18,6 +18,7 @@ package main
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/server"
@@ -35,9 +36,23 @@ var (
 		Short: "Dadi p2p is a file distribution service using P2P protocol.",
 		Long:  `Dadi p2p is a file distribution service using P2P protocol. The main purpose is to accelerate the image's layer download.`,
 		Run: func(cmd *cobra.Command, args []string) {
+			if len(cfgFile) == 0 {
+				_ = cmd.Help()
+				return
+			}
 			config := configure.InitConfig(cfgFile)
 			configure.CheckConfig(config)
-			server.Execute(config, true)
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				server.StartProxyServer(config, true)
+			}()
+			go func() {
+				defer wg.Done()
+				server.StartP2PServer(config, true)
+			}()
+			wg.Wait()
 		},
 	}
 	cfgFile string
@@ -47,14 +62,16 @@ func init() {
 	// set seed
 	rand.Seed(time.Now().UnixNano())
 	// cfg
-	rootCmd.Flags().StringVarP(&cfgFile, "cfgFile", "c", "dadip2p.yaml", "Config file (default is dadip2p.yaml)")
+	rootCmd.Flags().StringVarP(&cfgFile, "cfgFile", "c", "", "config file path(template is dadip2p.yaml)")
 	// flag
-	rootCmd.Flags().BoolP("generate-cert", "", false, "Is auto generate cert")
-	bindFlag("CertConfig.GenerateCert", "generate-cert")
-	rootCmd.Flags().StringP("log-level", "l", "info", "Log level, debug | info | warn | error | panic")
+	rootCmd.Flags().BoolP("generate-cert", "", false, "is auto generate cert")
+	bindFlag("ProxyConfig.CertConfig.GenerateCert", "generate-cert")
+	rootCmd.Flags().StringP("log-level", "l", "info", "log level, debug | info | warn | error | panic")
 	bindFlag("LogLevel", "log-level")
-	rootCmd.Flags().IntP("port", "p", 19145, "Port")
-	bindFlag("Port", "port")
+	rootCmd.Flags().IntP("proxy-port", "", 19245, "proxy server port")
+	bindFlag("ProxyConfig.Port", "proxy-port")
+	rootCmd.Flags().IntP("p2p-port", "", 19145, "p2p server port")
+	bindFlag("P2PConfig.Port", "p2p-port")
 }
 
 func bindFlag(configName, flagName string) {
