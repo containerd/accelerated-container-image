@@ -136,7 +136,7 @@ func StartServers(root, agent int, serveBySSL, proxyHTTPS bool) []*http.Server {
 		port++
 	}
 	// set level there!!!
-	log.SetLevel(log.InfoLevel)
+	log.SetLevel(log.DebugLevel)
 	return res
 }
 

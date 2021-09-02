@@ -36,7 +36,7 @@ var wg sync.WaitGroup
 
 func setup() {
 	rand.Seed(time.Now().UnixNano())
-	log.SetLevel(log.InfoLevel)
+	log.SetLevel(log.DebugLevel)
 	// ignore test.root
 	flag.Bool("test.root", false, "")
 }
