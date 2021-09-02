@@ -60,30 +60,26 @@ func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fe
 	var item *fileCacheItem
 	{
 		c.lock.Lock()
-		defer c.lock.Unlock()
 		var ok bool
 		item, ok = c.cache.Get(key)
 		if !ok {
-			item = &fileCacheItem{}
+			item = &fileCacheItem{fileSize: int64(count)}
 			c.cache.Set(key, item)
 		}
+		c.lock.Unlock()
 	}
 	var value []byte
-	{
-		item.lock.Lock()
-		defer item.lock.Unlock()
-		if item.file != nil {
-			value = item.Val().([]byte)
+	item.lock.Lock()
+	defer item.lock.Unlock()
+	if item.file != nil {
+		value = item.Val().([]byte)
+	}
+	if len(value) == 0 {
+		err := fillFileCacheItem(item, key, int64(count), fetch)
+		if err != nil {
+			return nil, err
 		}
-		if len(value) == 0 {
-			var err error
-			item, err = newFileCacheItem(key, int64(count), fetch)
-			if err != nil {
-				return nil, err
-			}
-			value = item.Val().([]byte)
-			c.cache.Set(key, item)
-		}
+		value = item.Val().([]byte)
 	}
 	return value, nil
 }

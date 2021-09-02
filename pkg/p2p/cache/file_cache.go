@@ -96,20 +96,19 @@ func writeAll(file *os.File, buff []byte) (int, error) {
 	return offset, err
 }
 
-// newFileCacheItem constructor for fileCacheItem
-func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (*fileCacheItem, error) {
+func fillFileCacheItem(item *fileCacheItem, key string, fileSize int64, read func() ([]byte, error)) error {
 	err := os.MkdirAll(path.Dir(key), 0755)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	log.Debugf("Create %s: %d", key, atomic.AddInt32(&fdCnt, 1))
 	file, err := os.OpenFile(key, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil || file == nil {
-		return nil, err
+		return err
 	}
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if info.Size() != fileSize {
 		buffer, err := read()
@@ -120,7 +119,7 @@ func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (
 			if err := os.Remove(file.Name()); err != nil {
 				log.Warnf("File %s remove error!", file.Name())
 			}
-			return nil, err
+			return err
 		}
 		l, err := writeAll(file, buffer)
 		if err == nil && int64(l) != fileSize {
@@ -130,11 +129,13 @@ func newFileCacheItem(key string, fileSize int64, read func() ([]byte, error)) (
 			if err := os.Remove(file.Name()); err != nil {
 				log.Warnf("File %s remove error!", file.Name())
 			}
-			return nil, err
+			return err
 		}
 	}
-	item := &fileCacheItem{key: key, fileSize: fileSize, file: file}
-	return item, err
+	item.key = key
+	item.fileSize = fileSize
+	item.file = file
+	return nil
 }
 
 // fileCacheLRU file cache used lru policy
