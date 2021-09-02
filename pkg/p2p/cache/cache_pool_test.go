@@ -21,11 +21,10 @@ import (
 	"runtime"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/rangesplit"
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -62,10 +61,10 @@ func testCacheGetOrRefillHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetOrRefill(t *testing.T) {
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 0, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1000 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1, MaxEntry: 1, CacheMedia: media})
 }
 
 func testCacheGetPutHostHelper(t *testing.T, config *Config) {
@@ -101,7 +100,7 @@ func testCacheGetPutHostHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetPutHost(t *testing.T) {
-	testCacheGetPutHostHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutHostHelper(t, &Config{CacheSize: 1, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }
 
 func testCacheGetPutLengthHelper(t *testing.T, config *Config) {
@@ -131,5 +130,5 @@ func testCacheGetPutLengthHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetPutLength(t *testing.T) {
-	testCacheGetPutLengthHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutLengthHelper(t, &Config{CacheSize: 1, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }
