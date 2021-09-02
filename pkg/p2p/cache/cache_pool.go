@@ -21,7 +21,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
+	"github.com/dgraph-io/ristretto"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -49,88 +51,106 @@ type FileCachePool interface {
 }
 
 type fileCachePoolImpl struct {
-	cache *fileCacheLRU
-	entry *memCacheLRU
-	media string
-	lock  sync.Mutex
+	fileCache *ristretto.Cache
+	memCache  *ristretto.Cache
+	media     string
+	lock      sync.Mutex
 }
 
 func (c *fileCachePoolImpl) GetOrRefill(path string, offset int64, count int, fetch func() ([]byte, error)) ([]byte, error) {
 	key := filepath.Join(c.media, path, strconv.FormatInt(offset, 10))
-	var item *fileCacheItem
-	{
-		c.lock.Lock()
-		defer c.lock.Unlock()
-		var ok bool
-		item, ok = c.cache.Get(key)
-		if !ok {
-			item = &fileCacheItem{}
-			c.cache.Set(key, item)
+retry:
+	c.lock.Lock()
+	c.fileCache.Wait()
+	val, found := c.fileCache.Get(key)
+	if !found {
+		var err error
+		if val, err = newFileCacheItem(key, count); err != nil {
+			return nil, err
 		}
+		c.fileCache.Set(key, val, int64(count))
 	}
-	var value []byte
-	{
-		item.lock.Lock()
-		defer item.lock.Unlock()
-		if item.file != nil {
-			value = item.Val().([]byte)
+	c.lock.Unlock()
+	item := val.(*fileCacheItem)
+	item.lock.Lock()
+	if item.file == nil {
+		item.lock.Unlock()
+		log.Warnf("File %s already drop, retry!", key)
+		goto retry
+	}
+	defer item.lock.Unlock()
+	value := item.Val()
+	if len(value) == 0 {
+		if err := item.Fill(fetch); err != nil {
+			return nil, err
 		}
-		if len(value) == 0 {
-			var err error
-			item, err = newFileCacheItem(key, int64(count), fetch)
-			if err != nil {
-				return nil, err
-			}
-			value = item.Val().([]byte)
-			c.cache.Set(key, item)
-		}
+		value = item.Val()
 	}
 	return value, nil
 }
 
 func (c *fileCachePoolImpl) GetLen(path string) (int64, bool) {
 	key := filepath.Join(path, "metainfo")
-	val, found := c.entry.Get(key)
+	c.memCache.Wait()
+	val, found := c.memCache.Get(key)
 	if !found {
 		return 0, false
 	}
-	return val.Val().(int64), true
+	return val.(int64), true
 }
 
 func (c *fileCachePoolImpl) PutLen(path string, len int64) bool {
 	key := filepath.Join(path, "metainfo")
-	c.entry.Set(key, newMemCacheItem(key, len))
+	c.memCache.Set(key, len, 1)
 	return true
 }
 
 func (c *fileCachePoolImpl) GetHost(path string) (string, bool) {
 	key := filepath.Join(path, "upstream")
-	val, found := c.entry.Get(key)
+	c.memCache.Wait()
+	val, found := c.memCache.Get(key)
 	if !found {
 		return "", false
 	}
-	return val.Val().(string), found
+	return val.(string), found
 }
 
 func (c *fileCachePoolImpl) PutHost(path string, host string) bool {
 	key := filepath.Join(path, "upstream")
-	c.entry.Set(key, newMemCacheItem(path, host))
+	c.memCache.Set(key, host, 1)
 	return true
 }
 
 func (c *fileCachePoolImpl) DelHost(path string) {
 	key := filepath.Join(path, "upstream")
-	c.entry.Del(key)
+	c.memCache.Del(key)
 }
 
 // NewCachePool creator for FileCachePool
 func NewCachePool(config *Config) FileCachePool {
+	atomic.StoreInt32(&fdCnt, 0)
 	if err := os.MkdirAll(config.CacheMedia, 0755); err != nil {
 		log.Fatalf("Mkdir %s fail! %s", config.CacheMedia, err)
 	}
-	return &fileCachePoolImpl{
-		cache: newFileCacheLRU(config.CacheSize),
-		entry: newMemCacheLRU(config.MaxEntry),
-		media: config.CacheMedia,
+	cachePool := &fileCachePoolImpl{}
+	var err error
+	if cachePool.fileCache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,
+		MaxCost:     config.CacheSize,
+		BufferItems: 64,
+		OnExit: func(val interface{}) {
+			val.(*fileCacheItem).Drop()
+		},
+	}); err != nil {
+		panic(err)
 	}
+	if cachePool.memCache, err = ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,
+		MaxCost:     config.MaxEntry,
+		BufferItems: 64,
+	}); err != nil {
+		panic(err)
+	}
+	cachePool.media = config.CacheMedia
+	return cachePool
 }

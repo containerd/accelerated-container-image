@@ -36,6 +36,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+func init() {
+	log.SetFormatter(&log.TextFormatter{ForceColors: true})
+}
+
 const Media = "/tmp/cache"
 
 var (
@@ -132,7 +136,7 @@ func StartServers(root, agent int, serveBySSL, proxyHTTPS bool) []*http.Server {
 		port++
 	}
 	// set level there!!!
-	log.SetLevel(log.InfoLevel)
+	log.SetLevel(log.DebugLevel)
 	return res
 }
 

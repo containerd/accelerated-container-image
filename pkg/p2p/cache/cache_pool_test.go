@@ -24,6 +24,7 @@ import (
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/rangesplit"
 	"github.com/alibaba/accelerated-container-image/pkg/p2p/util"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,14 +36,17 @@ func testCacheGetOrRefillHelper(t *testing.T, config *Config) {
 		fileName := util.GetRandomString(10)
 		fileContent := []byte(GetData())
 		for j := 0; j < 10; j++ {
-			for seg := range rangesplit.NewRangeSplit(0, 128*1024, int64(len(fileContent)), int64(len(fileContent))).AllParts() {
+			for seg := range rangesplit.NewRangeSplit(0, 1024*1024, int64(len(fileContent)), int64(len(fileContent))).AllParts() {
 				wg.Add(1)
 				go func(offset int64, size int) {
 					defer wg.Done()
 					res, err := c.GetOrRefill(fileName, offset, size, func() ([]byte, error) {
 						return fileContent[offset : offset+int64(size)], nil
 					})
-					if Assert.Equal(nil, err) && Assert.Equal(size, len(res)) {
+					if err != nil {
+						log.Fatalf("GetOrRefill %s fail! %s", fileName, err)
+					}
+					if Assert.Equal(size, len(res)) {
 						expected := fileContent[offset : offset+int64(size)]
 						checkLen := util.Min(100, size)
 						Assert.Equal(expected[:checkLen], res[:checkLen])
@@ -57,10 +61,10 @@ func testCacheGetOrRefillHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetOrRefill(t *testing.T) {
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1 * 1024 * 1024, MaxEntry: 0, CacheMedia: media})
-	testCacheGetOrRefillHelper(t, &Config{CacheSize: 0, MaxEntry: 0, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1000 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 100 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 10 * 1024 * 1024, MaxEntry: 1, CacheMedia: media})
+	testCacheGetOrRefillHelper(t, &Config{CacheSize: 1, MaxEntry: 1, CacheMedia: media})
 }
 
 func testCacheGetPutHostHelper(t *testing.T, config *Config) {
@@ -96,7 +100,7 @@ func testCacheGetPutHostHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetPutHost(t *testing.T) {
-	testCacheGetPutHostHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutHostHelper(t, &Config{CacheSize: 1, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }
 
 func testCacheGetPutLengthHelper(t *testing.T, config *Config) {
@@ -126,5 +130,5 @@ func testCacheGetPutLengthHelper(t *testing.T, config *Config) {
 }
 
 func TestCacheGetPutLength(t *testing.T) {
-	testCacheGetPutLengthHelper(t, &Config{CacheSize: 0, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
+	testCacheGetPutLengthHelper(t, &Config{CacheSize: 1, MaxEntry: 1000 * 1024 * 1024, CacheMedia: media})
 }

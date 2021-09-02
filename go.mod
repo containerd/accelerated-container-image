@@ -8,6 +8,7 @@ require (
 	github.com/containerd/continuity v0.0.0-20210208174643-50096c924a4e
 	github.com/containerd/go-cni v1.0.2
 	github.com/containerd/go-runc v0.0.0-20201020171139-16b287bc67d0 // indirect
+	github.com/dgraph-io/ristretto v0.1.0
 	github.com/elazarl/goproxy v0.0.0-20210801061803-8e322dfb79c4
 	github.com/kr/text v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.4.0
