@@ -29,6 +29,7 @@ import (
 
 func setup() {
 	rand.Seed(time.Now().UnixNano())
+	log.SetFormatter(&log.TextFormatter{ForceColors: true})
 	log.SetLevel(log.InfoLevel)
 	// ignore test.root
 	flag.Bool("test.root", false, "")

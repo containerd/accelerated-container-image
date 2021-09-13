@@ -36,6 +36,7 @@ var wg sync.WaitGroup
 
 func setup() {
 	rand.Seed(time.Now().UnixNano())
+	log.SetFormatter(&log.TextFormatter{ForceColors: true})
 	log.SetLevel(log.DebugLevel)
 	// ignore test.root
 	flag.Bool("test.root", false, "")
