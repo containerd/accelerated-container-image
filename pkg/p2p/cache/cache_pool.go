@@ -68,7 +68,7 @@ retry:
 		if val, err = newFileCacheItem(key, count); err != nil {
 			return nil, err
 		}
-		c.fileCache.Set(key, val, int64(count))
+		c.fileCache.Set(key, val, 0)
 	}
 	c.lock.Unlock()
 	item := val.(*fileCacheItem)
@@ -139,7 +139,18 @@ func NewCachePool(config *Config) FileCachePool {
 		MaxCost:     config.CacheSize,
 		BufferItems: 64,
 		OnExit: func(val interface{}) {
-			val.(*fileCacheItem).Drop()
+			item := val.(*fileCacheItem)
+			item.Drop()
+		},
+		Cost: func(val interface{}) int64 {
+			item := val.(*fileCacheItem)
+			item.lock.RLock()
+			defer item.lock.RUnlock()
+			info, err := item.file.Stat()
+			if err != nil {
+				return 0
+			}
+			return info.Size()
 		},
 	}); err != nil {
 		panic(err)
