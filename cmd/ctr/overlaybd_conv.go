@@ -73,6 +73,16 @@ var convertCommand = cli.Command{
 			Usage: "baselayer path(required), used to init block device",
 			Value: "/opt/overlaybd/baselayers/ext4_64",
 		},
+		cli.StringFlag{
+			Name:  "fstype",
+			Usage: "filesystem type(required), used to mount block device, support specifying mount options and mkfs options, separate fs type and options by ';', separate mount options by ',', separate mkfs options by ' '",
+			Value: "ext4",
+		},
+		cli.BoolFlag{
+			Name:   "build-baselayer-only",
+			Usage:  "build base layer only",
+			Hidden: false,
+		},
 	},
 	Action: func(context *cli.Context) error {
 		var (
@@ -80,7 +90,7 @@ var convertCommand = cli.Command{
 			targetImage = context.Args().Get(1)
 		)
 
-		if srcImage == "" || targetImage == "" {
+		if (srcImage == "" || targetImage == "") && !context.Bool("build-baselayer-only") {
 			return errors.New("please provide src image name(must in local) and dest image name")
 		}
 
@@ -104,6 +114,38 @@ var convertCommand = cli.Command{
 			cs = cli.ContentStore()
 		)
 
+		fsType := context.String("fstype")
+		fmt.Printf("file system type: %s\n", fsType)
+		basePath := context.String("basepath")
+		fmt.Printf("base layer path: %s\n", basePath)
+		var baseLayer *layer = nil
+		_, exist := os.Stat(basePath)
+		if exist == nil {
+			if context.Bool("build-baselayer-only") {
+				fmt.Printf("build base layer only, base layer exists, build base layer failed\n")
+				return nil
+			}
+			loader := newContentLoaderWithFsType(false, fsType, contentFile{
+				context.String("basepath"), "overlaybd.commit"})
+			l, err := loader.Load(ctx, cs)
+			if err != nil {
+				return errors.Wrap(err, "failed to load baselayer into content.Store")
+			}
+			baseLayer = &l
+		} else {
+			fmt.Printf("base layer does not exist, then build it\n")
+			if context.Bool("build-baselayer-only") {
+				fmt.Printf("build base layer only\n")
+				_, err = buildBaseLayerInZfile(ctx, sn, fsType, basePath)
+				if err == nil {
+					fmt.Printf("build base layer successfully\n")
+				} else {
+					fmt.Printf("build base layer failed\n")
+				}
+				return err
+			}
+		}
+
 		srcImg, err := ensureImageExist(ctx, cli, srcImage)
 		if err != nil {
 			return err
@@ -114,14 +156,7 @@ var convertCommand = cli.Command{
 			return errors.Wrapf(err, "failed to read manifest")
 		}
 
-		loader := newContentLoader(false, contentFile{
-			context.String("basepath"), "overlaybd.commit"})
-		baseLayer, err := loader.Load(ctx, cs)
-		if err != nil {
-			return errors.Wrap(err, "failed to load baselayer into content.Store")
-		}
-
-		committedLayers, err := convOCIV1LayersToZfile(ctx, sn, cs, baseLayer, srcManifest.Layers)
+		committedLayers, err := convOCIV1LayersToZfile(ctx, sn, cs, baseLayer, srcManifest.Layers, fsType, basePath)
 		if err != nil {
 			return err
 		}
@@ -149,6 +184,15 @@ func newContentLoader(isAccelLayer bool, files ...contentFile) *contentLoader {
 	return &contentLoader{
 		files:        files,
 		isAccelLayer: isAccelLayer,
+		fsType:       "",
+	}
+}
+
+func newContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...contentFile) *contentLoader {
+	return &contentLoader{
+		files:        files,
+		isAccelLayer: isAccelLayer,
+		fsType:       fsType,
 	}
 }
 
@@ -160,12 +204,14 @@ type contentFile struct {
 type contentLoader struct {
 	files        []contentFile
 	isAccelLayer bool
+	fsType       string
 }
 
 func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l layer, err error) {
 	const (
 		annoOverlayBDBlobDigest  = "containerd.io/snapshot/overlaybd/blob-digest"
 		annoOverlayBDBlobSize    = "containerd.io/snapshot/overlaybd/blob-size"
+		annoOverlayBDBlobFsType  = "containerd.io/snapshot/overlaybd/blob-fs-type"
 		annoKeyAccelerationLayer = "containerd.io/snapshot/overlaybd/acceleration-layer"
 		labelBuildLayerFrom      = "containerd.io/snapshot/overlaybd/build.layer-from"
 	)
@@ -244,6 +290,9 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 	}
 	if loader.isAccelLayer {
 		l.desc.Annotations[annoKeyAccelerationLayer] = "yes"
+	}
+	if loader.fsType != "" {
+		l.desc.Annotations[annoOverlayBDBlobFsType] = loader.fsType
 	}
 	return l, nil
 }
@@ -340,21 +389,32 @@ func commitOverlaybdImage(ctx context.Context, cs content.Store, srcManifest oci
 // exports the layers based on zfile.
 //
 // NOTE: The first element of descs will be overlaybd baselayer.
-func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs content.Store, baseLayer layer, srcDescs []ocispec.Descriptor) ([]layer, error) {
+func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs content.Store, baseLayer *layer, srcDescs []ocispec.Descriptor, fsType string, basePath string) ([]layer, error) {
+	var (
+		lastParentID string
+		err          error
+	)
 	// init base layer
-	lastParentID, err := applyOCIV1LayerInZfile(ctx, sn, cs, "", baseLayer.desc, nil, func(root string) error {
-		f, err := ioutil.ReadDir(root)
-		if err != nil {
-			return err
-		}
+	if baseLayer != nil {
+		lastParentID, err = applyOCIV1LayerInZfile(ctx, sn, cs, "", baseLayer.desc, nil, func(root string) error {
+			f, err := ioutil.ReadDir(root)
+			if err != nil {
+				return err
+			}
 
-		if len(f) != 1 || f[0].IsDir() {
-			return errors.Errorf("unexpected base layer tar[.gz]")
+			if len(f) != 1 || f[0].IsDir() {
+				return errors.Errorf("unexpected base layer tar[.gz]")
+			}
+			return os.Rename(filepath.Join(root, f[0].Name()), filepath.Join(root, "overlaybd.commit"))
+		})
+		if err != nil {
+			return nil, err
 		}
-		return os.Rename(filepath.Join(root, f[0].Name()), filepath.Join(root, "overlaybd.commit"))
-	})
-	if err != nil {
-		return nil, err
+	} else {
+		lastParentID, err = buildBaseLayerInZfile(ctx, sn, fsType, basePath)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var (
@@ -362,7 +422,8 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 
 		opts = []snapshots.Opt{
 			snapshots.WithLabels(map[string]string{
-				"containerd.io/snapshot/overlaybd.writable": "dir",
+				"containerd.io/snapshot/overlaybd.writable":     "dir",
+				"containerd.io/snapshot/overlaybd/blob-fs-type": fsType,
 			}),
 		}
 	)
@@ -373,7 +434,7 @@ func convOCIV1LayersToZfile(ctx context.Context, sn snapshots.Snapshotter, cs co
 			return emptyLayer, err
 		}
 
-		loader := newContentLoader(false, contentFile{
+		loader := newContentLoaderWithFsType(false, fsType, contentFile{
 			info.Labels["containerd.io/snapshot/overlaybd.localcommitpath"],
 			"overlaybd.commit"})
 		return loader.Load(ctx, cs)
@@ -480,6 +541,87 @@ func applyOCIV1LayerInZfile(
 		if !errdefs.IsAlreadyExists(err) {
 			return emptyString, err
 		}
+	}
+
+	rollback = err != nil
+	return commitID, nil
+}
+
+func buildBaseLayerInZfile(ctx context.Context, sn snapshots.Snapshotter, fsType string, basePath string) (string, error) {
+	var (
+		key    string
+		mounts []mount.Mount
+		err    error
+	)
+
+	snOpts := []snapshots.Opt{
+		snapshots.WithLabels(map[string]string{
+			"containerd.io/snapshot/overlaybd.writable":     "dir",
+			"containerd.io/snapshot/overlaybd/blob-fs-type": fsType,
+			"containerd.io/snapshot/overlaybd.baselayer":    "baselayer",
+		}),
+	}
+
+	var afterApply = func(root string) error {
+		f, err := ioutil.ReadDir(root)
+		if err != nil {
+			return err
+		}
+		if len(f) != 1 || f[0].IsDir() {
+			return errors.Errorf("unexpected base layer")
+		}
+		src, err := os.Open(filepath.Join(root, f[0].Name()))
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		des, err := os.Create(basePath)
+		if err != nil {
+			return err
+		}
+		defer des.Close()
+		_, err = io.Copy(des, src)
+		return err
+	}
+
+	for {
+		key = fmt.Sprintf(convSnapshotNameFormat, uniquePart())
+		mounts, err = sn.Prepare(ctx, key, "", snOpts...)
+		if err != nil {
+			// retry other key
+			if errdefs.IsAlreadyExists(err) {
+				continue
+			}
+			return emptyString, errors.Wrapf(err, "failed to preprare snapshot %q", key)
+		}
+
+		break
+	}
+
+	var rollback = true
+
+	defer func() {
+		if rollback {
+			if rerr := sn.Remove(ctx, key); rerr != nil {
+				log.G(ctx).WithError(rerr).WithField("key", key).Warnf("apply failure and failed to cleanup snapshot")
+			}
+		}
+	}()
+
+	commitID := fmt.Sprintf(convSnapshotNameFormat, uniquePart())
+	if err = sn.Commit(ctx, commitID, key); err != nil {
+		if !errdefs.IsAlreadyExists(err) {
+			return emptyString, err
+		}
+	}
+
+	if err = mount.WithTempMount(ctx, mounts, func(root string) error {
+		if err == nil && afterApply != nil {
+			err = afterApply(root)
+		}
+		return err
+	}); err != nil {
+		return emptyString, errors.Wrapf(err, "failed to apply layer in snapshot %s", key)
 	}
 
 	rollback = err != nil

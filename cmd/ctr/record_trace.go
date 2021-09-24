@@ -211,6 +211,10 @@ var recordTraceCommand = cli.Command{
 		if topLayer.Annotations["containerd.io/snapshot/overlaybd/acceleration-layer"] == "yes" {
 			return errors.New("Acceleration layer already exists")
 		}
+		fsType, ok := topLayer.Annotations["containerd.io/snapshot/overlaybd/blob-fs-type"]
+		if !ok {
+			fsType = ""
+		}
 
 		// Fetch all layer blobs into content
 		if _, err = ctrcontent.Fetch(ctx, client, ref, fetchConfig); err != nil {
@@ -314,7 +318,8 @@ var recordTraceCommand = cli.Command{
 		collectTrace(traceFile)
 
 		// Load trace file into content, and generate an acceleration layer
-		loader := newContentLoader(true, contentFile{traceFile, "trace"})
+		//loader := newContentLoader(true, contentFile{traceFile, "trace"})
+		loader := newContentLoaderWithFsType(true, fsType, contentFile{traceFile, "trace"})
 		accelLayer, err := loader.Load(ctx, cs)
 		if err != nil {
 			return fmt.Errorf("loadCommittedSnapshotInContent failed: %v", err)

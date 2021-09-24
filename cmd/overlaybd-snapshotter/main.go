@@ -40,8 +40,9 @@ import (
 const defaultConfigPath = "/etc/overlaybd-snapshotter/config.json"
 
 type pluginConfig struct {
-	Address string `json:"address"`
-	Root    string `json:"root"`
+	Address  string `json:"address"`
+	Root     string `json:"root"`
+	LogLevel string `json:"verbose"`
 }
 
 var pconfig pluginConfig
@@ -64,6 +65,15 @@ func main() {
 	if err := parseConfig(defaultConfigPath); err != nil {
 		logrus.Error(err)
 		os.Exit(1)
+	}
+
+	if pconfig.LogLevel == "" {
+		pconfig.LogLevel = "info"
+	}
+	if err := setLogLevel(pconfig.LogLevel); err != nil {
+		logrus.Errorf("failed to set log level: %v", err)
+	} else {
+		logrus.Infof("set log level: %s", pconfig.LogLevel)
 	}
 
 	sn, err := overlaybd.NewSnapshotter(pconfig.Root)
@@ -157,4 +167,13 @@ func dumpStacks() {
 
 	buf = buf[:stackSize]
 	logrus.Infof("=== BEGIN goroutine stack dump ===\n%s\n=== END goroutine stack dump ===", buf)
+}
+
+func setLogLevel(level string) error {
+	logLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	logrus.SetLevel(logLevel)
+	return nil
 }

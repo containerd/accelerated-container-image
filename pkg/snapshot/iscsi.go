@@ -80,7 +80,7 @@ type OverlayBDBSConfigUpper struct {
 }
 
 // unmountAndDetachBlockDevice
-func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) error {
+func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string, unmount bool) error {
 
 	_, info, _, err := storage.GetInfo(ctx, snKey)
 	if err != nil {
@@ -88,7 +88,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	}
 	writeType := o.getWritableType(ctx, info)
 
-	if writeType != rwDev {
+	if unmount && writeType != rwDev {
 		mountPoint := o.overlaybdMountpoint(snID)
 		log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
 		if err := mount.UnmountAll(mountPoint, 0); err != nil {
@@ -135,7 +135,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable int) (retErr error) {
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable int, fsType string, mount bool) (retErr error) {
 
 	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
@@ -256,15 +256,78 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 			device := fmt.Sprintf("/dev/%s", dev.Name())
 			var mountPoint = o.overlaybdMountpoint(snID)
 
-			var mflag uintptr = unix.MS_RDONLY
-			if writable != roDir {
-				mflag = 0
+			options := strings.Split(fsType, ";")
+			fstype := options[0]
+			data := ""
+			if len(options) > 1 {
+				data = options[1]
+			} else {
+				switch fstype {
+				case "ext4":
+					data = "discard"
+				case "xfs":
+					data = "nouuid,discard"
+				default:
+				}
 			}
-			if writable != rwDev {
-				if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
-					lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
-					time.Sleep(10 * time.Millisecond)
-					break // retry
+
+			if mount {
+				var mflag uintptr = unix.MS_RDONLY
+				if writable != roDir {
+					mflag = 0
+				}
+				if writable != rwDev {
+					if fstype != "ntfs" {
+						log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %d", fstype, data, writable)
+						//if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
+						if err := unix.Mount(device, mountPoint, fstype, mflag, data); err != nil {
+							lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
+							time.Sleep(10 * time.Millisecond)
+							break // retry
+						}
+					} else {
+						args := []string{"-t", fstype}
+						if writable == roDir {
+							args = append(args, "-r")
+						}
+						if data != "" {
+							args = append(args, "-o", data)
+						}
+						args = append(args, device, mountPoint)
+						log.G(ctx).Infof("fs type: %s, mount options: %v", fstype, args)
+						out, err := exec.CommandContext(ctx, "mount", args...).CombinedOutput()
+						if err != nil {
+							lastErr = errors.Wrapf(err, "failed to mount for dev %s: %s", device, out)
+							time.Sleep(10 * time.Millisecond)
+							break
+						}
+					}
+				}
+			} else { // mkfs
+				args := []string{"-t", fstype}
+				if len(options) > 2 {
+					if options[2] != "" {
+						mkfsOpts := strings.Split(options[2], " ")
+						args = append(args, mkfsOpts...)
+					}
+				} else {
+					switch fstype {
+					case "ext4":
+						args = append(args, "-O", "^has_journal,sparse_super,flex_bg", "-G", "1", "-E", "discard")
+					case "xfs":
+						args = append(args, "-f", "-l", "size=4m", "-m", "crc=0")
+					case "f2fs":
+						args = append(args, "-S", "-w", "4096")
+					case "ntfs":
+						args = append(args, "-F", "-f")
+					default:
+					}
+				}
+				args = append(args, device)
+				log.G(ctx).Infof("fs type: %s, mkfs options: %v", fstype, args)
+				out, err := exec.CommandContext(ctx, "mkfs", args...).CombinedOutput()
+				if err != nil {
+					return errors.Wrapf(err, "failed to mkfs for dev %s: %s", device, out)
 				}
 			}
 			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
@@ -377,6 +440,21 @@ func (o *snapshotter) constructSpecForAccelLayer(id, parentID string) error {
 	accelLayerLower := OverlayBDBSConfigLower{Dir: o.upperPath(id)}
 	config.Lowers = append(config.Lowers, accelLayerLower)
 	return o.atomicWriteOverlaybdTargetConfig(id, config)
+}
+
+func (o *snapshotter) constructSpecForBaseLayer(ctx context.Context, id string) error {
+	if err := o.prepareWritableOverlaybd(ctx, id); err != nil {
+		return err
+	}
+	configJSON := OverlayBDBSConfig{
+		Lowers: []OverlayBDBSConfigLower{},
+		Upper: OverlayBDBSConfigUpper{
+			Index: o.overlaybdWritableIndexPath(id),
+			Data:  o.overlaybdWritableDataPath(id),
+		},
+		ResultFile: o.overlaybdInitDebuglogPath(id),
+	}
+	return o.atomicWriteOverlaybdTargetConfig(id, &configJSON)
 }
 
 func (o *snapshotter) updateSpec(snID string, isAccelLayer bool, recordTracePath string) error {
