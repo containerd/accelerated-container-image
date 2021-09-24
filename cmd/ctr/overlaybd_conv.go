@@ -180,14 +180,6 @@ type layer struct {
 }
 
 // contentLoader can load multiple files into content.Store service, and return an oci.v1.tar layer.
-func newContentLoader(isAccelLayer bool, files ...contentFile) *contentLoader {
-	return &contentLoader{
-		files:        files,
-		isAccelLayer: isAccelLayer,
-		fsType:       "",
-	}
-}
-
 func newContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...contentFile) *contentLoader {
 	return &contentLoader{
 		files:        files,
