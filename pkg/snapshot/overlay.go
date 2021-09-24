@@ -91,6 +91,12 @@ const (
 	// NOTE: The annotation is part of image layer blob's descriptor.
 	labelKeyOverlayBDBlobSize = "containerd.io/snapshot/overlaybd/blob-size"
 
+	// labelKeyOverlayBDBlobFsType is the annotation key in the manifest to
+	// describe the filesystem type to be mounted as of blob in OverlayBD format.
+	//
+	// NOTE: The annotation is part of image layer blob's descriptor.
+	labelKeyOverlayBDBlobFsType = "containerd.io/snapshot/overlaybd/blob-fs-type"
+
 	// labelKeyAccelerationLayer is the annotation key in the manifest to indicate
 	// whether a top layer is acceleration layer or not.
 	labelKeyAccelerationLayer = "containerd.io/snapshot/overlaybd/acceleration-layer"
@@ -125,6 +131,11 @@ const (
 	//
 	// NOTE: Only used in image build.
 	LabelLocalOverlayBDPath = "containerd.io/snapshot/overlaybd.localcommitpath"
+
+	// LabelLocalOverlayBDBaseLayer is used to build base layer.
+	//
+	// NOTE: Only used in image build.
+	LabelLocalOverlayBDBaseLayer = "containerd.io/snapshot/overlaybd.baselayer"
 )
 
 const (
@@ -226,6 +237,8 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 
 // Stat returns the info for an active or committed snapshot by the key.
 func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, error) {
+	log.G(ctx).Debugf("Stat (key: %s)", key)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return snapshots.Info{}, err
@@ -245,6 +258,8 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 //
 // TODO(fuweid): should not touch the interface-like or internal label!
 func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (snapshots.Info, error) {
+	log.G(ctx).Debugf("Update (fieldpaths: %s)", fieldpaths)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
 		return snapshots.Info{}, err
@@ -264,6 +279,8 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 
 // Usage returns the resources taken by the snapshot identified by key.
 func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, error) {
+	log.G(ctx).Debugf("Usage (key: %s)", key)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return snapshots.Usage{}, err
@@ -313,6 +330,8 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		return nil, err
 	}
 
+	log.G(ctx).Debugf("Prepare (key: %s, parent: %s)", key, parent)
+
 	rollback := true
 	defer func() {
 		if retErr != nil && rollback {
@@ -326,6 +345,8 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	if err != nil {
 		return nil, err
 	}
+
+	log.G(ctx).Debugf("Prepare snapshot info(id: %s, info: %v)", id, info.Labels)
 
 	defer func() {
 		if retErr != nil && !errdefs.IsAlreadyExists(retErr) {
@@ -348,6 +369,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		// Acceleration layer will not use remote snapshot. It still needs containerd to pull,
 		// unpack blob and commit snapshot. So return a normal mount point here.
 		isAccelLayer := info.Labels[labelKeyAccelerationLayer]
+		log.G(ctx).Debugf("Prepare (targetRefLabel: %s, accelLayerLabel: %s)", targetRef, isAccelLayer)
 		if isAccelLayer == "yes" {
 			parentID, _, _, err := storage.GetInfo(ctx, parent)
 			if err != nil {
@@ -371,6 +393,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 
 		stype, err := o.identifySnapshotStorageType(ctx, id, info)
+		log.G(ctx).Debugf("Prepare (storageType: %d)", stype)
 		if err != nil {
 			return nil, err
 		}
@@ -393,12 +416,36 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 	stype := storageTypeNormal
 	writeType := o.getWritableType(ctx, info)
+	// Preparing base layer
+	if _, ok := info.Labels[LabelLocalOverlayBDBaseLayer]; ok && parent == "" {
+		log.G(ctx).Debugf("prepare base layer")
+		if err := o.constructSpecForBaseLayer(ctx, id); err != nil {
+			return nil, err
+		}
+		log.G(ctx).Debugf("construct spec for base layer done")
+
+		fsType, ok := info.Labels[labelKeyOverlayBDBlobFsType]
+		if !ok {
+			log.G(ctx).Warnf("cannot get fs type from lable, %v", info.Labels)
+			fsType = "ext4"
+		}
+		log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
+			id, writeType, fsType, o.overlaybdTargetPath(id))
+
+		if err = o.attachAndMountBlockDevice(ctx, id, writeType, fsType, false); err != nil {
+			log.G(ctx).Errorf("%v", err)
+			return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", id)
+		}
+	}
+
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok && parent != "" {
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
 		}
+
+		log.G(ctx).Debugf("Prepare snapshot parent info(id: %s, info: %v)", parentID, parentInfo.Labels)
 
 		stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 		if err != nil {
@@ -413,11 +460,17 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 				}
 			}
 
+			log.G(ctx).Debugf("Prepare rootfs (parentID: %s, parentStorageType: %d, writeType: %d)", parentID, stype, writeType)
+
 			parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
 			needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
 			recordTracePath := info.Labels[labelKeyRecordTracePath]
+
+			log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
+				parentIsAccelLayer, needRecordTrace, recordTracePath)
+
 			if parentIsAccelLayer {
-				log.G(ctx).Infof("get accel-layer in parent (id: %s)", id)
+				log.G(ctx).Debugf("get accel-layer in parent (id: %s)", id)
 				// If parent is already an acceleration layer, there is certainly no need to record trace.
 				// Just mark this layer to get accelerated (trace replay)
 				err = o.updateSpec(parentID, true, "")
@@ -435,12 +488,23 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 			}
 
 			var obdID string
+			var obdInfo *snapshots.Info
 			if writeType != roDir {
 				obdID = id
+				obdInfo = &info
 			} else {
 				obdID = parentID
+				obdInfo = &parentInfo
 			}
-			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType); err != nil {
+			fsType, ok := obdInfo.Labels[labelKeyOverlayBDBlobFsType]
+			if !ok {
+				log.G(ctx).Warnf("cannot get fs type from lable, %v", obdInfo.Labels)
+				fsType = "ext4"
+			}
+			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
+				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
+			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, true); err != nil {
+				log.G(ctx).Errorf("%v", err)
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", obdID)
 			}
 
@@ -465,6 +529,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	switch stype {
 	case storageTypeNormal:
 		m = o.normalOverlayMount(s)
+		log.G(ctx).Debugf("return mount point(R/W mode: %d): %v", writeType, m)
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
 		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
 		if err != nil {
@@ -478,6 +543,8 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 // View returns a readonly view on parent snapshotter.
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+	log.G(ctx).Debugf("View (key: %s, parent: %s)", key, parent)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
 		return nil, err
@@ -524,7 +591,11 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
-			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir); err != nil {
+			fsType, ok := parentInfo.Labels[labelKeyOverlayBDBlobFsType]
+			if !ok {
+				fsType = "ext4"
+			}
+			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, true); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
 			}
 		default:
@@ -565,6 +636,8 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 		return nil, errors.Wrap(err, "failed to get active mount")
 	}
 
+	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
+
 	if len(s.ParentIDs) > 0 {
 		_, info, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
@@ -595,6 +668,8 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 
 // Commit
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) (retErr error) {
+	log.G(ctx).Debugf("Commit (key: %s, name: %s)", key, name)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
 		return err
@@ -617,8 +692,9 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 
 	// if writable, should commit the data and make it immutable.
 	if _, writableBD := oinfo.Labels[LabelSupportReadWriteMode]; writableBD {
+		_, baselayer := oinfo.Labels[LabelLocalOverlayBDBaseLayer]
 		// TODO(fuweid): how to rollback?
-		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
+		if err := o.unmountAndDetachBlockDevice(ctx, id, key, !baselayer); err != nil {
 			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 		}
 
@@ -649,6 +725,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		return err
 	}
 
+	log.G(ctx).Debugf("Commit info (id: %s, info: %v, stype: %d)", id, info.Labels, stype)
+
 	if stype == storageTypeLocalBlock {
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
 			return errors.Wrapf(err, "failed to construct overlaybd config")
@@ -663,6 +741,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		if err != nil {
 			return err
 		}
+
+		log.G(ctx).Debugf("Commit info (info: %v)", info.Labels)
 	}
 
 	rollback = false
@@ -694,6 +774,8 @@ func (o *snapshotter) commit(ctx context.Context, name, key string, opts ...snap
 // Remove abandons the snapshot identified by key. The snapshot will
 // immediately become unavailable and unrecoverable.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
+	log.G(ctx).Debugf("Remove (key: %s)", key)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
 		return err
@@ -713,7 +795,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	if stype != storageTypeNormal {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
-			err = o.unmountAndDetachBlockDevice(ctx, id, key)
+			err = o.unmountAndDetachBlockDevice(ctx, id, key, true)
 			if err != nil {
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
@@ -743,6 +825,8 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 // Walk the snapshots.
 func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) error {
+	log.G(ctx).Debugf("Walk (fs: %s)", fs)
+
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return err
@@ -808,6 +892,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		if err != nil {
 			return nil, err
 		}
+		// TODO: support multi fs
 		return []mount.Mount{
 			{
 				Source: string(devName),
