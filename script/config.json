@@ -1,4 +1,0 @@
-{
-    "root": "/var/lib/overlaybd/",
-    "address": "/run/overlaybd-snapshotter/overlaybd.sock"
-}
