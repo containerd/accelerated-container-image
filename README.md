@@ -44,6 +44,8 @@ The key features are:
 
 * See the [PERFORMANCE](docs/PERFORMANCE.md) test about the acceleration.
 
+* See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
+
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
 ## Overview
