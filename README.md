@@ -22,6 +22,10 @@ The key features are:
 
     Overlaybd can be used as writable/container layer. The end-users can build their overlaybd images naturally without conversion.
 
+* **Multiple File System Supported**
+
+    Overlaybd outputs virtual block devices, which is supported to be formatted by multiple file system. It's convenient for user to choose ideal file system.
+
 ## Components
 
 * [overlaybd](https://github.com/alibaba/overlaybd)
