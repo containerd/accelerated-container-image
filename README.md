@@ -22,6 +22,10 @@ The key features are:
 
     Overlaybd can be used as writable/container layer. The end-users can build their overlaybd images naturally without conversion.
 
+* **Multiple File System Supported**
+
+    Overlaybd outputs virtual block devices, which is supported to be formatted by multiple file system. It's convenient for user to choose ideal file system.
+
 ## Components
 
 * [overlaybd](https://github.com/alibaba/overlaybd)
@@ -43,6 +47,8 @@ The key features are:
 * After build or install, see our [EXAMPLES](docs/EXAMPLES.md) about how to run an accelerated container. see [EXAMPLES_CRI](docs/EXAMPLES_CRI.md) if you run containers by k8s/cri.
 
 * See the [PERFORMANCE](docs/PERFORMANCE.md) test about the acceleration.
+
+* See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
