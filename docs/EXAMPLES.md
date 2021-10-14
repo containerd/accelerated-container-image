@@ -94,10 +94,19 @@ Overlaybd image convertor helps to convert a normal image to overlaybd-format re
 sudo ctr content fetch registry.hub.docker.com/library/redis:6.2.1
 
 # convert
-sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 localhost:5000/redis:6.2.1_obd
+sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/library/redis:6.2.1_obd_new
+
+# push the overlaybd image to registry, then the new converted image can be used as a remote image
+sudo ctr image push registry.hub.docker.com/library/redis:6.2.1_obd_new
+
+# remove the local overlaybd image
+sudo ctr image rm registry.hub.docker.com/library/redis:6.2.1_obd_new
+
+# rpull
+sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
 
 # run
-sudo ctr run --net-host --snapshotter=overlaybd --rm -t localhost:5000/redis:6.2.1_obd demo
+sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new demo
 
 1:C 03 Mar 2021 04:50:12.853 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
 1:C 03 Mar 2021 04:50:12.853 # Redis version=6.2.1, bits=64, commit=00000000, modified=0, pid=1, just started

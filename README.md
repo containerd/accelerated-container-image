@@ -16,7 +16,7 @@ The key features are:
 
 * **High Reliability**
 
-    Overlaybd outputs virtual block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes.
+    Overlaybd outputs virtual block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes, which is difficult for FUSE-based image formats.
 
 * **Native Support for Writable**
 
@@ -37,6 +37,12 @@ The key features are:
     It is a [containerd](https://containerd.io/) snapshotter plugin for overlaybd image. This snapshotter is compatible for OCI image, as well as overlayfs snapshotter.
 
     We also provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
+
+* P2P
+
+    [DADI P2P](README-P2P.md) is an accelerator to speed up HTTP file download using P2P protocol. It helps to reduce the pressure of registry for large-scale clusters.
+
+    The P2P is an independent component and optional if the registry becomes the bottleneck or risk under pressure.
 
 ## Getting Started
 
