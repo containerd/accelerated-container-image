@@ -32,7 +32,7 @@ sudo cp $H/script/overlaybd-snapshotter.service /opt/overlaybd/snapshotter
 sudo systemctl enable /opt/overlaybd/snapshotter/overlaybd-snapshotter.service
 sudo systemctl start overlaybd-snapshotter
 
-getInput 'Would you like make containerd support overlaybd-snapshotter [Y/N]? (this will change /etc/containerd/config.tom and restart containerd)'
+getInput 'Would you like make containerd support overlaybd-snapshotter [Y/N]? (this will change /etc/containerd/config.toml and restart containerd)'
 OP=$?
 if [[ OP -eq 1 ]]; then
     echo "Change config.toml to make containerd support snapshotter..."
