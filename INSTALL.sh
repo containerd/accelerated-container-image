@@ -38,6 +38,9 @@ if [[ OP -eq 1 ]]; then
     echo "Change config.toml to make containerd support snapshotter..."
     m=$(grep proxy_plugins.overlaybd /etc/containerd/config.toml)
     if [[ $? -ne 0 ]]; then
+        if [[ !-f /etc/containerd/config.toml ]]; then
+            touch /etc/containerd/config.toml
+        fi
 sudo cat <<-EOF | sudo tee --append /etc/containerd/config.toml
 [proxy_plugins.overlaybd]
     type = "snapshot"
