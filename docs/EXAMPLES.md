@@ -1,6 +1,6 @@
 # Getting Started
 
-Before checkout the examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/alibaba/overlaybd/blob/main/README.md) and [BUILDING](BUILDING.md).
+Before checkout the examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/containerd/overlaybd/blob/main/README.md) and [BUILDING](BUILDING.md).
 
 This doc includes:
 
@@ -17,7 +17,7 @@ This doc includes:
 
 Check whether the `overlaybd-tcmu` is running.
 
-For any problems, please checkout [overlaybd](https://github.com/alibaba/overlaybd).
+For any problems, please checkout [overlaybd](https://github.com/containerd/overlaybd).
 
 ### Proxy overlaybd snapshotter
 

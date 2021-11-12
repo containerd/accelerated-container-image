@@ -27,7 +27,7 @@ import (
 	"runtime"
 	"strings"
 
-	overlaybd "github.com/alibaba/accelerated-container-image/pkg/snapshot"
+	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/contrib/snapshotservice"

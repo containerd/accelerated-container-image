@@ -27,7 +27,7 @@ The key features are:
 
 ## Components
 
-* [overlaybd](https://github.com/alibaba/overlaybd)
+* [overlaybd](https://github.com/containerd/overlaybd)
 
     Overlaybd provides a merged view of block-based layer sequence as an virtual block device in user space.
 
@@ -39,7 +39,7 @@ The key features are:
 
 ## Getting Started
 
-* See how to setup overlaybd backstore at [README](https://github.com/alibaba/overlaybd).
+* See how to setup overlaybd backstore at [README](https://github.com/containerd/overlaybd).
 
 * See how to build snaphshotter and ctr plugin components at [BUILDING](docs/BUILDING.md).
 
