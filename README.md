@@ -2,10 +2,9 @@
 
 Accelerated Container Image is an open-source implementation of paper ["DADI: Block-Level Image Service for Agile and Elastic Application Deployment. USENIX ATC'20"](https://www.usenix.org/conference/atc20/presentation/li-huiba).
 
-DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features,
-and has been widely used in Alibaba and Alibaba Cloud, and already supported by Alibaba Cloud Registry (ACR), and helps Alibaba Cloud function compute enter the Forrester leader quadrant.
+DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Function Compute** _([FaaSNet: Scalable and Fast Provisioning of Custom Serverless Container Runtimes at Alibaba Cloud Function Compute. USENIX ATC'21](https://www.usenix.org/system/files/atc21-wang-ao.pdf))_ which enter **the Forrester leader quadrant**.
 
-At the heart of the acceleration is overlaybd, which is a new remote image format based on block device. Overlaybd backstore provides a merged view of a sequence of block-based layers in userspace and outputs as an iSCSI device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
+At the heart of the acceleration is overlaybd, which is a new remote image format based on block device. Overlaybd backstore provides a merged view of a sequence of block-based layers in userspace and outputs as a virtual blocks device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
 It can be used for container acceleration by supporting fetching image data on-demand without downloading and unpacking the whole image before a container running. With overlaybd image format, we can cold start a container instantly.
 
 The key features are:
@@ -37,12 +36,6 @@ The key features are:
     It is a [containerd](https://containerd.io/) snapshotter plugin for overlaybd image. This snapshotter is compatible for OCI image, as well as overlayfs snapshotter.
 
     We also provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
-
-* P2P
-
-    [DADI P2P](README-P2P.md) is an accelerator to speed up HTTP file download using P2P protocol. It helps to reduce the pressure of registry for large-scale clusters.
-
-    The P2P is an independent component and optional if the registry becomes the bottleneck or risk under pressure.
 
 ## Getting Started
 

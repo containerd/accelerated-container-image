@@ -123,7 +123,6 @@ jobs:
         run: |
           echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-#          ./src/github.com/alibaba/accelerated-container-image/pkg/p2p/test/harbor/install.sh
 
       - name: unit test
         working-directory: src/github.com/alibaba/accelerated-container-image
