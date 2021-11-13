@@ -1,4 +1,4 @@
-module github.com/alibaba/accelerated-container-image
+module github.com/containerd/accelerated-container-image
 
 go 1.15
 

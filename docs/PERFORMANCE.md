@@ -37,4 +37,4 @@ time ./setup-wordpress.sh registry.hub.docker.com/overlaybd/wordpress:5.7.0
 
 Conclusion: Overlaybd format outperforms OCI tar format at startup speed.
 
-Note: The [prefetch](https://github.com/alibaba/accelerated-container-image/blob/main/docs/trace-prefetch.md) feature is enabled.
+Note: The [prefetch](https://github.com/containerd/accelerated-container-image/blob/main/docs/trace-prefetch.md) feature is enabled.

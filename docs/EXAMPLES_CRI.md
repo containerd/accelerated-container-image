@@ -2,7 +2,7 @@
 
 ## Check Components
 
-Before checkout the cri examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/alibaba/overlaybd/README.md) and [BUILDING](BUILDING.md).
+Before checkout the cri examples, make sure that you have built or installed the components described in [overlaybd](https://github.com/containerd/overlaybd/README.md) and [BUILDING](BUILDING.md).
 You can check your overlaybd components as described in [EXAMPLES](EXAMPLES.md#check-components).
 
 ## Containerd config
