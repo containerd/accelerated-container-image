@@ -21,7 +21,7 @@ This doc includes:
 You need git to checkout the source code and compile:
 
 ```bash
-git clone https://github.com/alibaba/accelerated-container-image.git
+git clone https://github.com/containerd/accelerated-container-image.git
 cd accelerated-container-image
 make
 ```
