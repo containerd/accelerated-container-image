@@ -25,6 +25,9 @@ The key features are:
 
     Overlaybd outputs virtual block devices, which is supported to be formatted by multiple file system. It's convenient for user to choose ideal file system.
 
+
+Accelerated Container Image is a __non-core__ sub-project of containerd.
+
 ## Components
 
 * [overlaybd](https://github.com/containerd/overlaybd)
