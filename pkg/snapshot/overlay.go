@@ -905,18 +905,26 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		}, nil
 	}
 
-	var options []string
-
-	if o.indexOff {
-		options = append(options, "index=off")
-	}
-
-	if s.Kind == snapshots.KindActive {
-		options = append(options,
-			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
-			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
-		)
-	} else if len(s.ParentIDs) == 1 {
+	if len(s.ParentIDs) >= 1 {
+		// for ro mode, always has parent
+		if s.Kind == snapshots.KindActive {
+			var options []string
+			if o.indexOff {
+				options = append(options, "index=off")
+			}
+			options = append(options,
+				fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
+				fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
+				fmt.Sprintf("lowerdir=%s", o.overlaybdMountpoint(s.ParentIDs[0])),
+			)
+			return []mount.Mount{
+				{
+					Type:    "overlay",
+					Source:  "overlay",
+					Options: options,
+				},
+			}, nil
+		}
 		return []mount.Mount{
 			{
 				Source: o.overlaybdMountpoint(s.ParentIDs[0]),
@@ -929,12 +937,15 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		}, nil
 	}
 
-	options = append(options, fmt.Sprintf("lowerdir=%s", o.overlaybdMountpoint(s.ParentIDs[0])))
+	// ro and no parent, will not work
 	return []mount.Mount{
 		{
-			Type:    "overlay",
-			Source:  "overlay",
-			Options: options,
+			Source: o.overlaybdMountpoint(s.ID),
+			Type:   "bind",
+			Options: []string{
+				"ro",
+				"rbind",
+			},
 		},
 	}, nil
 }
