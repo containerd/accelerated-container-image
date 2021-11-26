@@ -40,6 +40,10 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     We also provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
 
+* [buildkit for overlaybd](https://github.com/data-accelerator/buildkit) (Experimental)
+
+    It is a customized buildkit for overlaybd images. It fetches the data of base images on demand without pulling whole data and uses overlaybd writable layer to build new layers.
+
 ## Getting Started
 
 * See how to setup overlaybd backstore at [README](https://github.com/containerd/overlaybd).
