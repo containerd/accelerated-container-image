@@ -660,6 +660,13 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 		}
 
 		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
+			fsType, ok := parentInfo.Labels[labelKeyOverlayBDBlobFsType]
+			if !ok {
+				fsType = "ext4"
+			}
+			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, true); err != nil {
+				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
+			}
 			return o.basedOnBlockDeviceMount(ctx, s, roDir)
 		}
 	}
