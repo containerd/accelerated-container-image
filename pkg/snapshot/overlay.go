@@ -323,16 +323,14 @@ func (o *snapshotter) getWritableType(ctx context.Context, info snapshots.Info) 
 	return
 }
 
-// Prepare creates an active snapshot identified by key descending from the provided parent.
-func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
 		return nil, err
 	}
-
-	log.G(ctx).Debugf("Prepare (key: %s, parent: %s)", key, parent)
-
 	rollback := true
+
 	defer func() {
 		if retErr != nil && rollback {
 			if rerr := t.Rollback(); rerr != nil {
@@ -341,13 +339,10 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		}
 	}()
 
-	id, info, err := o.createSnapshot(ctx, snapshots.KindActive, key, parent, opts)
+	id, info, err := o.createSnapshot(ctx, kind, key, parent, opts)
 	if err != nil {
 		return nil, err
 	}
-
-	log.G(ctx).Debugf("Prepare snapshot info(id: %s, info: %v)", id, info.Labels)
-
 	defer func() {
 		if retErr != nil && !errdefs.IsAlreadyExists(retErr) {
 			if rerr := os.RemoveAll(o.snPath(id)); rerr != nil {
@@ -426,7 +421,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 		fsType, ok := info.Labels[labelKeyOverlayBDBlobFsType]
 		if !ok {
-			log.G(ctx).Warnf("cannot get fs type from lable, %v", info.Labels)
+			log.G(ctx).Warnf("cannot get fs type from label, %v", info.Labels)
 			fsType = "ext4"
 		}
 		log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
@@ -539,85 +534,20 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		panic("unreachable")
 	}
 	return m, nil
+
+}
+
+// Prepare creates an active snapshot identified by key descending from the provided parent.
+func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+
+	return o.createMountPoint(ctx, snapshots.KindActive, key, parent, opts...)
 }
 
 // View returns a readonly view on parent snapshotter.
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 	log.G(ctx).Debugf("View (key: %s, parent: %s)", key, parent)
 
-	ctx, t, err := o.ms.TransactionContext(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-
-	rollback := true
-	defer func() {
-		if retErr != nil && rollback {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
-			}
-		}
-	}()
-
-	id, _, err := o.createSnapshot(ctx, snapshots.KindView, key, parent, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if retErr != nil {
-			if rerr := os.RemoveAll(o.snPath(id)); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to cleanup")
-			}
-		}
-	}()
-
-	s, err := storage.GetSnapshot(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-
-	stype := storageTypeNormal
-	if parent != "" {
-		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
-		}
-
-		stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
-		if err != nil {
-			return nil, err
-		}
-
-		switch stype {
-		case storageTypeLocalBlock, storageTypeRemoteBlock:
-			fsType, ok := parentInfo.Labels[labelKeyOverlayBDBlobFsType]
-			if !ok {
-				fsType = "ext4"
-			}
-			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, true); err != nil {
-				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
-			}
-		default:
-			// do nothing
-		}
-	}
-
-	rollback = false
-	if err := t.Commit(); err != nil {
-		return nil, err
-	}
-
-	var m []mount.Mount
-	switch stype {
-	case storageTypeNormal:
-		m = o.normalOverlayMount(s)
-	case storageTypeLocalBlock, storageTypeRemoteBlock:
-		m, retErr = o.basedOnBlockDeviceMount(ctx, s, roDir)
-	default:
-		panic("unreachable")
-	}
-	return m, retErr
+	return o.createMountPoint(ctx, snapshots.KindView, key, parent, opts...)
 }
 
 // Mounts returns the mounts for the transaction identified by key. Can be
