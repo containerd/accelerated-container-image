@@ -36,23 +36,10 @@ If there is no overlaybd plugin, please checkout [BUILDING](BUILDING.md).
 
 The containerd feature [supports target snapshot references on prepare](https://github.com/containerd/containerd/pull/3793) is released by v1.4.x.
 
-__[recommend]__ Now we support to start an overlaybd container by [`nerdctl`](https://github.com/containerd/nerdctl)[(#603)](https://github.com/containerd/nerdctl/pull/603).
+__[Recommend]__ Now we support to start an overlaybd container by [`nerdctl`](https://github.com/containerd/nerdctl)[(#603)](https://github.com/containerd/nerdctl/pull/603).
 
 ```bash
-sudo nerdctl run --rm -it --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:6.2.1_obd
-```
-
-And we also provide `ctr` subcommand `rpull` as plugin to use feature to support pulling image in on-demand mode.
-
-```bash
-# you will see that the rpull doesn't pull layer data.
-sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd
-```
-
-And start a container based on this image.
-
-```bash
-$ sudo nerdctl run --net host --rm --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:6.2.1_obd
+$ sudo nerdctl run --net host -it --rm --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:6.2.1_obd
 
 1:C 03 Mar 2021 04:39:31.804 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
 1:C 03 Mar 2021 04:39:31.804 # Redis version=6.2.1, bits=64, commit=00000000, modified=0, pid=1, just started
@@ -84,12 +71,16 @@ $ sudo nerdctl run --net host --rm --snapshotter=overlaybd registry.hub.docker.c
 1:M 03 Mar 2021 04:39:31.808 # WARNING overcommit_memory is set to 0! Background save may fail under low memory condition. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
 1:M 03 Mar 2021 04:39:31.810 * Ready to accept connections
 ```
-And also, you can use `ctr` to run this image:
-```
+
+And also, you can use `ctr` to run this image. However, you should first use the subcommand `rpull` in the customized `bin/ctr` to pull image
+```bash
+# you will see that the rpull doesn't pull layer data.
+sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd
+# start the container
 sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo
 ```
 
-We could see a new iSCSI device (sdb) has been created, and its mount-point is the lowerdir of overlayfs.
+After container launched success, we could see a new iSCSI device (sdb) has been created, and its mount-point is the lowerdir of overlayfs.
 ```bash
 $ sudo lsblk
 NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
