@@ -539,61 +539,32 @@ func applyOCIV1LayerInZfile(
 	return commitID, nil
 }
 
-func buildBaseLayerInZfile(ctx context.Context, sn snapshots.Snapshotter, fsType string, basePath string) (string, error) {
+func buildBaseLayerInZfile(ctx context.Context, sn snapshots.Snapshotter, fsType string, basePath string) (_ string, retErr error) {
 	var (
-		key    string
-		mounts []mount.Mount
-		err    error
+		key string
+
+		snOpts = []snapshots.Opt{
+			snapshots.WithLabels(map[string]string{
+				"containerd.io/snapshot/overlaybd.writable":     "dir",
+				"containerd.io/snapshot/overlaybd/blob-fs-type": fsType,
+				"containerd.io/snapshot/overlaybd.baselayer":    "baselayer",
+			}),
+		}
 	)
-
-	snOpts := []snapshots.Opt{
-		snapshots.WithLabels(map[string]string{
-			"containerd.io/snapshot/overlaybd.writable":     "dir",
-			"containerd.io/snapshot/overlaybd/blob-fs-type": fsType,
-			"containerd.io/snapshot/overlaybd.baselayer":    "baselayer",
-		}),
-	}
-
-	var afterApply = func(root string) error {
-		f, err := ioutil.ReadDir(root)
-		if err != nil {
-			return err
-		}
-		if len(f) != 1 || f[0].IsDir() {
-			return errors.Errorf("unexpected base layer")
-		}
-		src, err := os.Open(filepath.Join(root, f[0].Name()))
-		if err != nil {
-			return err
-		}
-		defer src.Close()
-		des, err := os.Create(basePath)
-		if err != nil {
-			return err
-		}
-		defer des.Close()
-		_, err = io.Copy(des, src)
-		return err
-	}
 
 	for {
 		key = fmt.Sprintf(convSnapshotNameFormat, uniquePart())
-		mounts, err = sn.Prepare(ctx, key, "", snOpts...)
-		if err != nil {
-			// retry other key
+		if _, err := sn.Prepare(ctx, key, "", snOpts...); err != nil {
 			if errdefs.IsAlreadyExists(err) {
 				continue
 			}
 			return emptyString, errors.Wrapf(err, "failed to preprare snapshot %q", key)
 		}
-
 		break
 	}
 
-	var rollback = true
-
 	defer func() {
-		if rollback {
+		if retErr != nil {
 			if rerr := sn.Remove(ctx, key); rerr != nil {
 				log.G(ctx).WithError(rerr).WithField("key", key).Warnf("apply failure and failed to cleanup snapshot")
 			}
@@ -601,22 +572,11 @@ func buildBaseLayerInZfile(ctx context.Context, sn snapshots.Snapshotter, fsType
 	}()
 
 	commitID := fmt.Sprintf(convSnapshotNameFormat, uniquePart())
-	if err = sn.Commit(ctx, commitID, key); err != nil {
+	if err := sn.Commit(ctx, commitID, key); err != nil {
 		if !errdefs.IsAlreadyExists(err) {
 			return emptyString, err
 		}
 	}
-
-	if err = mount.WithTempMount(ctx, mounts, func(root string) error {
-		if err == nil && afterApply != nil {
-			err = afterApply(root)
-		}
-		return err
-	}); err != nil {
-		return emptyString, errors.Wrapf(err, "failed to apply layer in snapshot %s", key)
-	}
-
-	rollback = err != nil
 	return commitID, nil
 }
 
