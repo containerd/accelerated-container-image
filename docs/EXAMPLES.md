@@ -21,6 +21,14 @@ For any problems, please checkout [overlaybd](https://github.com/containerd/over
 
 ### Proxy overlaybd snapshotter
 
+First, you should make sure that '/etc/containerd/config.toml' has been changed and contains the following contents like this:
+
+```bash
+[proxy_plugins.overlaybd]
+    type = "snapshot"
+    address = "/run/overlaybd-snapshotter/overlaybd.sock"
+```
+
 Use `ctr` to check the plugin.
 
 ```bash
