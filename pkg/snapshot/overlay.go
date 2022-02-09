@@ -131,11 +131,6 @@ const (
 	//
 	// NOTE: Only used in image build.
 	LabelLocalOverlayBDPath = "containerd.io/snapshot/overlaybd.localcommitpath"
-
-	// LabelLocalOverlayBDBaseLayer is used to build base layer.
-	//
-	// NOTE: Only used in image build.
-	LabelLocalOverlayBDBaseLayer = "containerd.io/snapshot/overlaybd.baselayer"
 )
 
 const (
@@ -356,6 +351,18 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		return nil, err
 	}
 
+	var (
+		parentID   string
+		parentInfo snapshots.Info
+	)
+
+	if parent != "" {
+		parentID, parentInfo, _, err = storage.GetInfo(ctx, parent)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
+		}
+	}
+
 	// If the layer is in overlaybd format, construct backstore spec and saved it into snapshot dir.
 	// Return ErrAlreadyExists to skip pulling and unpacking layer. See https://github.com/containerd/containerd/blob/master/docs/remote-snapshotter.md#snapshotter-apis-for-querying-remote-snapshots
 	// This part code is only for Pull.
@@ -366,10 +373,6 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		isAccelLayer := info.Labels[labelKeyAccelerationLayer]
 		log.G(ctx).Debugf("Prepare (targetRefLabel: %s, accelLayerLabel: %s)", targetRef, isAccelLayer)
 		if isAccelLayer == "yes" {
-			parentID, _, _, err := storage.GetInfo(ctx, parent)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
-			}
 			if err := o.constructSpecForAccelLayer(id, parentID); err != nil {
 				return nil, errors.Wrapf(err, "constructSpecForAccelLayer failed: id %s", id)
 			}
@@ -411,75 +414,47 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 	stype := storageTypeNormal
 	writeType := o.getWritableType(ctx, info)
-	// Preparing base layer
-	if _, ok := info.Labels[LabelLocalOverlayBDBaseLayer]; ok && parent == "" {
-		log.G(ctx).Debugf("prepare base layer")
-		if err := o.constructSpecForBaseLayer(ctx, id); err != nil {
-			return nil, err
-		}
-		log.G(ctx).Debugf("construct spec for base layer done")
-
-		fsType, ok := info.Labels[labelKeyOverlayBDBlobFsType]
-		if !ok {
-			log.G(ctx).Warnf("cannot get fs type from label, %v", info.Labels)
-			fsType = "ext4"
-		}
-		log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
-			id, writeType, fsType, o.overlaybdTargetPath(id))
-
-		if err = o.attachAndMountBlockDevice(ctx, id, writeType, fsType, false); err != nil {
-			log.G(ctx).Errorf("%v", err)
-			return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", id)
-		}
-	}
-
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
-	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok && parent != "" {
-		parentID, parentInfo, _, err := storage.GetInfo(ctx, parent)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
-		}
-
-		log.G(ctx).Debugf("Prepare snapshot parent info(id: %s, info: %v)", parentID, parentInfo.Labels)
-
-		stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
-		if err != nil {
-			return nil, err
+	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
+		if writeType != roDir {
+			stype = storageTypeLocalBlock
+			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
+				return nil, err
+			}
+		} else if parent != "" {
+			stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
-			if writeType != roDir {
-				if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
-					return nil, err
+			if parent != "" {
+				parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
+				needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
+				recordTracePath := info.Labels[labelKeyRecordTracePath]
+
+				log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
+					parentIsAccelLayer, needRecordTrace, recordTracePath)
+
+				if parentIsAccelLayer {
+					log.G(ctx).Debugf("get accel-layer in parent (id: %s)", id)
+					// If parent is already an acceleration layer, there is certainly no need to record trace.
+					// Just mark this layer to get accelerated (trace replay)
+					err = o.updateSpec(parentID, true, "")
+					if writeType != roDir {
+						o.updateSpec(id, true, "")
+					}
+				} else if needRecordTrace && recordTracePath != "" {
+					err = o.updateSpec(parentID, false, recordTracePath)
+				} else {
+					// For the compatibility of images which have no accel layer
+					err = o.updateSpec(parentID, false, "")
 				}
-			}
-
-			log.G(ctx).Debugf("Prepare rootfs (parentID: %s, parentStorageType: %d, writeType: %d)", parentID, stype, writeType)
-
-			parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
-			needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
-			recordTracePath := info.Labels[labelKeyRecordTracePath]
-
-			log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
-				parentIsAccelLayer, needRecordTrace, recordTracePath)
-
-			if parentIsAccelLayer {
-				log.G(ctx).Debugf("get accel-layer in parent (id: %s)", id)
-				// If parent is already an acceleration layer, there is certainly no need to record trace.
-				// Just mark this layer to get accelerated (trace replay)
-				err = o.updateSpec(parentID, true, "")
-				if writeType != roDir {
-					o.updateSpec(id, true, "")
+				if err != nil {
+					return nil, errors.Wrapf(err, "updateSpec failed for snapshot %s", parentID)
 				}
-			} else if needRecordTrace && recordTracePath != "" {
-				err = o.updateSpec(parentID, false, recordTracePath)
-			} else {
-				// For the compatibility of images which have no accel layer
-				err = o.updateSpec(parentID, false, "")
-			}
-			if err != nil {
-				return nil, errors.Wrapf(err, "updateSpec failed for snapshot %s", parentID)
 			}
 
 			var obdID string
@@ -498,7 +473,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
-			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, true); err != nil {
+			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, parent == ""); err != nil {
 				log.G(ctx).Errorf("%v", err)
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", obdID)
 			}
@@ -594,7 +569,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 			if !ok {
 				fsType = "ext4"
 			}
-			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, true); err != nil {
+			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, false); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
 			}
 			return o.basedOnBlockDeviceMount(ctx, s, roDir)
@@ -629,9 +604,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 
 	// if writable, should commit the data and make it immutable.
 	if _, writableBD := oinfo.Labels[LabelSupportReadWriteMode]; writableBD {
-		_, baselayer := oinfo.Labels[LabelLocalOverlayBDBaseLayer]
 		// TODO(fuweid): how to rollback?
-		if err := o.unmountAndDetachBlockDevice(ctx, id, key, !baselayer); err != nil {
+		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
 			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 		}
 
@@ -732,7 +706,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	if stype != storageTypeNormal {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
-			err = o.unmountAndDetachBlockDevice(ctx, id, key, true)
+			err = o.unmountAndDetachBlockDevice(ctx, id, key)
 			if err != nil {
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
