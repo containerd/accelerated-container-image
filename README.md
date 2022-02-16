@@ -38,7 +38,11 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     It is a [containerd](https://containerd.io/) snapshotter plugin for overlaybd image. This snapshotter is compatible for OCI image, as well as overlayfs snapshotter.
 
-    We also provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
+* image-convertor
+
+    We provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
+
+    The convertor supports layer deduplication, which prevents duplication of layer convertion for every image conversion.
 
 * [buildkit for overlaybd](https://github.com/data-accelerator/buildkit) (Experimental)
 
@@ -55,6 +59,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 * See the [PERFORMANCE](docs/PERFORMANCE.md) test about the acceleration.
 
 * See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
+
+* See how to use layer deduplication for image conversion at [IMAGE_CONVERTOR](docs/IMAGE_CONVERTOR.md)
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 

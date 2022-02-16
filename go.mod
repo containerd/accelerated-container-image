@@ -8,6 +8,8 @@ require (
 	github.com/containerd/continuity v0.2.2
 	github.com/containerd/go-cni v1.1.1
 	github.com/dgraph-io/ristretto v0.1.0
+	github.com/docker/distribution v2.7.1+incompatible
+	github.com/go-sql-driver/mysql v1.6.0
 	github.com/kr/text v0.2.0 // indirect
 	github.com/moby/sys/mountinfo v0.5.0
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
