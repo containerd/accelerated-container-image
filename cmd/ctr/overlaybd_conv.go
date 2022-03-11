@@ -397,7 +397,7 @@ func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispe
 		return emptyDesc, errors.Wrap(err, "failed to write image manifest")
 	}
 	if c.remote {
-		if err := c.pushObject(ctx, config); err != nil {
+		if err := c.pushObject(ctx, desc); err != nil {
 			return ocispec.Descriptor{}, errors.Wrap(err, "failed to push image manifest")
 		}
 		log.G(ctx).Infof("image pushed")
@@ -572,6 +572,18 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 				return nil, errors.Wrapf(err, "failed to prepare remote snapshot")
 			}
 			lastParentID = key
+			commitLayers[idx] = layer{
+				desc: ocispec.Descriptor{
+					MediaType: ocispec.MediaTypeImageLayer,
+					Digest:    remoteDesc.Digest,
+					Size:      remoteDesc.Size,
+					Annotations: map[string]string{
+						labelOverlayBDBlobDigest: remoteDesc.Digest.String(),
+						labelOverlayBDBlobSize:   fmt.Sprintf("%d", remoteDesc.Size),
+					},
+				},
+				diffID: remoteDesc.Digest,
+			}
 			continue
 		}
 
