@@ -286,7 +286,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 				} else {
 					switch fstype {
 					case "ext4":
-						args = append(args, "-O", "^has_journal,sparse_super,flex_bg", "-G", "1", "-E", "discard")
+						args = append(args, "-O", "^has_journal,sparse_super,flex_bg", "-G", "1", "-E", "discard", "-F")
 					case "xfs":
 						args = append(args, "-f", "-l", "size=4m", "-m", "crc=0")
 					case "f2fs":
