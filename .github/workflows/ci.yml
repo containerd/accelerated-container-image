@@ -32,8 +32,9 @@ jobs:
       - name: golangci-lint check
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.42.0
+          version: v1.45.0
           working-directory: src/github.com/containerd/accelerated-container-image
+          skip-cache: true
           args: --timeout=5m
 
 
