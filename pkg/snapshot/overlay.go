@@ -340,7 +340,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	}
 	defer func() {
 		// the transaction rollback makes created snapshot invalid, just clean it.
-		if retErr != nil && rollback == true {
+		if retErr != nil && rollback {
 			if rerr := os.RemoveAll(o.snPath(id)); rerr != nil {
 				log.G(ctx).WithError(rerr).Warn("failed to cleanup")
 			}
