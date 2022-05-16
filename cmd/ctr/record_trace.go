@@ -17,32 +17,37 @@
 package main
 
 import (
+	"archive/tar"
+	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/containerd/console"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
-	ctrcontent "github.com/containerd/containerd/cmd/ctr/commands/content"
 	"github.com/containerd/containerd/cmd/ctr/commands/tasks"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/oci"
 	"github.com/containerd/containerd/platforms"
+	"github.com/containerd/containerd/plugin"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/go-cni"
@@ -57,8 +62,9 @@ import (
 
 const (
 	uniqueObjectFormat = "record-trace-%s-%s"
+	traceNameInLayer   = ".trace"
 	cniConf            = `{
-  "cniVersion": "0.4.0",
+  "cniVersion": "0.3.1",
   "name": "record-trace-cni",
   "plugins": [
     {
@@ -84,28 +90,29 @@ const (
   ]
 }
 `
+	containerdDir = "/var/lib/containerd/"
+	v1ContentsDir = "io.containerd.content.v1.content/blobs/"
 )
 
 var (
-	networkNamespace string
-	namespacePath    string
+	networkNamespace    string
+	namespacePath       string
+	maxCollectTraceTime time.Duration // In case there are back-store bugs and the trace file is not generated
+	maxTaskRunningTime  time.Duration // In case the task is not able to respond to SIGTERM
+	maxLeaseTime        time.Duration // After which the temporary resources shall be cleaned
 )
 
 var recordTraceCommand = cli.Command{
 	Name:           "record-trace",
 	Usage:          "record trace for prefetch",
-	UsageText:      "Make an new image from the old one, with a trace layer on top of it. A temporary container will be created and do the recording.",
-	ArgsUsage:      "[flags] OldImage NewImage [COMMAND] [ARG...]",
+	ArgsUsage:      "OldImage NewImage [COMMAND] [ARG...]",
+	Description:    "Make an new image from the old one, with a trace layer on top of it. A temporary container will be created and do the recording.",
 	SkipArgReorder: true,
 	Flags: []cli.Flag{
 		cli.UintFlag{
 			Name:  "time",
 			Usage: "record time in seconds. When time expires, a TERM signal will be sent to the task. The task might fail to respond signal if time is too short.",
-			Value: 600,
-		},
-		cli.StringFlag{
-			Name:  "user,u",
-			Usage: "user[:password] Registry user and password",
+			Value: 60,
 		},
 		cli.StringFlag{
 			Name:  "working-dir",
@@ -120,16 +127,12 @@ var recordTraceCommand = cli.Command{
 		cli.StringFlag{
 			Name:  "runtime",
 			Usage: "runtime name",
-			Value: defaults.DefaultRuntime,
+			Value: plugin.RuntimeLinuxV1,
 		},
 		cli.IntFlag{
 			Name:  "max-concurrent-downloads",
 			Usage: "Set the max concurrent downloads for each pull",
 			Value: 8,
-		},
-		cli.BoolFlag{
-			Name:  "tty,t",
-			Usage: "allocate a TTY for the container",
 		},
 		cli.BoolFlag{
 			Name:  "disable-network-isolation",
@@ -143,6 +146,15 @@ var recordTraceCommand = cli.Command{
 	},
 
 	Action: func(cliCtx *cli.Context) (err error) {
+		rand.Seed(time.Now().UnixNano())
+		recordTime := time.Duration(cliCtx.Uint("time")) * time.Second
+		if recordTime == 0 {
+			return errors.New("time can't be 0")
+		}
+		maxTaskRunningTime = recordTime
+		maxCollectTraceTime = recordTime
+		maxLeaseTime = 3 * recordTime
+
 		// Create client
 		client, ctx, cancel, err := commands.NewClient(cliCtx)
 		if err != nil {
@@ -150,18 +162,6 @@ var recordTraceCommand = cli.Command{
 		}
 		defer cancel()
 		cs := client.ContentStore()
-
-		var con console.Console
-		if cliCtx.Bool("tty") {
-			if cliCtx.Uint("time") != 0 {
-				return errors.New("Cannot assign tty and time at the same time")
-			}
-			con = console.Current()
-			defer con.Reset()
-			if err := con.SetRaw(); err != nil {
-				return err
-			}
-		}
 
 		// Validate arguments
 		ref := cliCtx.Args().Get(0)
@@ -172,52 +172,20 @@ var recordTraceCommand = cli.Command{
 		if newRef == "" {
 			return errors.New("new image ref must be provided")
 		}
-		if _, err = client.ImageService().Get(ctx, ref); err == nil {
-			return errors.Errorf("Please remove old image %s first", ref)
-		} else if !errdefs.IsNotFound(err) {
-			return errors.Errorf("Fail to lookup image %s", ref)
-		}
 		if _, err = client.ImageService().Get(ctx, newRef); err == nil {
-			return errors.Errorf("New image %s exists", newRef)
+			return errors.Errorf("few image %s exists", newRef)
 		} else if !errdefs.IsNotFound(err) {
-			return errors.Errorf("Fail to lookup image %s", newRef)
-		}
-
-		// Fetch image metadata by rpull
-		fetchConfig, err := ctrcontent.NewFetchConfig(ctx, cliCtx)
-		if err != nil {
-			return err
-		}
-		if err := rpull(ctx, client, ref, cliCtx.String("snapshotter"), fetchConfig); err != nil {
-			return errors.Wrapf(err, "Fail to pull image metadata")
+			return errors.Errorf("fail to lookup image %s", newRef)
 		}
 
 		// Get image instance
-		imgInstance, err := client.ImageService().Get(ctx, ref)
+		imgModel, err := client.ImageService().Get(ctx, ref)
 		if err != nil {
-			return err
+			return errors.Errorf("fail to get image %s", ref)
 		}
-		image := containerd.NewImage(client, imgInstance)
+		image := containerd.NewImage(client, imgModel)
 		imageManifest, err := images.Manifest(ctx, cs, image.Target(), platforms.Default())
 		if err != nil {
-			return err
-		}
-
-		// Validate top layer
-		topLayer := imageManifest.Layers[len(imageManifest.Layers)-1]
-		if _, ok := topLayer.Annotations["containerd.io/snapshot/overlaybd/blob-digest"]; !ok {
-			return errors.New("Must be an overlaybd image")
-		}
-		if topLayer.Annotations["containerd.io/snapshot/overlaybd/acceleration-layer"] == "yes" {
-			return errors.New("Acceleration layer already exists")
-		}
-		fsType, ok := topLayer.Annotations["containerd.io/snapshot/overlaybd/blob-fs-type"]
-		if !ok {
-			fsType = ""
-		}
-
-		// Fetch all layer blobs into content
-		if _, err = ctrcontent.Fetch(ctx, client, ref, fetchConfig); err != nil {
 			return err
 		}
 
@@ -226,15 +194,17 @@ var recordTraceCommand = cli.Command{
 			return errors.Wrapf(err, "failed to create working dir")
 		}
 		traceFile := filepath.Join(cliCtx.String("working-dir"), uniqueObjectString())
-		if _, err := os.Create(traceFile); err != nil {
+		var traceFd *os.File
+		if traceFd, err = os.Create(traceFile); err != nil {
 			return errors.New("failed to create trace file")
 		}
+		_ = traceFd.Close()
 		defer os.Remove(traceFile)
 
 		// Create lease
 		ctx, deleteLease, err := client.WithLease(ctx,
 			leases.WithID(uniqueObjectString()),
-			leases.WithExpiration(1*time.Hour),
+			leases.WithExpiration(maxLeaseTime),
 		)
 		if err != nil {
 			return errors.Wrap(err, "failed to create lease")
@@ -274,17 +244,11 @@ var recordTraceCommand = cli.Command{
 		}
 		defer container.Delete(ctx, containerd.WithSnapshotCleanup)
 
-		task, err := tasks.NewTask(ctx, client, container, "", con, false, "", nil)
+		task, err := tasks.NewTask(ctx, client, container, "", nil, false, "", nil)
 		if err != nil {
 			return err
 		}
 		defer task.Delete(ctx)
-
-		if cliCtx.Bool("tty") {
-			if err := tasks.HandleConsoleResize(ctx, task, con); err != nil {
-				return errors.Wrapf(err, "failed to resize console")
-			}
-		}
 
 		var statusC <-chan containerd.ExitStatus
 		if statusC, err = task.Wait(ctx); err != nil {
@@ -296,13 +260,11 @@ var recordTraceCommand = cli.Command{
 		}
 		fmt.Println("Task is running ...")
 
-		timer := time.NewTimer(time.Duration(cliCtx.Uint("time")) * time.Second)
+		timer := time.NewTimer(recordTime)
 		watchStop := make(chan bool)
 
 		// Start a thread to watch timeout and signals
-		if !cliCtx.Bool("tty") {
-			go watchThread(ctx, timer, task, watchStop)
-		}
+		go watchThread(ctx, timer, task, watchStop)
 
 		// Wait task stopped
 		status := <-statusC
@@ -315,20 +277,19 @@ var recordTraceCommand = cli.Command{
 			fmt.Println("Task finished before timeout ...")
 		}
 
-		collectTrace(traceFile)
-
-		// Load trace file into content, and generate an acceleration layer
-		//loader := newContentLoader(true, contentFile{traceFile, "trace"})
-		loader := newContentLoaderWithFsType(true, fsType, contentFile{traceFile, "trace"})
-		accelLayer, err := loader.Load(ctx, cs)
-		if err != nil {
-			return fmt.Errorf("loadCommittedSnapshotInContent failed: %v", err)
+		if err = collectTrace(traceFile); err != nil {
+			return err
 		}
 
-		// Create image with the acceleration layer on top
-		newManifestDesc, err := createImageWithAccelLayer(ctx, cs, imageManifest, accelLayer)
+		// Make a duplicated top layer and fill in trace
+		newTopLayer, err := duplicateTopLayerWithTrace(ctx, cs, imageManifest, traceFile)
 		if err != nil {
-			return fmt.Errorf("createImageWithAccelLayer failed: %v", err)
+			return err
+		}
+
+		newManifestDesc, err := createImageWithNewTopLayer(ctx, cs, imageManifest, newTopLayer)
+		if err != nil {
+			return fmt.Errorf("createImageWithNewTopLayer failed: %v", err)
 		}
 
 		newImage := images.Image{
@@ -346,7 +307,7 @@ var recordTraceCommand = cli.Command{
 func watchThread(ctx context.Context, timer *time.Timer, task containerd.Task, watchStop chan bool) {
 	// Allow termination by user signals
 	sigStop := make(chan bool)
-	sigChan := registerSignals(ctx, task, sigStop)
+	sigChan := registerSignalsForTask(ctx, task, sigStop)
 
 	select {
 	case <-sigStop:
@@ -367,49 +328,293 @@ func watchThread(ctx context.Context, timer *time.Timer, task containerd.Task, w
 		fmt.Printf("Failed to get task status: %v\n", err)
 	}
 	if st.Status == containerd.Running {
+		// Note the task will not be deleted until the end
+		go preventTaskHang(ctx, task)
+
 		if err = task.Kill(ctx, unix.SIGTERM); err != nil {
 			fmt.Printf("Failed to kill task: %v\n", err)
 		}
 	}
 }
 
-func collectTrace(traceFile string) {
+func preventTaskHang(ctx context.Context, task containerd.Task) {
+	time.Sleep(maxTaskRunningTime)
+	st, err := task.Status(ctx)
+	if err != nil {
+		fmt.Printf("Failed to get task status: %v\n", err)
+	}
+	if st.Status == containerd.Running {
+		fmt.Println("Reached maxTaskRunningTime, force kill ...")
+		_ = task.Kill(ctx, unix.SIGKILL)
+	}
+}
+
+func collectTrace(traceFile string) error {
+	sigStop := make(chan bool)
+	sigChan := registerSignalsForTraceCollection(sigStop)
+
+	defer func() {
+		signal.Stop(sigChan)
+		close(sigChan)
+	}()
+
 	lockFile := traceFile + ".lock"
-	okFile := traceFile + ".ok"
 	if err := os.Remove(lockFile); err != nil && !os.IsNotExist(err) {
 		fmt.Printf("Remove lock file %s failed: %v\n", lockFile, err)
-		return
+		return err
 	}
 
+	okFile := traceFile + ".ok"
+	defer os.Remove(okFile)
+
+	fmt.Println("Collecting trace ...")
+	var elapsed time.Duration
 	for {
-		time.Sleep(time.Second)
+		select {
+		case <-sigStop:
+			return errors.New("trace collection was canceled")
+		default:
+		}
+
+		if elapsed < maxCollectTraceTime {
+			elapsed += time.Second
+			time.Sleep(time.Second)
+		} else {
+			return errors.New("trace collection was timed-out")
+		}
+
 		if _, err := os.Stat(okFile); err == nil {
 			fmt.Printf("Found OK file, trace is available now at %s\n", traceFile)
-			_ = os.Remove(okFile)
-			break
+			return nil
 		}
 	}
 }
 
-func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
+type countingWriter struct {
+	writer io.Writer
+	count  int64
+}
+
+func (w *countingWriter) Write(p []byte) (n int, err error) {
+	n, err = w.writer.Write(p)
+	w.count += int64(n)
+	return
+}
+
+func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManifest ocispec.Manifest, traceFile string) (l layer, err error) {
+	configData, err := content.ReadBlob(ctx, cs, imgManifest.Config)
+	if err != nil {
+		return emptyLayer, err
+	}
+	config := ocispec.Image{}
+	if err := json.Unmarshal(configData, &config); err != nil {
+		return emptyLayer, err
+	}
+	diffID := config.RootFS.DiffIDs[len(config.RootFS.DiffIDs)-1]
+	contentDigest := ""
+
+	var walker content.WalkFunc = func(info content.Info) error {
+		for k, v := range info.Labels {
+			if contentDigest == "" && k == "containerd.io/uncompressed" && v == diffID.String() {
+				contentDigest = info.Digest.String()
+			}
+		}
+		return nil
+	}
+	if err = cs.Walk(ctx, walker); err != nil {
+		return emptyLayer, errors.Wrapf(err, "walk contents failed")
+	}
+
+	contentFilePath := containerdDir + v1ContentsDir + strings.Replace(contentDigest, ":", "/", 1)
+	tmpDirPath, err := ioutil.TempDir("", "top-layer")
+	if err != nil {
+		return emptyLayer, err
+	}
+	defer os.RemoveAll(tmpDirPath)
+
+	if err = exec.Command("tar", "-C", tmpDirPath, "-xf", contentFilePath).Run(); err != nil {
+		return emptyLayer, errors.Wrapf(err, "extract content failed")
+	}
+
+	if err = copyFile(traceFile, path.Join(tmpDirPath, traceNameInLayer)); err != nil {
+		return emptyLayer, errors.Wrapf(err, "copy file failed")
+	}
+
+	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(uniqueObjectString()))
+	if err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
+	}
+	defer contentWriter.Close()
+
+	tarGzipDigester := digest.Canonical.Digester()
+	tarGzipCountingWriter := &countingWriter{writer: io.MultiWriter(contentWriter, tarGzipDigester.Hash())}
+	gzipWriter := gzip.NewWriter(tarGzipCountingWriter)
+
+	tarDigester := digest.Canonical.Digester()
+	tarWriter := tar.NewWriter(io.MultiWriter(gzipWriter, tarDigester.Hash()))
+
+	filesInfo, err := ioutil.ReadDir(tmpDirPath)
+	if err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to read dir")
+	}
+
+	for _, info := range filesInfo {
+		fd, err := os.Open(path.Join(tmpDirPath, info.Name()))
+		if err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to open file of %s", info.Name())
+		}
+
+		if err := tarWriter.WriteHeader(&tar.Header{
+			Name:     info.Name(),
+			Mode:     0444,
+			Size:     info.Size(),
+			Typeflag: tar.TypeReg,
+			ModTime:  info.ModTime(),
+		}); err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
+		}
+
+		if _, err := io.Copy(tarWriter, bufio.NewReader(fd)); err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to copy IO")
+		}
+	}
+
+	if err = tarWriter.Close(); err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to close tar writer")
+	}
+	if err = gzipWriter.Close(); err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to close gzip writer")
+	}
+
+	annotationsCopy := make(map[string]string)
+	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
+		annotationsCopy[k] = v
+	}
+
+	if err := contentWriter.Commit(ctx, tarGzipCountingWriter.count, tarGzipDigester.Digest()); err != nil {
+		if !errdefs.IsAlreadyExists(err) {
+			return emptyLayer, errors.Wrapf(err, "failed to commit content")
+		}
+	}
+
+	l = layer{
+		desc: ocispec.Descriptor{
+			MediaType:   images.MediaTypeDockerSchema2LayerGzip,
+			Digest:      tarGzipDigester.Digest(),
+			Size:        tarGzipCountingWriter.count,
+			Annotations: annotationsCopy,
+		},
+		diffID: tarDigester.Digest(),
+	}
+	return l, nil
+}
+
+//func duplicateTopLayerWithTrace2(ctx context.Context, ss snapshots.Snapshotter, cs content.Store, imgManifest ocispec.Manifest, container containerd.Container, traceFile string) (l layer, err error) {
+//	containerInfo, err := container.Info(ctx)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//
+//	snapshotInfo, err := ss.Stat(ctx, containerInfo.SnapshotKey)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//	parentSnapshotInfo, err := ss.Stat(ctx, snapshotInfo.Parent)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//
+//	grandParentKey := parentSnapshotInfo.Parent
+//	parentKey := snapshotInfo.Parent
+//
+//	lowerSnapshotKey := uniqueObjectString()
+//	lowerMounts, err := ss.View(ctx, lowerSnapshotKey, grandParentKey)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//	defer func() {
+//		if nextErr := ss.Remove(ctx, lowerSnapshotKey); nextErr != nil && err == nil {
+//			err = errors.Wrapf(nextErr, "failed to remove lower snapshot")
+//		}
+//	}()
+//
+//	upperSnapshotKey := uniqueObjectString()
+//	upperMounts, err := ss.Prepare(ctx, upperSnapshotKey, parentKey)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//	defer func() {
+//		if nextErr := ss.Remove(ctx, upperSnapshotKey); nextErr != nil && err == nil {
+//			err = errors.Wrapf(nextErr, "failed to remove upper snapshot")
+//		}
+//	}()
+//	if len(upperMounts) != 1 {
+//		return emptyLayer, errors.New("prepare upper returned unknown mounts")
+//	}
+//
+//	upperdir := ""
+//	for _, opt := range upperMounts[0].Options {
+//		if strings.HasPrefix(opt, "upperdir=") {
+//			upperdir = opt[len("upperdir="):]
+//			break
+//		}
+//	}
+//	if upperdir == "" {
+//		return emptyLayer, errors.New("cannot find upperdir, unable to fill in trace file")
+//	}
+//
+//	if err = copyFile(traceFile, path.Join(upperdir, traceNameInLayer)); err != nil {
+//		return emptyLayer, err
+//	}
+//
+//	diffComparer := walking.NewWalkingDiff(cs)
+//	opt := diff.WithMediaType(ocispec.MediaTypeImageLayerGzip)
+//	contentDesc, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//	opt = diff.WithMediaType(ocispec.MediaTypeImageLayer)
+//	contentDescUncompressed, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
+//	if err != nil {
+//		return emptyLayer, err
+//	}
+//
+//	annotationsCopy := make(map[string]string)
+//	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
+//		annotationsCopy[k] = v
+//	}
+//
+//	// Remain media type the same as the old images
+//	contentDesc.MediaType = images.MediaTypeDockerSchema2LayerGzip
+//	contentDesc.Annotations = annotationsCopy
+//
+//	l = layer{
+//		desc:   contentDesc,
+//		diffID: contentDescUncompressed.Digest,
+//	}
+//	return l, nil
+//}
+
+func createImageWithNewTopLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
 	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
 	if err != nil {
 		return emptyDesc, err
 	}
 
-	var oldConfig ocispec.Image
+	oldConfig := make(map[string]interface{})
 	if err := json.Unmarshal(oldConfigData, &oldConfig); err != nil {
 		return emptyDesc, err
 	}
 
-	buildTime := time.Now()
-	var newHistory = []ocispec.History{{
-		Created:   &buildTime,
-		CreatedBy: "Acceleration Layer",
-	}}
-	oldConfig.History = append(newHistory, oldConfig.History...)
-	oldConfig.RootFS.DiffIDs = append(oldConfig.RootFS.DiffIDs, l.diffID)
-	oldConfig.Created = &buildTime
+	rootfs, ok := oldConfig["rootfs"].(map[string]interface{})
+	if !ok {
+		return emptyDesc, errors.New("failed to parse rootfs")
+	}
+	diffIds, ok := rootfs["diff_ids"].([]interface{})
+	if !ok {
+		return emptyDesc, errors.New("failed to parse diff_ids")
+	}
+	diffIds[len(diffIds)-1] = l.diffID.String()
 
 	newConfigData, err := json.MarshalIndent(oldConfig, "", "   ")
 	if err != nil {
@@ -429,7 +634,7 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 	newManifest := ocispec.Manifest{}
 	newManifest.SchemaVersion = oldManifest.SchemaVersion
 	newManifest.Config = newConfigDesc
-	newManifest.Layers = append(oldManifest.Layers, l.desc)
+	newManifest.Layers = append(oldManifest.Layers[:len(oldManifest.Layers)-1], l.desc)
 
 	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
 	var newManifestV2 = struct {
@@ -480,23 +685,25 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 		opts  []oci.SpecOpts
 		cOpts []containerd.NewContainerOpts
 		spec  containerd.NewContainerOpts
-	)
-	cOpts = append(cOpts, containerd.WithContainerLabels(commands.LabelArgs(cliCtx.StringSlice("label"))))
 
-	var (
 		key = uniqueObjectString()
 		// Specify the binary and arguments for the application to execute
 		args = cliCtx.Args()[2:]
 	)
-	opts = append(opts, oci.WithDefaultSpec(), oci.WithDefaultUnixDevices)
-	opts = append(opts, oci.WithImageConfig(image))
+
 	cOpts = append(cOpts,
 		containerd.WithImage(image),
-		containerd.WithSnapshotter(cliCtx.String("snapshotter")))
+		containerd.WithSnapshotter(cliCtx.String("snapshotter")),
+		containerd.WithImageStopSignal(image, "SIGTERM"),
+		containerd.WithRuntime(cliCtx.String("runtime"), nil),
+		withNewSnapshot(key, image, cliCtx.String("snapshotter"), traceFile),
+	)
 
-	cOpts = append(cOpts, withNewSnapshot(key, image, cliCtx.String("snapshotter"), traceFile))
-	cOpts = append(cOpts, containerd.WithImageStopSignal(image, "SIGTERM"))
-
+	opts = append(opts,
+		oci.WithDefaultSpec(),
+		oci.WithDefaultUnixDevices,
+		oci.WithImageConfig(image),
+	)
 	if !cliCtx.Bool("disable-network-isolation") {
 		opts = append(opts, oci.WithLinuxNamespace(specs.LinuxNamespace{
 			Type: specs.NetworkNamespace,
@@ -504,16 +711,10 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 		}))
 	}
 
-	if cliCtx.Bool("tty") {
-		opts = append(opts, oci.WithTTY)
-	}
-
 	if len(args) > 0 {
 		opts = append(opts, oci.WithProcessArgs(args...))
 	}
 
-	cOpts = append(cOpts, containerd.WithRuntime(cliCtx.String("runtime"), nil))
-	opts = append(opts, oci.WithAnnotations(commands.LabelArgs(cliCtx.StringSlice("label"))))
 	var s specs.Spec
 	spec = containerd.WithSpec(&s, opts...)
 	cOpts = append(cOpts, spec)
@@ -575,7 +776,7 @@ func uniqueObjectString() string {
 	return fmt.Sprintf(uniqueObjectFormat, now.Format("20060102150405"), hex.EncodeToString(b[:]))
 }
 
-func registerSignals(ctx context.Context, task containerd.Task, sigStop chan bool) chan os.Signal {
+func registerSignalsForTraceCollection(sigStop chan bool) chan os.Signal {
 	sigc := make(chan os.Signal, 128)
 	signal.Notify(sigc)
 	go func() {
@@ -584,6 +785,23 @@ func registerSignals(ctx context.Context, task containerd.Task, sigStop chan boo
 				continue
 			}
 			if s == unix.SIGTERM || s == unix.SIGINT {
+				sigStop <- true
+			}
+		}
+	}()
+	return sigc
+}
+
+func registerSignalsForTask(ctx context.Context, task containerd.Task, sigStop chan bool) chan os.Signal {
+	sigc := make(chan os.Signal, 128)
+	signal.Notify(sigc)
+	go func() {
+		for s := range sigc {
+			if canIgnoreSignal(s) {
+				continue
+			}
+			if s == unix.SIGTERM || s == unix.SIGINT {
+				fmt.Printf("Received signal %s\n", s)
 				sigStop <- true
 			}
 			// Forward all signals to task
@@ -601,4 +819,30 @@ func registerSignals(ctx context.Context, task containerd.Task, sigStop chan boo
 // Go 1.14 started to use non-cooperative goroutine preemption, SIGURG should be ignored
 func canIgnoreSignal(s os.Signal) bool {
 	return s == unix.SIGURG
+}
+
+func copyFile(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if err = out.Truncate(0); err != nil {
+		return err
+	}
+	defer func() {
+		cerr := out.Close()
+		if err == nil {
+			err = cerr
+		}
+	}()
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	err = out.Sync()
+	return err
 }
