@@ -16,24 +16,17 @@ jobs:
 
     strategy:
       matrix:
-        go-version: [1.15.8]
+        go-version: [1.18.2]
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/setup-go@v2
         with:
-          path: src/github.com/containerd/accelerated-container-image
+          go-version: ${{ matrix.go-version }}
 
-      - name: set env
-        shell: bash
-        run: |
-          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-
-      - name: golangci-lint check
-        uses: golangci/golangci-lint-action@v2
+      - uses: actions/checkout@v2
+      - uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45.0
-          working-directory: src/github.com/containerd/accelerated-container-image
           skip-cache: true
           args: --timeout=5m
 
@@ -117,7 +110,7 @@ jobs:
       - name: install Go
         uses: actions/setup-go@v1
         with:
-          go-version: '1.15.8'
+          go-version: '1.18.2'
 
       - name: set env
         shell: bash

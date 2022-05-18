@@ -17,11 +17,11 @@ The key features are:
 
     Overlaybd outputs virtual block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes, which is difficult for FUSE-based image formats.
 
-* **Native Support for Writable**
+* **[Native Support for Writable](docs/WRITABLE.md)**
 
     Overlaybd can be used as writable/container layer. The end-users can build their overlaybd images naturally without conversion.
 
-* **Multiple File System Supported**
+* **[Multiple File System Supported](docs/MULTI_FS_SUPPORT.md)**
 
     Overlaybd outputs virtual block devices, which is supported to be formatted by multiple file system. It's convenient for user to choose ideal file system.
 
@@ -61,6 +61,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 * See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
 
 * See how to use layer deduplication for image conversion at [IMAGE_CONVERTOR](docs/IMAGE_CONVERTOR.md)
+
+* See how to use overlaybd writable layer at [WRITABLE](docs/WRITABLE.md)
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
