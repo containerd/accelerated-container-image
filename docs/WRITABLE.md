@@ -1,13 +1,13 @@
 # Writable layer
 
-Overlaybd can be used as writable/container layer, which can be used for image build/conversion, and container runtime.
+Overlaybd writable/container layer can be used for image build/conversion, and container runtime.
 
 
-There are two kinds of writable layer, append-only based and sparse-file based:
+There are two kinds of writable layer, `append-only` based and `sparse-file` based:
 
 * **append-only**
 
-    It is a writable layer in the form of log-structure that data is append to the end of the data file. It has high performance but the size will increase without gc (not implemented yet). It is suitable for image building.
+    It is a writable layer in the form of log-structure that data is appended to the end of the data file with index update. It has high performance but the size will increase without gc (not implemented yet). It is suitable for image conversion and image building.
 
 * **sparse-file**
 
@@ -16,7 +16,7 @@ There are two kinds of writable layer, append-only based and sparse-file based:
     *This feature is incomming.*
 
 
-There are two kinds of mount mode, dir mod and dev mod:
+There are two kinds of mount mode, `dir` mod and `dev` mod:
 
 * **dir**
 
@@ -24,14 +24,14 @@ There are two kinds of mount mode, dir mod and dev mod:
 
 * **dev**
 
-    It returns a mount of a writable device with fs type when calling snapshotter `Mounts`. It is up to the caller to decide when and where to mount the device. This device can be passed to a secure container or a vm runtime through virtio-blk.
+    It returns a mount of a writable device with fs type parameter when calling snapshotter `Mounts`. It is up to the caller to decide when and where to mount the device. This device can be passed to a secure container or a vm runtime through virtio-blk.
 
 
 ## Usage
 
 * for containerd/ctr 1.6+
 
-    Just pass the parameter through `--snapshotter-label`, by passing `dev` or `dir` to `containerd.io/snapshot/overlaybd.writable support`.
+    Just pass the parameter through `--snapshotter-label`, by setting `dev` or `dir` to `containerd.io/snapshot/overlaybd.writable`.
 
     ```bash
     ctr run --net-host --snapshotter=overlaybd --rm -t --snapshotter-label containerd.io/snapshot/overlaybd.writable=dev registry.hub.docker.com/overlaybd/redis:6.2.1_obd test_rw
