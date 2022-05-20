@@ -606,25 +606,29 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	// if writable, should commit the data and make it immutable.
 	if _, writableBD := oinfo.Labels[LabelSupportReadWriteMode]; writableBD {
 		// TODO(fuweid): how to rollback?
-		if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
-			return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
-		}
-
-		if err := o.commitWritableOverlaybd(ctx, id); err != nil {
-			return err
-		}
-
-		defer func() {
-			if retErr != nil {
-				return
+		if oinfo.Labels[labelKeyAccelerationLayer] == "yes" {
+			log.G(ctx).Info("Commit accel-layer requires no writable_data")
+		} else {
+			if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
+				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
 
-			// clean up the temporary data
-			os.Remove(o.overlaybdWritableDataPath(id))
-			os.Remove(o.overlaybdWritableIndexPath(id))
-		}()
+			if err := o.commitWritableOverlaybd(ctx, id); err != nil {
+				return err
+			}
 
-		opts = append(opts, snapshots.WithLabels(map[string]string{LabelLocalOverlayBDPath: o.magicFilePath(id)}))
+			defer func() {
+				if retErr != nil {
+					return
+				}
+
+				// clean up the temporary data
+				os.Remove(o.overlaybdWritableDataPath(id))
+				os.Remove(o.overlaybdWritableIndexPath(id))
+			}()
+
+			opts = append(opts, snapshots.WithLabels(map[string]string{LabelLocalOverlayBDPath: o.magicFilePath(id)}))
+		}
 	}
 
 	id, info, err := o.commit(ctx, name, key, opts...)
