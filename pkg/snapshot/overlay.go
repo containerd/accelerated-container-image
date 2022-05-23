@@ -172,9 +172,9 @@ type Opt func(config *SnapshotterConfig) error
 //      |_ ${ID}/
 //      |   |_ fs/               # lowerdir or upperdir
 //      |   |_ work/             # workdir
-//      |   |_ block/            # iscsi-target block
-//      |      |_ config.v1.json     # config for overlaybd target
-//      |      |_ init-debug.log     # shows the debug log when creating iscsi target
+//      |   |_ block/            # tcmu block device
+//      |      |_ config.v1.json     # config for overlaybd
+//      |      |_ init-debug.log     # shows the debug log when creating overlaybd device
 //      |      |_ mountpoint         # the block device will mount on this if the snapshot is based on overlaybd
 //      |      |_ writable_data      # exists if the block is writable in active snapshotter
 //      |      |_ writable_index     # exists if the block is writable in active snapshotter
