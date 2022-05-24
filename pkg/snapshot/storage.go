@@ -51,7 +51,7 @@ const (
 	// for example snID 128, the loopback device config in /sys/kernel/config/target/loopback/naa.1990000000000128
 	obdLoopNaaPrefix = 199
 
-	// param used to restrict tcmu devices mmap memory size for iSCSI data.
+	// param used to restrict tcmu data area size
 	// it is worked by setting max_data_area_mb for devices in configfs.
 	obdMaxDataAreaMB = 4
 )

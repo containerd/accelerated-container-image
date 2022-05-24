@@ -88,7 +88,7 @@ sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd
 sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo
 ```
 
-After container launched success, we could see a new iSCSI device (sdb) has been created, and its mount-point is the lowerdir of overlayfs.
+After container launched success, we could see a new block device (sdb) has been created, and its mount-point is the lowerdir of overlayfs.
 ```bash
 $ sudo lsblk
 NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT

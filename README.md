@@ -2,7 +2,7 @@
 
 Accelerated Container Image is an open-source implementation of paper ["DADI: Block-Level Image Service for Agile and Elastic Application Deployment. USENIX ATC'20"](https://www.usenix.org/conference/atc20/presentation/li-huiba).
 
-DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Function Compute** _([FaaSNet: Scalable and Fast Provisioning of Custom Serverless Container Runtimes at Alibaba Cloud Function Compute. USENIX ATC'21](https://www.usenix.org/system/files/atc21-wang-ao.pdf))_ which enter **the Forrester leader quadrant**.
+DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Alibaba serverless services (FC / SAE / ECI, etc)**, which enter **the Forrester leader quadrant**.
 
 At the heart of the acceleration is overlaybd, which is a new remote image format based on block device. Overlaybd backstore provides a merged view of a sequence of block-based layers in userspace and outputs as a virtual blocks device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
 It can be used for container acceleration by supporting fetching image data on-demand without downloading and unpacking the whole image before a container running. With overlaybd image format, we can cold start a container instantly.
@@ -15,11 +15,11 @@ The key features are:
 
 * **High Reliability**
 
-    Overlaybd outputs virtual block devices through iSCSI protocol, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes, which is difficult for FUSE-based image formats.
+    Overlaybd outputs virtual block devices through TCMU, which is widely used and supported in most operation systems. Overlaybd backstore can recover from failures or crashes, which is difficult for FUSE-based image formats.
 
 * **[Native Support for Writable](docs/WRITABLE.md)**
 
-    Overlaybd can be used as writable/container layer. The end-users can build their overlaybd images naturally without conversion.
+    Overlaybd can be used as writable/container layer. It can be used as container layer for runtime instead of overlayfs upper layer, or used to build overlaybd images.
 
 * **[Multiple File System Supported](docs/MULTI_FS_SUPPORT.md)**
 
@@ -80,7 +80,7 @@ Zfile is a new compression file format to support seekable decompression, which 
 
 ![io-path](docs/images/io-path.png "io-path")
 
-Overlaybd connects with applications through a filesystem mounted on an virtual block device. Overlaybd is agnostic to the choice of filesystem so users can select one that best fits their needs. I/O requests go from applications to a regular filesystem such as ext4. From there they go to the loopback iSCSI device (through TCM_loopback) and then to the user space overlaybd backstore (through TCMU). Backend read operations are always on layer files. Some of the layer files may have already been downloaded, so these reads would hit local filesystem. Other reads will be directed to registry, or hit the registry cache. Write and trim operations are handled by overlaybd backstore which writes the data and index files of the writable layer to the local file system. For more details, see the [paper](https://www.usenix.org/conference/atc20/presentation/li-huiba).
+Overlaybd connects with applications through a filesystem mounted on an virtual block device. Overlaybd is agnostic to the choice of filesystem so users can select one that best fits their needs. I/O requests go from applications to a regular filesystem such as ext4. From there they go to the loopback device (through TCM_loopback) and then to the user space overlaybd backstore (through TCMU). Backend read operations are always on layer files. Some of the layer files may have already been downloaded, so these reads would hit local filesystem. Other reads will be directed to registry, or hit the registry cache. Write and trim operations are handled by overlaybd backstore which writes the data and index files of the writable layer to the local file system. For more details, see the [paper](https://www.usenix.org/conference/atc20/presentation/li-huiba).
 
 ## Licenses
 
