@@ -31,7 +31,7 @@ There are two kinds of mount mode, `dir` mod and `dev` mod:
 
 * for containerd/ctr 1.6+
 
-    Just pass the parameter through `--snapshotter-label`, by setting `dev` or `dir` to `containerd.io/snapshot/overlaybd.writable`.
+    Just pass the parameter through `--snapshotter-label`, by setting `dev` or `dir` to `containerd.io/snapshot/overlaybd.writable`. [#5660](https://github.com/containerd/containerd/pull/5660)
 
     ```bash
     ctr run --net-host --snapshotter=overlaybd --rm -t --snapshotter-label containerd.io/snapshot/overlaybd.writable=dev registry.hub.docker.com/overlaybd/redis:6.2.1_obd test_rw

@@ -39,6 +39,7 @@ if [[ OP -eq 1 ]]; then
     m=$(grep proxy_plugins.overlaybd /etc/containerd/config.toml)
     if [[ $? -ne 0 ]]; then
         if [[ ! -f /etc/containerd/config.toml ]]; then
+            mkdir -p /etc/containerd ## this directory may not exist in ubuntu
             touch /etc/containerd/config.toml
         fi
 sudo cat <<-EOF | sudo tee --append /etc/containerd/config.toml

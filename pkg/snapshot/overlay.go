@@ -469,7 +469,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			fsType, ok := obdInfo.Labels[labelKeyOverlayBDBlobFsType]
 			if !ok {
-				log.G(ctx).Warnf("cannot get fs type from lable, %v", obdInfo.Labels)
+				log.G(ctx).Warnf("cannot get fs type from label, %v", obdInfo.Labels)
 				fsType = "ext4"
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
