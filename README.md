@@ -82,6 +82,12 @@ Zfile is a new compression file format to support seekable decompression, which 
 
 Overlaybd connects with applications through a filesystem mounted on an virtual block device. Overlaybd is agnostic to the choice of filesystem so users can select one that best fits their needs. I/O requests go from applications to a regular filesystem such as ext4. From there they go to the loopback device (through TCM_loopback) and then to the user space overlaybd backstore (through TCMU). Backend read operations are always on layer files. Some of the layer files may have already been downloaded, so these reads would hit local filesystem. Other reads will be directed to registry, or hit the registry cache. Write and trim operations are handled by overlaybd backstore which writes the data and index files of the writable layer to the local file system. For more details, see the [paper](https://www.usenix.org/conference/atc20/presentation/li-huiba).
 
+
+## Communication
+For async communication and long running discussions please use issues and pull requests on the github repo. This will be the best place to discuss design and implementation.
+
+For sync communication catch us in the #overlaybd slack channels on Cloud Native Computing Foundation's (CNCF) slack - cloud-native.slack.com. Everyone is welcome to join and chat. [Get Invite to CNCF slack.](https://communityinviter.com/apps/cloud-native/cncf)
+
 ## Licenses
 
 Accelerated Container Image is released under the Apache License, Version 2.0.
