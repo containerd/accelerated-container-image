@@ -298,13 +298,18 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 	return usage, nil
 }
 
-func (o *snapshotter) getWritableType(ctx context.Context, info snapshots.Info) (mode int) {
+func (o *snapshotter) getWritableType(ctx context.Context, id string, info snapshots.Info) (mode int) {
 	defer func() {
 		log.G(ctx).Infof("snapshot R/W label: %d", mode)
 	}()
 	mode = roDir
 	m, ok := info.Labels[LabelSupportReadWriteMode]
 	if !ok {
+		return
+	}
+	filePath := o.overlaybdWritableDataPath(id)
+	if _, err := os.Stat(filePath); err != nil {
+		log.G(ctx).Errorf("overlaybd writable file stat failed: %v", err)
 		return
 	}
 	if m == "dir" {
@@ -414,7 +419,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	}
 
 	stype := storageTypeNormal
-	writeType := o.getWritableType(ctx, info)
+	writeType := o.getWritableType(ctx, id, info)
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
 		if writeType != roDir {
@@ -428,14 +433,12 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				return nil, err
 			}
 		}
-
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
 			if parent != "" {
 				parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
 				needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
 				recordTracePath := info.Labels[labelKeyRecordTracePath]
-
 				log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
 					parentIsAccelLayer, needRecordTrace, recordTracePath)
 
@@ -550,7 +553,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 			return nil, errors.Wrap(err, "failed to get info")
 		}
 
-		writeType := o.getWritableType(ctx, info)
+		writeType := o.getWritableType(ctx, s.ID, info)
 		if writeType != roDir {
 			return o.basedOnBlockDeviceMount(ctx, s, writeType)
 		}
