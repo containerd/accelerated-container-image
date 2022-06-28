@@ -307,20 +307,26 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	if !ok {
 		return
 	}
-	filePath := o.overlaybdWritableDataPath(id)
-	if _, err := os.Stat(filePath); err != nil {
-		log.G(ctx).Errorf("overlaybd writable file stat failed: %v", err)
+	rwMode := func() int {
+		if m == "dir" {
+			return rwDir
+		}
+		if m == "dev" {
+			return rwDev
+		}
+		return roDir
+	}
+	if id == "" {
+		// 'id' shouldn't be empty unless building initial layer.
+		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
+		return rwMode()
+	}
+	// check image type (ociv1 or overlaybd)
+	if _, err := o.loadBackingStoreConfig(id); err != nil {
+		log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
 		return
 	}
-	if m == "dir" {
-		mode = rwDir
-		return
-	}
-	if m == "dev" {
-		mode = rwDev
-		return
-	}
-	return
+	return rwMode()
 }
 
 func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
@@ -419,7 +425,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	}
 
 	stype := storageTypeNormal
-	writeType := o.getWritableType(ctx, id, info)
+	writeType := o.getWritableType(ctx, parentID, info)
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
 		if writeType != roDir {
