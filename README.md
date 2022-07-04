@@ -2,7 +2,7 @@
 
 Accelerated Container Image is an open-source implementation of paper **["DADI: Block-Level Image Service for Agile and Elastic Application Deployment. USENIX ATC'20"](https://www.usenix.org/conference/atc20/presentation/li-huiba)**.
 
-DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Alibaba serverless services (FC [FaaSNet. USENIX ATC'21](https://www.usenix.org/system/files/atc21-wang-ao.pdf) / SAE / ECI, )** which enter **the Forrester leader quadrant**.
+DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Alibaba serverless services (FC [FaaSNet. USENIX ATC'21](https://www.usenix.org/system/files/atc21-wang-ao.pdf) / SAE / ECI, etc)** which enter **the Forrester leader quadrant**.
 
 At the heart of the acceleration is overlaybd, which is a new remote image format based on block device. Overlaybd backstore provides a merged view of a sequence of block-based layers in userspace and outputs as a virtual blocks device through [TCMU](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt).
 It can be used for container acceleration by supporting fetching image data on-demand without downloading and unpacking the whole image before a container running. With overlaybd image format, we can cold start a container instantly.
