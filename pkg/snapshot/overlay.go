@@ -186,12 +186,13 @@ type Opt func(config *SnapshotterConfig) error
 //    # based on boltdb.
 //    #
 //    - metadata.db
-//
+//,
 type snapshotter struct {
-	root     string
-	config   SnapshotterConfig
-	ms       *storage.MetaStore
-	indexOff bool
+	root           string
+	config         SnapshotterConfig
+	ms             *storage.MetaStore
+	metacopyOption string
+	indexOff       bool
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
@@ -216,6 +217,11 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 		return nil, err
 	}
 
+	metacopyOption := ""
+	if _, err := os.Stat("/sys/module/overlay/parameters/metacopy"); err == nil {
+		metacopyOption = "metacopy=on"
+	}
+
 	// figure out whether "index=off" option is recognized by the kernel
 	var indexOff bool
 	if _, err = os.Stat("/sys/module/overlay/parameters/index"); err == nil {
@@ -223,10 +229,11 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 	}
 
 	return &snapshotter{
-		root:     root,
-		ms:       ms,
-		indexOff: indexOff,
-		config:   config,
+		root:           root,
+		ms:             ms,
+		indexOff:       indexOff,
+		config:         config,
+		metacopyOption: metacopyOption,
 	}, nil
 }
 
@@ -425,7 +432,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	}
 
 	stype := storageTypeNormal
-	writeType := o.getWritableType(ctx, parentID, info)
+	writeType = o.getWritableType(ctx, parentID, info)
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
 		if writeType != roDir {
@@ -559,9 +566,27 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 			return nil, errors.Wrap(err, "failed to get info")
 		}
 
-		writeType := o.getWritableType(ctx, s.ID, info)
+		writeType = o.getWritableType(ctx, s.ID, info)
 		if writeType != roDir {
 			return o.basedOnBlockDeviceMount(ctx, s, writeType)
+		}
+
+		isDadi, mountDir, err := o.MountDadiSnapshot(ctx, key, info, s, "")
+		if err != nil {
+			log.G(ctx).Errorf("Error in MountDadiSnapshot")
+			return nil, err
+		}
+		if isDadi {
+			return []mount.Mount{
+				{
+					Source: mountDir,
+					Type:   "bind",
+					Options: []string{
+						"rw",
+						"rbind",
+					},
+				},
+			}, nil
 		}
 
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
@@ -973,16 +998,33 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		}
 	}
 
+	_, info, _, err := storage.GetInfo(ctx, key)
 	path = filepath.Join(snapshotDir, s.ID)
 	if err = os.Rename(td, path); err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to rename")
 	}
 	td = ""
+	if data, ok := info.Labels["PodSandboxMetadata"]; ok {
+		if err := ioutil.WriteFile(filepath.Join(path, SandBoxMetaFile), []byte(data), 0644); err != nil {
+			log.G(ctx).Errorf("LSMD ERROR write sandbox meta failed. path: %s, err: %s", filepath.Join(path, SandBoxMetaFile), err.Error())
+		}
+	} else {
+		log.G(ctx).Warnf("sandbox meta not found.")
+	}
+
+	if img, ok := info.Labels[labelKeyCriImageRef]; ok {
+		if err := ioutil.WriteFile(filepath.Join(path, ImageRefFile), []byte(img), 0644); err != nil {
+			log.G(ctx).Errorf("LSMD ERROR write imageRef '%s'. path: %s, err: %s", img, filepath.Join(path, SandBoxMetaFile), err.Error())
+		}
+	} else {
+		log.G(ctx).Warnf("imageRef meta not found.")
+	}
 
 	id, info, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to get snapshot info")
 	}
+
 	return id, info, nil
 }
 
@@ -993,6 +1035,7 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 		_, hasRef := info.Labels[labelKeyImageRef]
 		_, hasCriRef := info.Labels[labelKeyCriImageRef]
 
+		log.G(ctx).Debugf("hasBDBlobSize: %s, hasBDBlobDigest: %s, hasRef: %s, hasCriRef: %s")
 		if hasBDBlobSize && hasBDBlobDigest {
 			if hasRef || hasCriRef {
 				return storageTypeRemoteBlock, nil

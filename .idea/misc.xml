@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="UnattendedHostPersistenceState">
+    <option name="openedFilesInfos">
+      <list>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="3682" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/cmd/overlaybd-snapshotter/main.go" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="235" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/pkg/snapshot/overlay.go" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="13700" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/pkg/snapshot/zdfs.go" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="1958" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/pkg/snapshot/storage.go" />
+        </OpenedFileInfo>
+        <OpenedFileInfo>
+          <option name="caretOffset" value="4718" />
+          <option name="fileUrl" value="file://$PROJECT_DIR$/pkg/snapshot/overlaybd.go" />
+        </OpenedFileInfo>
+      </list>
+    </option>
+  </component>
+</project>
