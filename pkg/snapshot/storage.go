@@ -59,6 +59,7 @@ const (
 
 // OverlayBDBSConfig is the config of overlaybd target.
 type OverlayBDBSConfig struct {
+	ImageRef          string                   `json:"imageRef"`
 	RepoBlobURL       string                   `json:"repoBlobUrl"`
 	Lowers            []OverlayBDBSConfigLower `json:"lowers"`
 	Upper             OverlayBDBSConfigUpper   `json:"upper"`
