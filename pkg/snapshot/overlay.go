@@ -19,6 +19,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -546,19 +547,28 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 // called on an read-write or readonly transaction.
 //
 // This can be used to recover mounts after calling View or Prepare.
-func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, error) {
+func (o *snapshotter) Mounts(ctx context.Context, key string) (res []mount.Mount, resErr error) {
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return nil, err
 	}
+
 	defer t.Rollback()
 
 	s, err := storage.GetSnapshot(ctx, key)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get active mount")
+		return nil, errors.Wrapf(err, "failed to get snapshot")
 	}
 
-	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
+	logrus.Infof("enter Mounts: id = %s", s.ID)
+	defer func() {
+		logrus.Infof("exit Mounts: id = %s, return = %v", s.ID, res)
+	}()
+
+	recordTracePath, err := getRecordTracePath(ctx, key)
+	if err != nil {
+		return nil, err
+	}
 
 	if len(s.ParentIDs) > 0 {
 		_, info, _, err := storage.GetInfo(ctx, key)
@@ -566,40 +576,22 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 			return nil, errors.Wrap(err, "failed to get info")
 		}
 
-		writeType = o.getWritableType(ctx, s.ID, info)
-		if writeType != roDir {
-			return o.basedOnBlockDeviceMount(ctx, s, writeType)
-		}
-
-		isDadi, mountDir, err := o.MountDadiSnapshot(ctx, key, info, s, "")
+		isDadi, _, err := o.MountDadiSnapshot(ctx, key, info, s, recordTracePath)
 		if err != nil {
-			log.G(ctx).Errorf("Error in MountDadiSnapshot")
+			logrus.Error(err.Error())
 			return nil, err
 		}
 		if isDadi {
-			return []mount.Mount{
-				{
-					Source: mountDir,
-					Type:   "bind",
-					Options: []string{
-						"rw",
-						"rbind",
-					},
-				},
-			}, nil
-		}
+			writeType = o.getWritableType(ctx, s.ID, info)
+			if writeType != roDir {
+				return o.basedOnBlockDeviceMount(ctx, s, writeType)
+			}
 
-		parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", info.Parent)
-		}
+			parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", info.Parent)
+			}
 
-		parentStype, err := o.identifySnapshotStorageType(ctx, parentID, parentInfo)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to identify storage of parent snapshot %s", parentInfo.Name)
-		}
-
-		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
 			fsType, ok := parentInfo.Labels[labelKeyOverlayBDBlobFsType]
 			if !ok {
 				fsType = "ext4"
@@ -650,7 +642,6 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			if err := o.commitWritableOverlaybd(ctx, id); err != nil {
 				return err
 			}
-
 			defer func() {
 				if retErr != nil {
 					return
@@ -1133,4 +1124,16 @@ func isOverlaybdFileHeader(header []byte) bool {
 	magic2 := *(*uint64)(unsafe.Pointer(&header[16]))
 	return (magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632) ||
 		(magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426)
+}
+
+func getRecordTracePath(ctx context.Context, key string) (string, error) {
+	var recordTracePath string
+	_, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to get info")
+	}
+	if info.Labels[labelKeyRecordTrace] == "yes" {
+		recordTracePath = info.Labels[labelKeyRecordTracePath]
+	}
+	return recordTracePath, nil
 }

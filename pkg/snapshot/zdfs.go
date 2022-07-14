@@ -4,21 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/reference"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/storage"
-	dockermount "github.com/docker/docker/pkg/mount"
-	"github.com/moby/sys/mountinfo"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/snapshots"
+	"github.com/containerd/containerd/snapshots/storage"
+	"github.com/containerd/continuity"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 var (
@@ -27,28 +26,17 @@ var (
 )
 
 const (
-	deviceName = "dev_name"
-
-	dataFile            = ".data_file"             //top layer data file for lsmd
-	idxFile             = ".data_index"            //top layer index file for lsmd
-	zdfsMerged          = "zdfsmerged"             //merged dir that containes all the context of all dadi lower dirs
 	zdfsMetaDir         = "zdfsmeta"               //meta dir that contains the dadi image meta files
 	iNewFormat          = ".aaaaaaaaaaaaaaaa.lsmt" //characteristic file of dadi image
 	zdfsChecksumFile    = ".checksum_file"         //file containing the checksum data if each dadi layer file to guarantee data consistent
 	zdfsOssurlFile      = ".oss_url"               //file containing the address of layer file
 	zdfsOssDataSizeFile = ".data_size"             //file containing the size of layer file
 	zdfsOssTypeFile     = ".type"                  //file containing the type, such as layern, commit(layer file on local dir), oss(layer file is in oss
-	zdfsOssTypeTopLayer = "layern"                 //type that indicates that this layer is the top layer for lsmd
 	zdfsTrace           = ".trace"
 
-	overlaybdBaseLayerDir = "/opt/overlaybd/baselayers"
-	overlaybdBaseLayer    = "/opt/overlaybd/baselayers/.commit"
-
-	lsmtCreate = "/opt/lsmd/bin/lsmt_create" //binary path that is used to creteat top layer files for lsmd
-
-	ImageRefFile = "image_ref" // save cri.imageRef as file for old dadi format
-
-	SandBoxMetaFile = "pod_sandbox_meta" // for SAE
+	overlaybdBaseLayer = "/opt/overlaybd/baselayers/.commit"
+	ImageRefFile       = "image_ref"        // save cri.imageRef as file for old dadi format
+	SandBoxMetaFile    = "pod_sandbox_meta" // for SAE
 )
 
 //If error is nil, the existence is valid.
@@ -65,7 +53,7 @@ func pathExists(path string) (bool, error) {
 }
 
 func IsZdfsLayer(dir string) (bool, error) {
-	exists, _ := pathExists(path.Join(dir, "zdfsmeta", "config.v1.json"))
+	exists, _ := pathExists(overlaybdConfPath(dir))
 	if exists {
 		return true, nil
 	}
@@ -76,10 +64,6 @@ func IsZdfsLayer(dir string) (bool, error) {
 		return false, fmt.Errorf("LSMD ERROR failed to IsZdfsLayerInApplyDiff(dir%s), err:%s", dir, err)
 	}
 	return b, nil
-}
-
-func scsiBlockDevicePath(deviceNumber string) string {
-	return fmt.Sprintf("/sys/class/scsi_device/%s:0/device/block", deviceNumber)
 }
 
 func (o *snapshotter) getSnDir(snID string) string {
@@ -99,8 +83,25 @@ func (o *snapshotter) convertIDsToDirs(parentIDs []string) []string {
 	return ret
 }
 
-func getZdfsmerged(dir string) string {
-	return path.Join(dir, zdfsMerged)
+func overlaybdConfPath(dir string) string {
+	return filepath.Join(dir, "block", "config.v1.json")
+}
+
+func overlaybdInitDebuglogPath(dir string) string {
+	return filepath.Join(dir, zdfsMetaDir, "init-debug.log")
+}
+
+func atomicWriteOverlaybdTargetConfig(dir string, configJSON *OverlayBDBSConfig) error {
+	data, err := json.Marshal(configJSON)
+	if err != nil {
+		return errors.Wrapf(err, "failed to marshal %+v configJSON into JSON", configJSON)
+	}
+
+	confPath := overlaybdConfPath(dir)
+	if err := continuity.AtomicWriteFile(confPath, data, 0600); err != nil {
+		return errors.Wrapf(err, "failed to commit the overlaybd config on %s", confPath)
+	}
+	return nil
 }
 
 func getTrimStringFromFile(filePath string) (string, error) {
@@ -127,123 +128,6 @@ func hasZdfsFlagFiles(dir string) (bool, error) {
 	return true, nil
 }
 
-//check necessary binaries and dirs
-func CheckLsmdNecessity(engine string) bool {
-	if zdfsIsReady {
-		return true
-	}
-
-	if engine == "tcmu" {
-		paths := []string{overlaybdBaseLayer}
-		for _, p := range paths {
-			b, err := pathExists(p)
-			if err != nil {
-				logrus.Errorf(" %s doesn't exist. err:%s", p, err)
-				return false
-			}
-			if b == false {
-				logrus.Errorf(" %s doesn't exist.", p)
-				return false
-			}
-		}
-		// use service ExecStartPre to do modprobe
-		// if !CheckAndModprobe("target_core_user") {
-		// 	logrus.Errorf("failed to modprobe target_core_user(tcmu) module, try use vrbd")
-		// 	return false
-		// }
-		zdfsIsReady = true
-		return true
-	}
-
-	return false
-}
-
-func GetShared(snDir string, lowerDirs []string, upper string, engine string) (devName string, retErr error) {
-	devName = ""
-	if len(lowerDirs) <= 0 {
-		return devName, fmt.Errorf("LSMD GetShared ERROR empty lowerDirs")
-	}
-
-	logrus.Infof("LSMD Enter GetShared, image top layer: %s, upper: %s", lowerDirs[0], upper)
-	defer logrus.Infof("LSMD Exit GetShared, image top layer: %s, upper: %s", lowerDirs[0], upper)
-
-	topLayerDir := lowerDirs[0]
-	if upper != "" {
-		topLayerDir = upper
-	}
-	if b, err := pathExists(topLayerDir); !b {
-		logrus.Errorf("LSMD GetShared ERROR topdir:%s doesn't exist. err:%s", topLayerDir, err)
-		return devName, fmt.Errorf("LSMD GetShared ERROR topdir:%s doesn't exist. err:%s", topLayerDir, err)
-	}
-
-	// 直接挂在toplayer的zdfsmerged，不存在则创建
-	dst := getZdfsmerged(topLayerDir)
-	logrus.Infof("toplayer: %s", dst)
-	b, _ := pathExists(dst)
-	if !b {
-		if err := os.MkdirAll(dst, 0755); err != nil && !os.IsExist(err) {
-			logrus.Errorf("LSMD ERROR os.MkdirAs(%s, 0755) err:%s", dst, err)
-			return devName, fmt.Errorf("LSMD GetShared ERROR os.MkdirAs(%s, 0755). err:%s", dst, err)
-		}
-	}
-	// overwrite sandbox meta to image's top layer.
-	sandBoxMetaSrc := path.Join(snDir, SandBoxMetaFile)
-	if _, err := os.Stat(sandBoxMetaSrc); err == nil {
-		sandBoxMetaCopy := path.Join(lowerDirs[0], SandBoxMetaFile)
-		logrus.Infof("overwrite sandbox meta into %s", sandBoxMetaCopy)
-		input, _ := ioutil.ReadFile(sandBoxMetaSrc)
-		if err := ioutil.WriteFile(sandBoxMetaCopy, input, 0644); err != nil {
-			logrus.Errorf("overwrite sandbox meta into %s failed: %v", sandBoxMetaCopy, err)
-			return devName, err
-		}
-	}
-	b, err := mountinfo.Mounted(dst)
-	if err != nil {
-		logrus.Errorf("LSMD ERROR can't get mount status of %s", dst)
-		return devName, err
-	}
-
-	if b {
-		logrus.Warnf("LSMD WARN %s has been already mounted.", dst)
-		return devName, nil
-	}
-
-	if engine == "tcmu" {
-		l := strings.LastIndex(topLayerDir, "/")
-		if devName, err = tcmuMount(topLayerDir[l+1:], topLayerDir, dst, lowerDirs, "", upper != ""); err != nil {
-			logrus.Errorf("LSMD ERROR tcmuMount %s fail, error: %v", topLayerDir, err)
-			return devName, err
-		}
-	} else {
-		return "", fmt.Errorf("bad engine: %s", engine)
-	}
-	return devName, nil
-}
-
-func Get(snDir string, lowers []string, upperdir string, engine string) (mergedDir string, retErr error) {
-	logrus.Infof("LSMD enter Get(%s)", lowers)
-	defer logrus.Infof("LSMD leave Get(%s), merged Dir: %s", lowers, mergedDir)
-
-	if CheckLsmdNecessity(engine) == false {
-		logrus.Errorf("LSMD ERROR failed to checkLsmdNecessity().")
-		return "", fmt.Errorf("LSMD ERROR failed to checkLsmdNecessity().")
-	}
-
-	if len(lowers) <= 0 {
-		logrus.Errorf("LSMD ERROR len(lowers):%d should be >= 1", len(lowers))
-		return "", fmt.Errorf("LSMD ERROR len(lowers) should be >= 1")
-	}
-
-	//launch new lsmd
-	if mergedDir, retErr = GetShared(snDir, lowers, upperdir, engine); retErr != nil {
-		return "", retErr
-	}
-	if upperdir == "" {
-		return getZdfsmerged(lowers[0]), nil
-	}
-	return mergedDir, nil
-}
-
 func (o *snapshotter) MountDadiSnapshot(ctx context.Context, key string, info snapshots.Info, s storage.Snapshot, recordTracePath string) (bool, string, error) {
 	//dadi image layer may more than one layer
 	if s.Kind != snapshots.KindActive {
@@ -255,7 +139,6 @@ func (o *snapshotter) MountDadiSnapshot(ctx context.Context, key string, info sn
 
 	//check dadi layer
 	dir := o.getSnDir(s.ParentIDs[0])
-	log.G(ctx).Debugf("dir: %s", dir)
 	isDadi, err := IsZdfsLayer(dir)
 	if err != nil {
 		log.G(ctx).WithError(err).Errorf("[DADI] invalid dadi snapshot as parent: %s", dir)
@@ -274,47 +157,7 @@ func (o *snapshotter) MountDadiSnapshot(ctx context.Context, key string, info sn
 	if err := PrepareMeta(snDir, lowers, info, recordTracePath); err != nil {
 		return true, "", err
 	}
-	//getMergedDir
-	engine := "tcmu"
-	zdfsMergedDir, err := Get(snDir, lowers, "", engine)
-	if err != nil {
-		return true, "", err
-	}
-	dst := path.Join(snDir, "omerged")
-	if err := os.MkdirAll(dst, 0755); err != nil && !os.IsExist(err) {
-		logrus.Errorf("LSMD Mounts() ERROR os.MkdirAs(%s, 0755) err:%s", dst, err)
-		return true, "", fmt.Errorf("LSMD Mounts() ERROR os.MkdirAs(%s, 0755). err:%s", dst, err)
-	}
-
-	m, err := dockermount.Mounted(dst)
-	if err != nil {
-		logrus.Errorf("LSMD ERROR devId:%d, mount.Mounted(%s) err:%s", dst, err)
-		return true, "", err
-	}
-	if !m {
-		var options []string
-		options = append(options,
-			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
-			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
-		)
-		options = append(options, fmt.Sprintf("lowerdir=%s", zdfsMergedDir))
-		if o.metacopyOption != "" {
-			options = append(options, o.metacopyOption)
-		}
-		logrus.Infof("[DADI] mount options : %s", options)
-
-		if err := mount.All([]mount.Mount{
-			{
-				Type:    "overlay",
-				Source:  "overlay",
-				Options: options,
-			},
-		}, dst); err != nil {
-			return true, "", err
-		}
-	}
-
-	return true, dst, nil
+	return true, "", nil
 }
 
 func GetBlobRepoDigest(dir string) (string, string, error) {
@@ -370,13 +213,14 @@ func loadBackingStoreConfig(dir string) (*OverlayBDBSConfig, error) {
 // ConstructOverlayBDSpec generates the config spec for overlaybd target.
 func ConstructOverlayBDSpec(dir, parent, repo, digest string, info snapshots.Info, size uint64, recordTracePath string) error {
 	configJSON := OverlayBDBSConfig{
+		ImageRef:   info.Labels[labelKeyCriImageRef],
 		Lowers:     []OverlayBDBSConfigLower{},
 		ResultFile: overlaybdInitDebuglogPath(dir),
 	}
 	configJSON.RepoBlobURL = repo
 	if parent == "" {
 		configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
-			Dir: overlaybdBaseLayerDir,
+			File: overlaybdBaseLayer,
 		})
 	} else {
 		parentConfJSON, err := loadBackingStoreConfig(parent)
@@ -386,26 +230,14 @@ func ConstructOverlayBDSpec(dir, parent, repo, digest string, info snapshots.Inf
 		if repo == "" {
 			configJSON.RepoBlobURL = parentConfJSON.RepoBlobURL
 		}
-		// configJSON.RepoBlobURL = parentConfJSON.RepoBlobURL
 		configJSON.Lowers = parentConfJSON.Lowers
 	}
 
 	configJSON.RecordTracePath = recordTracePath
-	// if configJSON.RepoBlobURL == "" {
-
-	// }
-	refPath := path.Join(dir, ImageRefFile)
-	logrus.Debugf("! refPath: %s", refPath)
-	if b, _ := pathExists(refPath); b {
-		img, _ := ioutil.ReadFile(refPath)
-		configJSON.ImageRef = string(img)
-		logrus.Infof("read imageRef from %s: %s", refPath, configJSON.ImageRef)
-	}
-
 	configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
 		Digest: digest,
 		Size:   int64(size),
-		Dir:    path.Join(dir, zdfsMetaDir),
+		Dir:    path.Join(dir, "block"),
 	})
 
 	return atomicWriteOverlaybdTargetConfig(dir, &configJSON)
@@ -431,29 +263,26 @@ func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTrace
 
 	makeConfig := func(dir string, parent string) error {
 		logrus.Info("ENTER makeConfig(dir: %s, parent: %s)", dir, parent)
-		dstDir := path.Join(dir, zdfsMetaDir)
+		dstDir := path.Join(dir, "block")
+
 		repo, digest, err := GetBlobRepoDigest(dstDir)
 		if err != nil {
 			return err
 		}
-		refPath := path.Join(dir, ImageRefFile)
-		if b, _ := pathExists(refPath); b {
-			img, _ := ioutil.ReadFile(refPath)
-			imageRef := string(img)
-			logrus.Infof("read imageRef from %s: %s", refPath, imageRef)
-			repo, _ = constructImageBlobURL(imageRef)
-			logrus.Infof("construct repoBlobUrl: %s", repo)
-		}
+
+		imageRef := info.Labels[labelKeyCriImageRef]
+		logrus.Infof("read imageRef from labelKeyCriImageRef: %s", imageRef)
+		repo, _ = constructImageBlobURL(imageRef)
+		logrus.Infof("construct repoBlobUrl: %s", repo)
+
 		size, err := GetBlobSize(dstDir)
 		if err := ConstructOverlayBDSpec(dir, parent, repo, digest, info, size, recordTracePath); err != nil {
 			return err
 		}
-		logrus.Info("makeConfig success")
 		return nil
 	}
 
 	doDir := func(dir string, parent string) error {
-		logrus.Debugf("ENTER doDir(dir: %s)", dir)
 		dstDir := path.Join(dir, zdfsMetaDir)
 		//1.check if the dir exists. Create the dir only when dir doesn't exist.
 		b, err := pathExists(dstDir)
@@ -461,6 +290,7 @@ func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTrace
 			logrus.Errorf("LSMD ERROR PathExists(%s) err:%s", dstDir, err)
 			return err
 		}
+
 		if b {
 			configPath := overlaybdConfPath(dir)
 			configExists, err := pathExists(configPath)
@@ -476,6 +306,12 @@ func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTrace
 			return makeConfig(dir, parent)
 		}
 
+		b, _ = pathExists(path.Join(dir, "block", "config.v1.json"))
+		if b {
+			// is new dadi format
+			return nil
+		}
+
 		//2.create tmpDir in dir
 		tmpDir, err := ioutil.TempDir(dir, "temp_for_prepare_dadimeta")
 		if err != nil {
@@ -483,10 +319,16 @@ func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTrace
 			return err
 		}
 
-		//3.copy meta files to tmpDir
+		//3.copy meta files to tmpDir)
 		srcDir := path.Join(dir, "fs")
 		if err := copyPulledZdfsMetaFiles(srcDir, tmpDir); err != nil {
 			logrus.Errorf("failed to copyPulledZdfsMetaFiles(%s, %s), err:%s", srcDir, tmpDir, err)
+			return err
+		}
+
+		blockDir := path.Join(dir, "block")
+		if err := copyPulledZdfsMetaFiles(srcDir, blockDir); err != nil {
+			logrus.Errorf("failed to copyPulledZdfsMetaFiles(%s, %s), err:%s", srcDir, blockDir, err)
 			return err
 		}
 
@@ -531,35 +373,4 @@ func copyPulledZdfsMetaFiles(srcDir, dstDir string) error {
 		}
 	}
 	return nil
-}
-
-func createRWlayer(dir, parent, engine string) error {
-
-	rwDir := path.Join(dir, zdfsMetaDir)
-	if err := os.MkdirAll(rwDir, 0755); err != nil && !os.IsExist(err) {
-		logrus.Errorf("create rw layer's dir failed: %s, err %s", rwDir, err.Error())
-		return err
-	}
-	//only write on blank
-	if err := ioutil.WriteFile(path.Join(rwDir, iNewFormat), []byte(" "), 0666); err != nil {
-		logrus.Errorf("LSMD ERROR ioutil.WriteFile(path.Join(dir:%s, iNewFormat:%s),..) err:%s", dir, iNewFormat, err)
-		return err
-	}
-	//writing “layern” indicates this is zdfs top dir
-	if err := ioutil.WriteFile(path.Join(rwDir, zdfsOssTypeFile), []byte(zdfsOssTypeTopLayer), 0666); err != nil {
-		logrus.Errorf("LSMD ERROR ioutil.WriteFile(path.Join(dir:%s, zdfsOssTypeFile:%s), zdfsOssTypeTopLayer:%s), err:%s", dir, zdfsOssTypeFile, zdfsOssTypeTopLayer, err)
-		return err
-	}
-	str := lsmtCreate
-	if engine == "tcmu" {
-		str = overlaybdCreate
-	}
-	str = str + " -s " + path.Join(rwDir, dataFile)
-	str = str + " " + path.Join(rwDir, idxFile)
-	str = str + " 256 "
-	if err := execCmd(str); err != nil {
-		return err
-	}
-
-	return constructOverlayBDWritableSpec(dir, parent)
 }
