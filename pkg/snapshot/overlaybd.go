@@ -262,7 +262,7 @@ func updateSpec(dir, recordTracePath string) error {
 func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTracePath string) error {
 
 	makeConfig := func(dir string, parent string) error {
-		logrus.Info("ENTER makeConfig(dir: %s, parent: %s)", dir, parent)
+		logrus.Infof("ENTER makeConfig(dir: %s, parent: %s)", dir, parent)
 		dstDir := path.Join(dir, "block")
 
 		repo, digest, err := GetBlobRepoDigest(dstDir)
@@ -270,9 +270,10 @@ func PrepareMeta(idDir string, lowers []string, info snapshots.Info, recordTrace
 			return err
 		}
 
-		imageRef := info.Labels[labelKeyCriImageRef]
-		logrus.Infof("read imageRef from labelKeyCriImageRef: %s", imageRef)
-		repo, _ = constructImageBlobURL(imageRef)
+		if imageRef, ok := info.Labels[labelKeyCriImageRef]; ok {
+			logrus.Infof("read imageRef from labelKeyCriImageRef: %s", imageRef)
+			repo, _ = constructImageBlobURL(imageRef)
+		}
 		logrus.Infof("construct repoBlobUrl: %s", repo)
 
 		size, err := GetBlobSize(dstDir)

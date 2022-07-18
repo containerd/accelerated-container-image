@@ -19,13 +19,15 @@ package snapshot
 import (
 	"context"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
+
+	"github.com/docker/docker/pkg/locker"
+	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
@@ -194,6 +196,8 @@ type snapshotter struct {
 	ms             *storage.MetaStore
 	metacopyOption string
 	indexOff       bool
+
+	locker *locker.Locker
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
@@ -235,6 +239,7 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 		indexOff:       indexOff,
 		config:         config,
 		metacopyOption: metacopyOption,
+		locker:         locker.New(),
 	}, nil
 }
 
@@ -571,6 +576,11 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (res []mount.Mount
 	}
 
 	if len(s.ParentIDs) > 0 {
+		o.locker.Lock(s.ID)
+		defer o.locker.Unlock(s.ID)
+		o.locker.Lock(s.ParentIDs[0])
+		defer o.locker.Unlock(s.ParentIDs[0])
+
 		_, info, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get info")
@@ -728,6 +738,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return err
 	}
 
+	log.G(ctx).Debugf("labels: %v", info.Labels)
 	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
@@ -737,6 +748,22 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
 			err = o.unmountAndDetachBlockDevice(ctx, id, key)
+			if err != nil {
+				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+			}
+		}
+	}
+
+	// for TypeNormal, verify its(parent) meets the condition of overlaybd format
+	if s, err := storage.GetSnapshot(ctx, key); err == nil && s.Kind == snapshots.KindActive && len(s.ParentIDs) > 0 {
+		o.locker.Lock(s.ID)
+		defer o.locker.Unlock(s.ID)
+		o.locker.Lock(s.ParentIDs[0])
+		defer o.locker.Unlock(s.ParentIDs[0])
+
+		log.G(ctx).Debugf("try to verify parent snapshots format.")
+		if st, err := o.identifySnapshotStorageType(ctx, s.ParentIDs[0], info); err == nil && st != storageTypeNormal {
+			err = o.unmountAndDetachBlockDevice(ctx, s.ParentIDs[0], "")
 			if err != nil {
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
@@ -1041,14 +1068,26 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	if err == nil {
 		return st, nil
 	}
-	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
 
+	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
 	// check writable data file
 	filePath = o.overlaybdWritableDataPath(id)
 	st, err = o.identifyLocalStorageType(filePath)
-	if err != nil && os.IsNotExist(err) {
+	if err == nil {
+		return st, nil
+	}
+	if os.IsNotExist(err) {
+		// check config.v1.json
+		log.G(ctx).Debugf("failed to identify by writable_data(sn: %s), try to identify by config.v1.json", id)
+		filePath = o.overlaybdConfPath(id)
+		if _, err := os.Stat(filePath); err == nil {
+			log.G(ctx).Debugf("%s/config.v1.json found, return storageTypeRemoteBlock", id)
+			return storageTypeRemoteBlock, nil
+		}
 		return storageTypeNormal, nil
 	}
+	log.G(ctx).Debugf("storageType(sn: %s): %d", id, st)
+
 	return st, err
 }
 
