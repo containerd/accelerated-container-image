@@ -505,6 +505,9 @@ func (o *snapshotter) constructImageBlobURL(ref string) (string, error) {
 
 	host := refspec.Hostname()
 	repo := strings.TrimPrefix(refspec.Locator, host+"/")
+	if host == "docker.io" {
+		host = "registry-1.docker.io"
+	}
 	return "https://" + path.Join(host, "v2", repo) + "/blobs", nil
 }
 
