@@ -11,7 +11,7 @@ jobs:
   #
   linters:
     name: Linters
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     timeout-minutes: 10
 
     strategy:
@@ -37,7 +37,7 @@ jobs:
   # based on https://github.com/containerd/project-checks/blob/main/action.yml
   project:
     name: Project Checks
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     timeout-minutes: 5
 
     steps:
@@ -93,12 +93,9 @@ jobs:
           ltag -t "script/validate/template" --excludes "vendor contrib" --check -v
           echo "::endgroup::"
 
-  #
-  # Integration
-  #
-  integration:
-    name: integration
-    runs-on: ubuntu-18.04
+  ut:
+    name: ut
+    runs-on: ubuntu-20.04
     timeout-minutes: 10
 
     steps:
@@ -122,3 +119,53 @@ jobs:
         working-directory: src/github.com/containerd/accelerated-container-image
         run: |
           sudo GO_TESTFLAGS=-v make test
+
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          path: src/github.com/containerd/accelerated-container-image
+          fetch-depth: 100
+
+      - name: install Go
+        uses: actions/setup-go@v1
+        with:
+          go-version: '1.18.2'
+
+      - name: set env
+        shell: bash
+        run: |
+          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+
+      - name: e2e
+        working-directory: src/github.com/containerd/accelerated-container-image
+        run: |
+          sudo apt update && sudo apt install -y containerd.io libnl-3-200 libnl-genl-3-200
+          sudo modprobe -a target_core_user tcm_loop
+          wget https://github.com/containerd/overlaybd/releases/download/v0.5.0/overlaybd-0.5.0-1.x86_64.deb &&
+          sudo dpkg -i overlaybd-0.5.0-1.x86_64.deb
+          sudo systemctl enable /opt/overlaybd/overlaybd-tcmu.service
+          sudo systemctl start overlaybd-tcmu
+          sudo systemctl status overlaybd-tcmu
+          go mod tidy
+          make
+          sudo mkdir /etc/overlaybd-snapshotter
+          sudo echo '{"root": "/var/lib/overlaybd/","address": "/run/overlaybd-snapshotter/overlaybd.sock"}' | sudo tee -a /etc/overlaybd-snapshotter/config.json
+          sudo bin/overlaybd-snapshotter &
+          sudo mkdir /etc/containerd/
+          sudo echo -e '[proxy_plugins.overlaybd]\n\ttype = "snapshot"\n\taddress = "/run/overlaybd-snapshotter/overlaybd.sock"' | sudo tee -a /etc/containerd/config.toml
+          cat /etc/containerd/config.toml
+          sudo systemctl restart containerd
+          sudo containerd -v
+          sudo ctr plugin ls
+          sudo bin/ctr rpull docker.io/overlaybd/redis:6.2.1_obd
+          sudo bin/ctr run -d --net-host --rm --snapshotter=overlaybd docker.io/overlaybd/redis:6.2.1_obd test
+          sudo ctr t ls
+          sudo ctr i pull registry.hub.docker.com/library/redis:6.2.1
+          sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
