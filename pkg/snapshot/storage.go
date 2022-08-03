@@ -542,23 +542,13 @@ func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string)
 // commitWritableOverlaybd
 func (o *snapshotter) commitWritableOverlaybd(ctx context.Context, snID string) (retErr error) {
 	binpath := filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-commit")
-	tmpPath := filepath.Join(o.root, "snapshots", snID, "block", ".commit-before-zfile")
 
-	out, err := exec.CommandContext(ctx, binpath,
+	out, err := exec.CommandContext(ctx, binpath, "-z",
 		o.overlaybdWritableDataPath(snID),
-		o.overlaybdWritableIndexPath(snID), tmpPath).CombinedOutput()
+		o.overlaybdWritableIndexPath(snID),
+		o.magicFilePath(snID)).CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to commit writable overlaybd: %s", out)
-	}
-
-	defer func() {
-		os.Remove(tmpPath)
-	}()
-
-	binpath = filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-zfile")
-	out, err = exec.CommandContext(ctx, binpath, tmpPath, o.magicFilePath(snID)).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to create zfile: %s", out)
 	}
 	return nil
 }
