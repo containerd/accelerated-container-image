@@ -48,3 +48,13 @@ There are two kinds of mount mode, `dir` mod and `dev` mod:
 		containerd.WithNewSpec(oci.WithImageConfig(image)),
 	)
     ```
+
+* for proxy snapshotter plugin config
+
+    ```json
+    {
+        "root": "/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd",
+        "address": "/run/overlaybd-snapshotter/overlaybd.sock",
+        "mode": "dev"
+    }
+    ```

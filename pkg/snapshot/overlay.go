@@ -189,13 +189,14 @@ type Opt func(config *SnapshotterConfig) error
 //
 type snapshotter struct {
 	root     string
+	mode     string
 	config   SnapshotterConfig
 	ms       *storage.MetaStore
 	indexOff bool
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
-func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(root string, mode string, opts ...Opt) (snapshots.Snapshotter, error) {
 	config := defaultConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -224,6 +225,7 @@ func NewSnapshotter(root string, opts ...Opt) (snapshots.Snapshotter, error) {
 
 	return &snapshotter{
 		root:     root,
+		mode:     mode,
 		ms:       ms,
 		indexOff: indexOff,
 		config:   config,
@@ -302,12 +304,17 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	defer func() {
 		log.G(ctx).Infof("snapshot R/W label: %d", mode)
 	}()
-	mode = roDir
-	m, ok := info.Labels[LabelSupportReadWriteMode]
-	if !ok {
-		return
+	// check image type (OCIv1 or overlaybd)
+	if id != "" {
+		if _, err := o.loadBackingStoreConfig(id); err != nil {
+			log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
+			return roDir
+		}
+	} else {
+		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
 	}
-	rwMode := func() int {
+	// overlaybd
+	rwMode := func(m string) int {
 		if m == "dir" {
 			return rwDir
 		}
@@ -316,17 +323,12 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 		}
 		return roDir
 	}
-	if id == "" {
-		// 'id' shouldn't be empty unless building initial layer.
-		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
-		return rwMode()
+	m, ok := info.Labels[LabelSupportReadWriteMode]
+	if !ok {
+		return rwMode(o.mode)
 	}
-	// check image type (ociv1 or overlaybd)
-	if _, err := o.loadBackingStoreConfig(id); err != nil {
-		log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
-		return
-	}
-	return rwMode()
+
+	return rwMode(m)
 }
 
 func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
