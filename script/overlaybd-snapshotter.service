@@ -1,7 +1,7 @@
 [Unit]
 Description=overlaybd-snapshotter service
-After=network.target
-Before=local-fs-pre.target shutdown.target
+After=network.target local-fs.target
+Before=shutdown.target
 DefaultDependencies=no
 Conflicts=shutdown.target
 
