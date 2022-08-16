@@ -43,6 +43,7 @@ type pluginConfig struct {
 	Address  string `json:"address"`
 	Root     string `json:"root"`
 	LogLevel string `json:"verbose"`
+	Mode     string `json:"mode"` // fs, dir or dev
 }
 
 var pconfig pluginConfig
@@ -67,6 +68,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if pconfig.Mode == "" {
+		pconfig.Mode = "fs"
+	}
+	logrus.Infof("set mode: %s", pconfig.Mode)
+
 	if pconfig.LogLevel == "" {
 		pconfig.LogLevel = "info"
 	}
@@ -76,7 +82,7 @@ func main() {
 		logrus.Infof("set log level: %s", pconfig.LogLevel)
 	}
 
-	sn, err := overlaybd.NewSnapshotter(pconfig.Root)
+	sn, err := overlaybd.NewSnapshotter(pconfig.Root, pconfig.Mode)
 	if err != nil {
 		logrus.Errorf("failed to init overlaybd snapshotter: %v", err)
 		os.Exit(1)
