@@ -2,7 +2,7 @@
 SN_DESTDIR=/opt/overlaybd/snapshotter
 
 # command
-COMMANDS=overlaybd-snapshotter ctr
+COMMANDS=overlaybd-snapshotter ctr convertor
 BINARIES=$(addprefix bin/,$(COMMANDS))
 
 # go packages
