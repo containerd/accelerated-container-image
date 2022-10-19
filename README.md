@@ -42,7 +42,7 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     We provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
 
-    The convertor supports layer deduplication, which prevents duplication of layer convertion for every image conversion.
+    The convertor supports layer deduplication, which prevents duplication of layer conversion for every image conversion.
 
 * [buildkit for overlaybd](https://github.com/data-accelerator/buildkit) (Experimental)
 
