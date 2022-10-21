@@ -37,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/cmd/ctr/commands/tasks"
@@ -292,11 +293,8 @@ var recordTraceCommand = cli.Command{
 			return fmt.Errorf("createImageWithNewTopLayer failed: %v", err)
 		}
 
-		newImage := images.Image{
-			Name:   cliCtx.Args().Get(1),
-			Target: newManifestDesc,
-		}
-		if err = createImage(ctx, client.ImageService(), newImage); err != nil {
+		imgName := cliCtx.Args().Get(1)
+		if err = obdconv.CreateImage(ctx, client.ImageService(), imgName, newManifestDesc); err != nil {
 			return fmt.Errorf("createImage failed: %v", err)
 		}
 		fmt.Printf("New image %s is created\n", newRef)
