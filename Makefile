@@ -1,5 +1,6 @@
 # used to install binaries
 SN_DESTDIR=/opt/overlaybd/snapshotter
+SN_CFGDIR=/etc/overlaybd-snapshotter
 
 # command
 COMMANDS=overlaybd-snapshotter ctr convertor
@@ -21,8 +22,11 @@ bin/%: cmd/% force
 	@GOOS=linux go build -o $@ ./$<
 
 install: ## install binaries from bin
-	@mkdir -p ${SN_DESTDIR}
+	@mkdir -p $(SN_DESTDIR)
 	@install $(BINARIES) $(SN_DESTDIR)
+	@install -m 0644 script/overlaybd-snapshotter.service $(SN_DESTDIR)
+	@mkdir -p ${SN_CFGDIR}
+	@install -m 0644 script/config.json ${SN_CFGDIR}
 test: ## run tests that require root
 	@go test ${GO_TESTFLAGS} ${GO_PACKAGES} -test.root
 
