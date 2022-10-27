@@ -109,6 +109,9 @@ const (
 
 	// labelKeyCriImageRef is thr image-ref from cri
 	labelKeyCriImageRef = "containerd.io/snapshot/cri.image-ref"
+
+	remoteLabel    = "containerd.io/snapshot/remote"
+	remoteLabelVal = "remote snapshot"
 )
 
 // interface
@@ -410,7 +413,9 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			return nil, err
 		}
 		if stype == storageTypeRemoteBlock {
-			if _, _, err = o.commit(ctx, targetRef, key, opts...); err != nil {
+			info.Labels[remoteLabel] = remoteLabelVal // Mark this snapshot as remote
+			if _, _, err = o.commit(ctx, targetRef, key,
+				append(opts, snapshots.WithLabels(info.Labels))...); err != nil {
 				return nil, err
 			}
 
