@@ -12,6 +12,7 @@ This guide helps to config and run the common case of overlaybd image service.
 - [Image conversion](#image-conversion)
 - [Image build](#image-build)
 - [P2P](#p2p)
+
 ## Install
 
 There are two components to be installed, overlaybd-snapshotter and overlaybd-tcmu. They are located in two separate repositries.
@@ -202,24 +203,35 @@ Overlaybd images can be efficiently built from overlaybd images by using the [cu
 
 ### Install
 
-The same as original buildkit.
-
 ```bash
 https://github.com/data-accelerator/buildkit.git
+# 202210 is the latest branch
+git checkout 202210
 make
 sudo make install
 ```
 
 ### Run buildkitd
 
-First, make sure the overlaybd-snapshotter and overlaybd-service running.
+First, make sure the overlaybd-snapshotter and overlaybd-tcmu running.
 
 ```bash
-# use overlaybd snapshotter
-buildkitd --oci-worker-snapshotter=overlaybd
+# use containerd worker with overlaybd snapshotter
+buildkitd --containerd-worker-snapshotter=overlaybd --oci-worker=false --containerd-worker=true
 ```
 
-Then, write your Dockerfile and run buildctl to build images. The `FROM` must be an overlaybd image.
+Then, write your Dockerfile and run buildctl to build images.
+The `FROM` if Dockerfile must be an overlaybd image.
+
+```bash
+buildctl build \
+    --frontend dockerfile.v0 \
+    --local context=. \
+    --local dockerfile=.  \
+    --output type=image,name={new image},push=true,oci-mediatypes=true,compression=uncompressed
+```
+
+`oci-mediatypes=true` and `compression=uncompressed` are required.
 
 
 ## P2P
