@@ -1,0 +1,35 @@
+# nfpm example config file
+#
+# check https://nfpm.goreleaser.com/configuration for detailed usage
+#
+name: "overlaybd-snapshotter"
+arch: "amd64"
+platform: "linux"
+version: "v0.5.1"
+section: "default"
+priority: "extra"
+
+maintainer: "overlaybd authors"
+description: |
+  Overlaybd snapshotter
+vendor: "overlaybd"
+homepage: "https://github.com/containerd/accelerated-container-image"
+license: "Apache-2.0"
+contents:
+- src: ./bin/ctr
+  dst: /opt/overlaybd/snapshotter/ctr
+- src: ./bin/overlaybd-snapshotter
+  dst: /opt/overlaybd/snapshotter/overlaybd-snapshotter
+- src: ./bin/convertor
+  dst: /opt/overlaybd/snapshotter/convertor
+- src: ./script/overlaybd-snapshotter.service
+  dst: /opt/overlaybd/snapshotter/overlaybd-snapshotter.service
+  type: config
+- src: ./script/config.json
+  dst: /etc/overlaybd-snapshotter/config.json
+  type: config
+overrides:
+  rpm:
+    scripts:
+  deb:
+    scripts:

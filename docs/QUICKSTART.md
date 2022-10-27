@@ -38,9 +38,7 @@ sudo make install
 
 #### Download release
 
-After download, copy the binaries to `/opt/overlaybd/snapshotter`.
-
-In this way, the config file is not automatically installed, users have to be setup manually.
+After download, install the rpm/deb package.
 
 #### Config
 
