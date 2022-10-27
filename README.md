@@ -50,6 +50,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 ## Getting Started
 
+* [QUICKSTART](docs/QUICKSTART.md) helps quickly run an overlaybd image including basic usage.
+
 * See how to setup overlaybd backstore at [README](https://github.com/containerd/overlaybd).
 
 * See how to build snaphshotter and ctr plugin components at [BUILDING](docs/BUILDING.md).
