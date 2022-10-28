@@ -73,7 +73,7 @@ func prepareWritableLayer(ctx context.Context, dir string) error {
 	indexPath := path.Join(dir, "writable_index")
 	os.RemoveAll(dataPath)
 	os.RemoveAll(indexPath)
-	out, err := exec.CommandContext(ctx, binpath,
+	out, err := exec.CommandContext(ctx, binpath, "-s",
 		dataPath, indexPath, "64").CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare writable layer: %s", out)
