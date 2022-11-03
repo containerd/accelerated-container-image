@@ -38,6 +38,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/platforms"
@@ -636,34 +637,79 @@ func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
 	return
 }
 
-func NerdctlConvert(ctx context.Context, client *containerd.Client, srcImage, targetImage, fsType string) error {
-	cs := client.ContentStore()
-	sn := client.SnapshotService("overlaybd")
+// NOTE: based on https://github.com/containerd/containerd/blob/v1.6.8/images/converter/converter.go#L29-L71
+type options struct {
+	fsType string
+	dbstr  string
+	imgRef string
+	client *containerd.Client
+}
 
-	// TODO: add support to database options (dbstr)
-	// resolver, err := commands.GetResolver(ctx, context)
+type Option func(o *options) error
 
-	srcImg, err := client.GetImage(ctx, srcImage)
-	if err != nil {
-		return err
+func WithFsType(fsType string) Option {
+	return func(o *options) error {
+		o.fsType = fsType
+		return nil
 	}
+}
 
-	srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
-	if err != nil {
-		return errors.Wrapf(err, "failed to read manifest")
+func WithDbstr(dbstr string) Option {
+	return func(o *options) error {
+		o.dbstr = dbstr
+		return nil
 	}
+}
 
-	c, err := NewOverlaybdConvertor(ctx, cs, sn /* resolver */, nil, srcImage, targetImage)
-	if err != nil {
-		return err
+func WithImageRef(imgRef string) Option {
+	return func(o *options) error {
+		o.imgRef = imgRef
+		return nil
 	}
+}
 
-	newMfstDesc, err := c.Convert(ctx, srcManifest, fsType)
-	if err != nil {
-		return err
+func WithClient(client *containerd.Client) Option {
+	return func(o *options) error {
+		o.client = client
+		return nil
 	}
+}
 
-	return CreateImage(ctx, client.ImageService(), targetImage, newMfstDesc)
+func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		var copts options
+		for _, o := range opts {
+			if err := o(&copts); err != nil {
+				return nil, err
+			}
+		}
+		client := copts.client
+		imgRef := copts.imgRef
+		sn := client.SnapshotService("overlaybd")
+
+		srcImg, err := client.GetImage(ctx, imgRef)
+		if err != nil {
+			return nil, err
+		}
+
+		srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read manifest")
+		}
+
+		// TODO: add support to database options (dbstr)
+		// resolver, err := commands.GetResolver(ctx, context)
+
+		c, err := NewOverlaybdConvertor(ctx, cs, sn /* resolver */, nil, imgRef, copts.dbstr)
+		if err != nil {
+			return nil, err
+		}
+		newMfstDesc, err := c.Convert(ctx, srcManifest, copts.fsType)
+		if err != nil {
+			return nil, err
+		}
+		return &newMfstDesc, nil
+	}
 }
 
 func CreateImage(ctx context.Context, is images.Store, imgName string, imgDesc ocispec.Descriptor) error {
