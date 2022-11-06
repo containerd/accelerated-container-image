@@ -19,7 +19,6 @@ package snapshot
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -768,7 +767,7 @@ func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...str
 }
 
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
-	td, err := ioutil.TempDir(snapshotDir, "new-")
+	td, err := os.MkdirTemp(snapshotDir, "new-")
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create temp dir")
 	}
@@ -820,7 +819,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		}, nil
 	}
 	if writeType == rwDev {
-		devName, err := ioutil.ReadFile(o.overlaybdBackstoreMarkFile(s.ID))
+		devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(s.ID))
 		if err != nil {
 			return nil, err
 		}

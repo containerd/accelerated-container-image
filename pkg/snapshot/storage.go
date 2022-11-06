@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
@@ -157,27 +156,27 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 		}
 	}()
 
-	if err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID))), 0666); err != nil {
+	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID))), 0666); err != nil {
 		return errors.Wrapf(err, "failed to write target dev_config for %s", targetPath)
 	}
 
-	err = ioutil.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
+	err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write target max_data_area_mb for %s", targetPath)
 	}
 
-	err = ioutil.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
+	err = os.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
 	if err != nil {
 		// read the init-debug.log for readable
 		debugLogPath := o.overlaybdInitDebuglogPath(snID)
-		if data, derr := ioutil.ReadFile(debugLogPath); derr == nil {
+		if data, derr := os.ReadFile(debugLogPath); derr == nil {
 			return errors.Errorf("failed to enable target for %s, %s", targetPath, data)
 		}
 		return errors.Wrapf(err, "failed to enable target for %s", targetPath)
 	}
 
 	// fixed by fuweid
-	err = ioutil.WriteFile(
+	err = os.WriteFile(
 		path.Join(targetPath, "attrib", "cmd_time_out"),
 		([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666)
 	if err != nil {
@@ -219,7 +218,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	}()
 
 	nexusPath := path.Join(tpgtPath, "nexus")
-	err = ioutil.WriteFile(nexusPath, ([]byte)(loopDevID), 0666)
+	err = os.WriteFile(nexusPath, ([]byte)(loopDevID), 0666)
 	if err != nil {
 		return errors.Wrapf(err, "failed to write loopback nexus %s", nexusPath)
 	}
@@ -240,7 +239,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	}()
 
 	devAddressPath := path.Join(tpgtPath, "address")
-	bytes, err := ioutil.ReadFile(devAddressPath)
+	bytes, err := os.ReadFile(devAddressPath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read loopback address for %s", devAddressPath)
 	}
@@ -249,7 +248,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	// The device doesn't show up instantly. Need retry here.
 	var lastErr error = nil
 	for retry := 0; retry < maxAttachAttempts; retry++ {
-		devDirs, err := ioutil.ReadDir(o.scsiBlockDevicePath(deviceNumber))
+		devDirs, err := os.ReadDir(o.scsiBlockDevicePath(deviceNumber))
 		if err != nil {
 			lastErr = err
 			time.Sleep(10 * time.Millisecond)
@@ -323,7 +322,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 						break // retry
 					}
 					// fixed by fuweid
-					err = ioutil.WriteFile(
+					err = os.WriteFile(
 						path.Join("/sys/block", dev.Name(), "device", "timeout"),
 						([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666)
 					if err != nil {
@@ -349,7 +348,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 			}
 
 			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
-			if err := ioutil.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
+			if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
 				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snID)
 			}
 			log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
@@ -481,7 +480,7 @@ func (o *snapshotter) updateSpec(snID string, isAccelLayer bool, recordTracePath
 // loadBackingStoreConfig loads overlaybd target config.
 func (o *snapshotter) loadBackingStoreConfig(snID string) (*OverlayBDBSConfig, error) {
 	confPath := o.overlaybdConfPath(snID)
-	data, err := ioutil.ReadFile(confPath)
+	data, err := os.ReadFile(confPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read config(path=%s) of snapshot %s", confPath, snID)
 	}

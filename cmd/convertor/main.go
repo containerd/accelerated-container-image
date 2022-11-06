@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -223,7 +222,7 @@ func convert() error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to fetch manifest")
 	}
-	buf, err := ioutil.ReadAll(rc)
+	buf, err := io.ReadAll(rc)
 	if err != nil {
 		return errors.Wrapf(err, "failed to fetch manifest")
 	}
@@ -239,7 +238,7 @@ func convert() error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to fetch config")
 	}
-	buf, err = ioutil.ReadAll(rc)
+	buf, err = io.ReadAll(rc)
 	if err != nil {
 		return errors.Wrapf(err, "failed to fetch config")
 	}

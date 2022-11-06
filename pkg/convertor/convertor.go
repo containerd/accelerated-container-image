@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"time"
@@ -601,7 +600,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 	}
 
 	// Read any trailing data
-	if _, err := io.Copy(ioutil.Discard, rc); err != nil {
+	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return emptyString, err
 	}
 
