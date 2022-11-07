@@ -1,13 +1,10 @@
 linters:
   enable:
     - depguard
-    - structcheck
-    - varcheck
     - staticcheck
     - unconvert
     - gofmt
     - goimports
-    - golint
     - ineffassign
     - vet
     - unused

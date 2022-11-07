@@ -159,36 +159,35 @@ type Opt func(config *SnapshotterConfig) error
 //
 // It is a snapshotter plugin. The layout of root dir is organized:
 //
-//    # snapshots stores each snapshot's data in unique folder named by auto-
-//    # -incrementing integer (a.k.a Version ID).
-//    #
-//    # The snapshotter is based on overlayFS. It is the same with the containerd
-//    # overlayFS plugin, which means that it can support normal OCI image.
-//    #
-//    # If the pull job doesn't support `containerd.io/snapshot.ref` and `containerd.io/snapshot/image-ref`,
-//    # the snapshotter will use localBD mode to support the blob data in overlaybd
-//    # format. The ${ID}/fs will be empty and the real file data will be placed
-//    # in the ${ID}/block/mountpoint. It is the same to the remoteBD mode.
-//    #
-//    - snapshots/
-//      |_ ${ID}/
-//      |   |_ fs/               # lowerdir or upperdir
-//      |   |_ work/             # workdir
-//      |   |_ block/            # tcmu block device
-//      |      |_ config.v1.json     # config for overlaybd
-//      |      |_ init-debug.log     # shows the debug log when creating overlaybd device
-//      |      |_ mountpoint         # the block device will mount on this if the snapshot is based on overlaybd
-//      |      |_ writable_data      # exists if the block is writable in active snapshotter
-//      |      |_ writable_index     # exists if the block is writable in active snapshotter
-//      |
-//      |_ ...
+//	# snapshots stores each snapshot's data in unique folder named by auto-
+//	# -incrementing integer (a.k.a Version ID).
+//	#
+//	# The snapshotter is based on overlayFS. It is the same with the containerd
+//	# overlayFS plugin, which means that it can support normal OCI image.
+//	#
+//	# If the pull job doesn't support `containerd.io/snapshot.ref` and `containerd.io/snapshot/image-ref`,
+//	# the snapshotter will use localBD mode to support the blob data in overlaybd
+//	# format. The ${ID}/fs will be empty and the real file data will be placed
+//	# in the ${ID}/block/mountpoint. It is the same to the remoteBD mode.
+//	#
+//	- snapshots/
+//	  |_ ${ID}/
+//	  |   |_ fs/               # lowerdir or upperdir
+//	  |   |_ work/             # workdir
+//	  |   |_ block/            # tcmu block device
+//	  |      |_ config.v1.json     # config for overlaybd
+//	  |      |_ init-debug.log     # shows the debug log when creating overlaybd device
+//	  |      |_ mountpoint         # the block device will mount on this if the snapshot is based on overlaybd
+//	  |      |_ writable_data      # exists if the block is writable in active snapshotter
+//	  |      |_ writable_index     # exists if the block is writable in active snapshotter
+//	  |
+//	  |_ ...
 //
 //
-//    # metadata.db is managed by github.com/containerd/containerd/snapshots/storage
-//    # based on boltdb.
-//    #
-//    - metadata.db
-//
+//	# metadata.db is managed by github.com/containerd/containerd/snapshots/storage
+//	# based on boltdb.
+//	#
+//	- metadata.db
 type snapshotter struct {
 	root     string
 	mode     string
