@@ -1,5 +1,6 @@
 linters:
   enable:
+    - depguard
     - structcheck
     - varcheck
     - staticcheck
@@ -13,3 +14,12 @@ linters:
     - misspell
   disable:
     - errcheck
+
+linters-settings:
+  depguard:
+    list-type: denylist
+    include-go-root: true
+    packages:
+      # use "io" or "os" instead
+      # https://go.dev/doc/go1.16#ioutil
+      - io/ioutil

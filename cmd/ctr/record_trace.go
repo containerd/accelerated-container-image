@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -424,7 +423,7 @@ func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManife
 	}
 
 	contentFilePath := containerdDir + v1ContentsDir + strings.Replace(contentDigest, ":", "/", 1)
-	tmpDirPath, err := ioutil.TempDir("", "top-layer")
+	tmpDirPath, err := os.MkdirTemp("", "top-layer")
 	if err != nil {
 		return emptyLayer, err
 	}
@@ -451,23 +450,27 @@ func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManife
 	tarDigester := digest.Canonical.Digester()
 	tarWriter := tar.NewWriter(io.MultiWriter(gzipWriter, tarDigester.Hash()))
 
-	filesInfo, err := ioutil.ReadDir(tmpDirPath)
+	entries, err := os.ReadDir(tmpDirPath)
 	if err != nil {
 		return emptyLayer, errors.Wrapf(err, "failed to read dir")
 	}
 
-	for _, info := range filesInfo {
-		fd, err := os.Open(path.Join(tmpDirPath, info.Name()))
+	for _, entry := range entries {
+		fileInfo, err := entry.Info()
 		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to open file of %s", info.Name())
+			return emptyLayer, fmt.Errorf("failed to read file info for %s: %w", entry.Name(), err)
+		}
+		fd, err := os.Open(path.Join(tmpDirPath, fileInfo.Name()))
+		if err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to open file of %s", fileInfo.Name())
 		}
 
 		if err := tarWriter.WriteHeader(&tar.Header{
-			Name:     info.Name(),
+			Name:     entry.Name(),
 			Mode:     0444,
-			Size:     info.Size(),
+			Size:     fileInfo.Size(),
 			Typeflag: tar.TypeReg,
-			ModTime:  info.ModTime(),
+			ModTime:  fileInfo.ModTime(),
 		}); err != nil {
 			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
 		}
