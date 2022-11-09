@@ -17,9 +17,11 @@
 package snapshot
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -32,10 +34,12 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity"
 	"github.com/moby/sys/mountinfo"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
@@ -79,17 +83,117 @@ type OverlayBDBSConfigUpper struct {
 	Data  string `json:"data,omitempty"`
 }
 
-// unmountAndDetachBlockDevice
-func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) error {
-
-	_, info, _, err := storage.GetInfo(ctx, snKey)
+func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
+	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
-		return errors.Wrapf(err, "can't get snapshot info.")
+		return false, err
+	}
+	defer f.Close()
+	b, err := o.parseAndCheckMounted(ctx, f, dir)
+	if err != nil {
+		log.G(ctx).Errorf("Parsing mounts fields, error: %v", err)
+		return false, err
+	}
+	return b, nil
+}
+
+func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, dir string) (bool, error) {
+	s := bufio.NewScanner(r)
+	for s.Scan() {
+		if err := s.Err(); err != nil {
+			return false, err
+		}
+		/*
+		   489 29 0:51 / /run/containerd/io.containerd.runtime.v2.task/default/testwp1/rootfs rw,relatime shared:272 - overlay overlay rw,lowerdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd/snapshots/2335/block/mountpoint,upperdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd/snapshots/2344/fs,workdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd/snapshots/2344/work
+		   (1)(2) (3) (4) (5)                                                                  (6)            (7)   (8) (9)   (10)         (11)
+		   (1) mount ID:  unique identifier of the mount (may be reused after umount)
+		   (2) parent ID:  ID of parent (or of self for the top of the mount tree)
+		   (3) major:minor:  value of st_dev for files on filesystem
+		   (4) root:  root of the mount within the filesystem
+		   (5) mount point:  mount point relative to the process's root
+		   (6) mount options:  per mount options
+		   (7) optional fields:  zero or more fields of the form "tag[:value]"
+		   (8) separator:  marks the end of the optional fields
+		   (9) filesystem type:  name of filesystem of the form "type[.subtype]"
+		   (10) mount source:  filesystem specific information or "none"
+		   (11) super options:  per super block options
+		*/
+
+		text := s.Text()
+		fields := strings.Split(text, " ")
+		numFields := len(fields)
+		if numFields < 10 {
+			// should be at least 10 fields
+			logrus.Warnf("Parsing '%s' failed: not enough fields (%d)", text, numFields)
+			continue
+		}
+
+		// one or more optional fields, when a separator (-)
+		i := 6
+		for ; i < numFields && fields[i] != "-"; i++ {
+			switch i {
+			case 6:
+				// p.Optional = fields[6]
+			default:
+				/* NOTE there might be more optional fields before the such as
+				   fields[7]...fields[N] (where N < sepIndex), although
+				   as of Linux kernel 4.15 the only known ones are
+				   mount propagation flags in fields[6]. The correct
+				   behavior is to ignore any unknown optional fields.
+				*/
+				break
+			}
+		}
+		if i == numFields {
+			log.G(ctx).Warnf("Parsing '%s' failed: missing separator ('-')", text)
+			continue
+		}
+
+		// There should be 3 fields after the separator...
+		if i+4 > numFields {
+			log.G(ctx).Warnf("Parsing '%s' failed: not enough fields after a separator", text)
+			continue
+		}
+		// ... but in Linux <= 3.9 mounting a cifs with spaces in a share name
+		// (like "//serv/My Documents") _may_ end up having a space in the last field
+		// of mountinfo (like "unc=//serv/My Documents"). Since kernel 3.10-rc1, cifs
+		// option unc= is ignored,  so a space should not appear. In here we ignore
+		// those "extra" fields caused by extra spaces.
+		fstype := fields[i+1]
+		vfsOpts := fields[i+3]
+		if fstype == "overlay" && strings.Contains(vfsOpts, dir) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// unmountAndDetachBlockDevice
+func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) (err error) {
+
+	var info snapshots.Info
+	if snKey != "" {
+		_, info, _, err = storage.GetInfo(ctx, snKey)
+		if err != nil {
+			return errors.Wrapf(err, "can't get snapshot info.")
+		}
 	}
 	writeType := o.getWritableType(ctx, snID, info)
-
+	overlaybd, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
+	if err != nil {
+		log.G(ctx).Errorf("read device name failed: %s, err: %v", o.overlaybdBackstoreMarkFile(snID), err)
+	}
 	if writeType != rwDev {
 		mountPoint := o.overlaybdMountpoint(snID)
+		log.G(ctx).Debugf("check overlaybd mountpoint is in use: %s", mountPoint)
+		busy, err := o.checkOverlaybdInUse(ctx, mountPoint)
+		if err != nil {
+			return err
+		}
+		if busy {
+			log.G(ctx).Infof("device still in use.")
+			return nil
+		}
 		log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
 		if err := mount.UnmountAll(mountPoint, 0); err != nil {
 			return errors.Wrapf(err, "failed to umount %s", mountPoint)
@@ -129,13 +233,14 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	if err != nil {
 		return errors.Wrapf(err, "failed to remove target dir %s", targetPath)
 	}
+	log.G(ctx).Infof("destroy overlaybd device success(sn: %s): %s", snID, overlaybd)
 	return nil
 }
 
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable int, fsType string, mkfs bool) (retErr error) {
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
 
 	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
@@ -314,7 +419,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 			if writable != rwDev {
 				if fstype != "ntfs" {
-					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %d", fstype, data, writable)
+					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, data, writable)
 					//if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
 					if err := unix.Mount(device, mountPoint, fstype, mflag, data); err != nil {
 						lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
@@ -436,7 +541,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		if !writable {
 			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
-
+		log.G(ctx).Infof("prepare writable layer. (sn: %s)", id)
 		if err := o.prepareWritableOverlaybd(ctx, id); err != nil {
 			return err
 		}
@@ -526,6 +631,7 @@ func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *
 
 // prepareWritableOverlaybd
 func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string) error {
+
 	binpath := filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-create")
 
 	// TODO(fuweid): 256GB can be configurable?
@@ -533,7 +639,9 @@ func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string)
 		o.overlaybdWritableDataPath(snID),
 		o.overlaybdWritableIndexPath(snID), "64").CombinedOutput()
 	if err != nil {
-		return errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
+		err := errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
+		log.G(ctx).Errorln(err)
+		return err
 	}
 	return nil
 }

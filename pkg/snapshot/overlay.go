@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/snapshots"
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity/fs"
+	"github.com/moby/locker"
 	"github.com/pkg/errors"
 )
 
@@ -136,10 +137,28 @@ const (
 )
 
 const (
-	roDir = iota // overlayfs as rootfs. upper + lower (overlaybd)
-	rwDir        // mount overlaybd as rootfs
-	rwDev        // use overlaybd directly
+	roDir = "overlayfs" // overlayfs as rootfs. upper + lower (overlaybd)
+	rwDir = "dir"       // mount overlaybd as rootfs
+	rwDev = "dev"       // use overlaybd directly
 )
+
+type BootConfig struct {
+	Address         string `json:"address"`
+	Root            string `json:"root"`
+	LogLevel        string `json:"verbose"`
+	LogReportCaller bool   `json:"logReportCaller"`
+	Mode            string `json:"mode"` // fs, dir or dev
+	AutoRemoveDev   bool   `json:"autoRemoveDev"`
+}
+
+func DefaultBootConfig() *BootConfig {
+	return &BootConfig{
+		LogLevel:        "info",
+		Mode:            "overlayfs",
+		LogReportCaller: false,
+		AutoRemoveDev:   false,
+	}
+}
 
 // SnapshotterConfig is used to configure the snapshotter instance
 type SnapshotterConfig struct {
@@ -189,15 +208,19 @@ type Opt func(config *SnapshotterConfig) error
 //	#
 //	- metadata.db
 type snapshotter struct {
-	root     string
-	mode     string
-	config   SnapshotterConfig
-	ms       *storage.MetaStore
-	indexOff bool
+	root           string
+	mode           string
+	config         SnapshotterConfig
+	metacopyOption string
+	ms             *storage.MetaStore
+	indexOff       bool
+	autoRemoveDev  bool
+
+	locker *locker.Locker
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
-func NewSnapshotter(root string, mode string, opts ...Opt) (snapshots.Snapshotter, error) {
+func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter, error) {
 	config := defaultConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -205,17 +228,22 @@ func NewSnapshotter(root string, mode string, opts ...Opt) (snapshots.Snapshotte
 		}
 	}
 
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := os.MkdirAll(bootConfig.Root, 0700); err != nil {
 		return nil, err
 	}
 
-	ms, err := storage.NewMetaStore(filepath.Join(root, "metadata.db"))
+	ms, err := storage.NewMetaStore(filepath.Join(bootConfig.Root, "metadata.db"))
 	if err != nil {
 		return nil, err
 	}
 
-	if err := os.Mkdir(filepath.Join(root, "snapshots"), 0700); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(filepath.Join(bootConfig.Root, "snapshots"), 0700); err != nil && !os.IsExist(err) {
 		return nil, err
+	}
+
+	metacopyOption := ""
+	if _, err := os.Stat("/sys/module/overlay/parameters/metacopy"); err == nil {
+		metacopyOption = "metacopy=on"
 	}
 
 	// figure out whether "index=off" option is recognized by the kernel
@@ -225,11 +253,14 @@ func NewSnapshotter(root string, mode string, opts ...Opt) (snapshots.Snapshotte
 	}
 
 	return &snapshotter{
-		root:     root,
-		mode:     mode,
-		ms:       ms,
-		indexOff: indexOff,
-		config:   config,
+		root:           bootConfig.Root,
+		mode:           bootConfig.Mode,
+		ms:             ms,
+		indexOff:       indexOff,
+		config:         config,
+		metacopyOption: metacopyOption,
+		autoRemoveDev:  bootConfig.AutoRemoveDev,
+		locker:         locker.New(),
 	}, nil
 }
 
@@ -301,9 +332,9 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, e
 	return usage, nil
 }
 
-func (o *snapshotter) getWritableType(ctx context.Context, id string, info snapshots.Info) (mode int) {
+func (o *snapshotter) getWritableType(ctx context.Context, id string, info snapshots.Info) (mode string) {
 	defer func() {
-		log.G(ctx).Infof("snapshot R/W label: %d", mode)
+		log.G(ctx).Infof("snapshot R/W label: %s", mode)
 	}()
 	// check image type (OCIv1 or overlaybd)
 	if id != "" {
@@ -315,7 +346,7 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
 	}
 	// overlaybd
-	rwMode := func(m string) int {
+	rwMode := func(m string) string {
 		if m == "dir" {
 			return rwDir
 		}
@@ -431,11 +462,14 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 	stype := storageTypeNormal
 	writeType := o.getWritableType(ctx, parentID, info)
+
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
+		log.G(ctx).Infof("Preparing rootfs. writeType: %s", writeType)
 		if writeType != roDir {
 			stype = storageTypeLocalBlock
 			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
+				log.G(ctx).Errorln(err.Error())
 				return nil, err
 			}
 		} else if parent != "" {
@@ -486,7 +520,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				log.G(ctx).Warnf("cannot get fs type from label, %v", obdInfo.Labels)
 				fsType = "ext4"
 			}
-			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %d, fsType %s, targetPath: %s)",
+			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
 			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, parent == ""); err != nil {
 				log.G(ctx).Errorf("%v", err)
@@ -514,7 +548,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	switch stype {
 	case storageTypeNormal:
 		m = o.normalOverlayMount(s)
-		log.G(ctx).Debugf("return mount point(R/W mode: %d): %v", writeType, m)
+		log.G(ctx).Debugf("return mount point(R/W mode: %s): %v", writeType, m)
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
 		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
 		if err != nil {
@@ -559,6 +593,11 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
 
 	if len(s.ParentIDs) > 0 {
+		o.locker.Lock(s.ID)
+		defer o.locker.Unlock(s.ID)
+		o.locker.Lock(s.ParentIDs[0])
+		defer o.locker.Unlock(s.ParentIDs[0])
+
 		_, info, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get info")
@@ -732,6 +771,24 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		}
 	}
 
+	// for TypeNormal, verify its(parent) meets the condition of overlaybd format
+	if o.autoRemoveDev {
+		if s, err := storage.GetSnapshot(ctx, key); err == nil && s.Kind == snapshots.KindActive && len(s.ParentIDs) > 0 {
+			o.locker.Lock(s.ID)
+			defer o.locker.Unlock(s.ID)
+			o.locker.Lock(s.ParentIDs[0])
+			defer o.locker.Unlock(s.ParentIDs[0])
+
+			log.G(ctx).Debugf("try to verify parent snapshots format.")
+			if st, err := o.identifySnapshotStorageType(ctx, s.ParentIDs[0], info); err == nil && st != storageTypeNormal {
+				err = o.unmountAndDetachBlockDevice(ctx, s.ParentIDs[0], "")
+				if err != nil {
+					return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+				}
+			}
+		}
+	}
+
 	defer func() {
 		if err != nil && rollback {
 			if rerr := t.Rollback(); rerr != nil {
@@ -797,10 +854,10 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	return td, nil
 }
 
-func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Snapshot, writeType int) (m []mount.Mount, err error) {
+func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Snapshot, writeType string) (m []mount.Mount, err error) {
 	defer func() {
 		if err == nil {
-			log.G(ctx).Infof("return mount point(R/W mode: %d): %v", writeType, m)
+			log.G(ctx).Infof("return mount point(R/W mode: %s): %v", writeType, m)
 		} else {
 			log.G(ctx).Errorf("basedOnBlockDeviceMount return error: %v", err)
 		}
@@ -1017,9 +1074,21 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	// check writable data file
 	filePath = o.overlaybdWritableDataPath(id)
 	st, err = o.identifyLocalStorageType(filePath)
-	if err != nil && os.IsNotExist(err) {
+	if err == nil {
+		return st, nil
+	}
+	if os.IsNotExist(err) {
+		// check config.v1.json
+		log.G(ctx).Debugf("failed to identify by writable_data(sn: %s), try to identify by config.v1.json", id)
+		filePath = o.overlaybdConfPath(id)
+		if _, err := os.Stat(filePath); err == nil {
+			log.G(ctx).Debugf("%s/config.v1.json found, return storageTypeRemoteBlock", id)
+			return storageTypeRemoteBlock, nil
+		}
 		return storageTypeNormal, nil
 	}
+	log.G(ctx).Debugf("storageType(sn: %s): %d", id, st)
+
 	return st, err
 }
 
