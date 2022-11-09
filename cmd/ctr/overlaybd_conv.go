@@ -17,7 +17,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -25,12 +24,9 @@ import (
 	"time"
 
 	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
-	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/platforms"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -89,56 +85,40 @@ var convertCommand = cli.Command{
 		defer done(ctx)
 
 		var (
-			sn = cli.SnapshotService("overlaybd")
-			cs = cli.ContentStore()
+			convertOpts = []converter.Opt{}
+			obdOpts     = []obdconv.Option{}
 		)
 
 		fsType := context.String("fstype")
 		fmt.Printf("filesystem type: %s\n", fsType)
+		obdOpts = append(obdOpts, obdconv.WithFsType(fsType))
 		dbstr := context.String("dbstr")
 		if dbstr != "" {
+			obdOpts = append(obdOpts, obdconv.WithDbstr(dbstr))
 			fmt.Printf("database config string: %s\n", dbstr)
-		}
-
-		srcImg, err := ensureImageExist(ctx, cli, srcImage)
-		if err != nil {
-			return err
-		}
-
-		srcManifest, err := currentPlatformManifest(ctx, cs, srcImg)
-		if err != nil {
-			return errors.Wrapf(err, "failed to read manifest")
 		}
 
 		resolver, err := commands.GetResolver(ctx, context)
 		if err != nil {
 			return err
 		}
+		obdOpts = append(obdOpts, obdconv.WithResolver(resolver))
+		obdOpts = append(obdOpts, obdconv.WithImageRef(srcImage))
+		obdOpts = append(obdOpts, obdconv.WithClient(cli))
+		convertOpts = append(convertOpts, converter.WithIndexConvertFunc(obdconv.IndexConvertFunc(obdOpts...)))
 
-		c, err := obdconv.NewOverlaybdConvertor(ctx, cs, sn, resolver, targetImage, dbstr)
+		newImg, err := converter.Convert(ctx, cli, targetImage, srcImage, convertOpts...)
 		if err != nil {
 			return err
 		}
-		newMfstDesc, err := c.Convert(ctx, srcManifest, fsType)
-		if err != nil {
-			return err
-		}
-
-		return obdconv.CreateImage(ctx, cli.ImageService(), targetImage, newMfstDesc)
+		fmt.Printf("new image digest: %s\n", newImg.Target.Digest.String())
+		return nil
 	},
 }
 
 type layer struct {
 	desc   ocispec.Descriptor
 	diffID digest.Digest
-}
-
-func ensureImageExist(ctx context.Context, cli *containerd.Client, imageName string) (containerd.Image, error) {
-	return cli.GetImage(ctx, imageName)
-}
-
-func currentPlatformManifest(ctx context.Context, cs content.Provider, img containerd.Image) (ocispec.Manifest, error) {
-	return images.Manifest(ctx, cs, img.Target(), platforms.Default())
 }
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187

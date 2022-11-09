@@ -37,7 +37,6 @@ import (
 	"syscall"
 	"time"
 
-	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/cmd/ctr/commands/tasks"
@@ -294,11 +293,27 @@ var recordTraceCommand = cli.Command{
 		}
 
 		imgName := cliCtx.Args().Get(1)
-		if err = obdconv.CreateImage(ctx, client.ImageService(), imgName, newManifestDesc); err != nil {
-			return fmt.Errorf("createImage failed: %v", err)
+		is := client.ImageService()
+		img := images.Image{
+			Name:   imgName,
+			Target: newManifestDesc,
 		}
-		fmt.Printf("New image %s is created\n", newRef)
-		return nil
+		for {
+			if _, err := is.Create(ctx, img); err != nil {
+				if !errdefs.IsAlreadyExists(err) {
+					return fmt.Errorf("createImage failed: %v", err)
+				}
+
+				if _, err := is.Update(ctx, img); err != nil {
+					if errdefs.IsNotFound(err) {
+						continue
+					}
+					return fmt.Errorf("createImage failed: %v", err)
+				}
+			}
+			fmt.Printf("New image %s is created\n", newRef)
+			return nil
+		}
 	},
 }
 

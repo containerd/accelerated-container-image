@@ -105,7 +105,7 @@ type contentLoader struct {
 }
 
 func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l layer, err error) {
-	refName := fmt.Sprintf(convContentNameFormat, UniquePart())
+	refName := fmt.Sprintf(convContentNameFormat, uniquePart())
 	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
 	if err != nil {
 		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
@@ -559,7 +559,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 	)
 
 	for {
-		key = fmt.Sprintf(convSnapshotNameFormat, UniquePart())
+		key = fmt.Sprintf(convSnapshotNameFormat, uniquePart())
 		mounts, err = c.sn.Prepare(ctx, key, parentID, snOpts...)
 		if err != nil {
 			// retry other key
@@ -618,7 +618,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 }
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
-func UniquePart() string {
+func uniquePart() string {
 	t := time.Now()
 	var b [3]byte
 	// Ignore read failures, just decreases uniqueness
@@ -639,10 +639,11 @@ func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.6.8/images/converter/converter.go#L29-L71
 type options struct {
-	fsType string
-	dbstr  string
-	imgRef string
-	client *containerd.Client
+	fsType   string
+	dbstr    string
+	imgRef   string
+	resolver remotes.Resolver
+	client   *containerd.Client
 }
 
 type Option func(o *options) error
@@ -664,6 +665,13 @@ func WithDbstr(dbstr string) Option {
 func WithImageRef(imgRef string) Option {
 	return func(o *options) error {
 		o.imgRef = imgRef
+		return nil
+	}
+}
+
+func WithResolver(resolver remotes.Resolver) Option {
+	return func(o *options) error {
+		o.resolver = resolver
 		return nil
 	}
 }
@@ -697,10 +705,7 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 			return nil, errors.Wrapf(err, "failed to read manifest")
 		}
 
-		// TODO: add support to database options (dbstr)
-		// resolver, err := commands.GetResolver(ctx, context)
-
-		c, err := NewOverlaybdConvertor(ctx, cs, sn /* resolver */, nil, imgRef, copts.dbstr)
+		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr)
 		if err != nil {
 			return nil, err
 		}
@@ -709,27 +714,5 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 			return nil, err
 		}
 		return &newMfstDesc, nil
-	}
-}
-
-func CreateImage(ctx context.Context, is images.Store, imgName string, imgDesc ocispec.Descriptor) error {
-	img := images.Image{
-		Name:   imgName,
-		Target: imgDesc,
-	}
-	for {
-		if _, err := is.Create(ctx, img); err != nil {
-			if !errdefs.IsAlreadyExists(err) {
-				return err
-			}
-
-			if _, err := is.Update(ctx, img); err != nil {
-				if errdefs.IsNotFound(err) {
-					continue
-				}
-				return err
-			}
-		}
-		return nil
 	}
 }
