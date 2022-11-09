@@ -31,7 +31,7 @@ jobs:
       uses: github/codeql-action/init@v2
 
     - run: |
-      make
+        make
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v2
