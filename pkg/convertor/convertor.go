@@ -37,6 +37,7 @@ import (
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/platforms"
@@ -103,7 +104,7 @@ type contentLoader struct {
 }
 
 func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l layer, err error) {
-	refName := fmt.Sprintf(convContentNameFormat, UniquePart())
+	refName := fmt.Sprintf(convContentNameFormat, uniquePart())
 	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
 	if err != nil {
 		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
@@ -557,7 +558,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 	)
 
 	for {
-		key = fmt.Sprintf(convSnapshotNameFormat, UniquePart())
+		key = fmt.Sprintf(convSnapshotNameFormat, uniquePart())
 		mounts, err = c.sn.Prepare(ctx, key, parentID, snOpts...)
 		if err != nil {
 			// retry other key
@@ -616,7 +617,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 }
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
-func UniquePart() string {
+func uniquePart() string {
 	t := time.Now()
 	var b [3]byte
 	// Ignore read failures, just decreases uniqueness
@@ -635,54 +636,82 @@ func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
 	return
 }
 
-func NerdctlConvert(ctx context.Context, client *containerd.Client, srcImage, targetImage, fsType string) error {
-	cs := client.ContentStore()
-	sn := client.SnapshotService("overlaybd")
-
-	// TODO: add support to database options (dbstr)
-	// resolver, err := commands.GetResolver(ctx, context)
-
-	srcImg, err := client.GetImage(ctx, srcImage)
-	if err != nil {
-		return err
-	}
-
-	srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
-	if err != nil {
-		return errors.Wrapf(err, "failed to read manifest")
-	}
-
-	c, err := NewOverlaybdConvertor(ctx, cs, sn /* resolver */, nil, srcImage, targetImage)
-	if err != nil {
-		return err
-	}
-
-	newMfstDesc, err := c.Convert(ctx, srcManifest, fsType)
-	if err != nil {
-		return err
-	}
-
-	return CreateImage(ctx, client.ImageService(), targetImage, newMfstDesc)
+// NOTE: based on https://github.com/containerd/containerd/blob/v1.6.8/images/converter/converter.go#L29-L71
+type options struct {
+	fsType   string
+	dbstr    string
+	imgRef   string
+	resolver remotes.Resolver
+	client   *containerd.Client
 }
 
-func CreateImage(ctx context.Context, is images.Store, imgName string, imgDesc ocispec.Descriptor) error {
-	img := images.Image{
-		Name:   imgName,
-		Target: imgDesc,
-	}
-	for {
-		if _, err := is.Create(ctx, img); err != nil {
-			if !errdefs.IsAlreadyExists(err) {
-				return err
-			}
+type Option func(o *options) error
 
-			if _, err := is.Update(ctx, img); err != nil {
-				if errdefs.IsNotFound(err) {
-					continue
-				}
-				return err
+func WithFsType(fsType string) Option {
+	return func(o *options) error {
+		o.fsType = fsType
+		return nil
+	}
+}
+
+func WithDbstr(dbstr string) Option {
+	return func(o *options) error {
+		o.dbstr = dbstr
+		return nil
+	}
+}
+
+func WithImageRef(imgRef string) Option {
+	return func(o *options) error {
+		o.imgRef = imgRef
+		return nil
+	}
+}
+
+func WithResolver(resolver remotes.Resolver) Option {
+	return func(o *options) error {
+		o.resolver = resolver
+		return nil
+	}
+}
+
+func WithClient(client *containerd.Client) Option {
+	return func(o *options) error {
+		o.client = client
+		return nil
+	}
+}
+
+func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
+	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		var copts options
+		for _, o := range opts {
+			if err := o(&copts); err != nil {
+				return nil, err
 			}
 		}
-		return nil
+		client := copts.client
+		imgRef := copts.imgRef
+		sn := client.SnapshotService("overlaybd")
+
+		srcImg, err := client.GetImage(ctx, imgRef)
+		if err != nil {
+			return nil, err
+		}
+
+		srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to read manifest")
+		}
+
+		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr)
+		if err != nil {
+			return nil, err
+		}
+		newMfstDesc, err := c.Convert(ctx, srcManifest, copts.fsType)
+		if err != nil {
+			return nil, err
+		}
+		return &newMfstDesc, nil
 	}
 }
