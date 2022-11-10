@@ -2,16 +2,27 @@
 
 This guide helps to config and run the common case of overlaybd image service.
 
-- [Install](#install)
-  - [overlaybd-snapshotter](#overlaybd-snapshotter)
-  - [overlaybd-tcmu](#overlaybd-tcmu)
-- [Configuration](#configuration)
-  - [containerd](#containerd)
-  - [Authentication](#authentication)
-- [Run overlaybd images](#run-overlaybd-images)
-- [Image conversion](#image-conversion)
-- [Image build](#image-build)
-- [P2P](#p2p)
+- [Quickstart Guide](#quickstart-guide)
+  - [Install](#install)
+    - [overlaybd-snapshotter](#overlaybd-snapshotter)
+      - [Compile from source](#compile-from-source)
+      - [Download release](#download-release)
+      - [Config](#config)
+      - [Start service](#start-service)
+    - [overlaybd-tcmu](#overlaybd-tcmu)
+      - [Compile from source](#compile-from-source-1)
+      - [Download release](#download-release-1)
+      - [Config](#config-1)
+      - [Start service](#start-service-1)
+  - [Configuration](#configuration)
+    - [Containerd](#containerd)
+    - [Authentication](#authentication)
+  - [Run overlaybd images](#run-overlaybd-images)
+  - [Image conversion](#image-conversion)
+  - [Image build](#image-build)
+    - [Install](#install-1)
+    - [Run buildkitd](#run-buildkitd)
+  - [P2P](#p2p)
 
 ## Install
 
@@ -186,7 +197,7 @@ Images can be convert from oci format to overlaybd format by the following comma
 sudo nerdctl pull registry.hub.docker.com/library/redis:6.2.1
 
 # convert
-sudo /opt/overlaybd/snapshotter/ctrobdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
+sudo /opt/overlaybd/snapshotter/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
 
 # push the overlaybd image to registry, then the new converted image can be used as a remote image
 sudo nerdctl push registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
