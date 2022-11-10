@@ -831,23 +831,21 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	if err := os.Mkdir(filepath.Join(td, "fs"), 0755); err != nil {
 		return td, err
 	}
+	if err := os.Mkdir(filepath.Join(td, "block"), 0711); err != nil {
+		return td, err
+	}
+	if err := os.Mkdir(filepath.Join(td, "block", "mountpoint"), 0711); err != nil {
+		return td, err
+	}
+
+	f, err := os.Create(filepath.Join(td, "block", "init-debug.log"))
+	f.Close()
+	if err != nil {
+		return td, err
+	}
 
 	if kind == snapshots.KindActive {
 		if err := os.Mkdir(filepath.Join(td, "work"), 0711); err != nil {
-			return td, err
-		}
-
-		if err := os.Mkdir(filepath.Join(td, "block"), 0711); err != nil {
-			return td, err
-		}
-
-		if err := os.Mkdir(filepath.Join(td, "block", "mountpoint"), 0711); err != nil {
-			return td, err
-		}
-
-		f, err := os.Create(filepath.Join(td, "block", "init-debug.log"))
-		f.Close()
-		if err != nil {
 			return td, err
 		}
 	}
@@ -862,13 +860,18 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 			log.G(ctx).Errorf("basedOnBlockDeviceMount return error: %v", err)
 		}
 	}()
+	rwflag := "rw"
+	if s.Kind == snapshots.KindView && (writeType == rwflag || writeType == rwDev) {
+		log.G(ctx).Infof("snapshot.Kind == View, reset overlaybd as READ-ONLY.")
+		rwflag = "ro"
+	}
 	if writeType == rwDir {
 		return []mount.Mount{
 			{
 				Source: o.overlaybdMountpoint(s.ID),
 				Type:   "bind",
 				Options: []string{
-					"rw",
+					rwflag,
 					"rbind",
 				},
 			},
@@ -885,7 +888,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 				Source: string(devName),
 				Type:   "ext4",
 				Options: []string{
-					"rw",
+					rwflag,
 					"discard",
 				},
 			},
