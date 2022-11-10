@@ -1,4 +1,8 @@
 {
     "root": "/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd",
-    "address": "/run/overlaybd-snapshotter/overlaybd.sock"
+    "address": "/run/overlaybd-snapshotter/overlaybd.sock",
+    "verbose": "info",
+    "mode": "overlayfs",
+    "logReportCaller": false,
+    "autoRemoveDev": false
 }

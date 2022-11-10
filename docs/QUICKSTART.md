@@ -57,11 +57,23 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 
 ```json
 {
-    "root": "/var/lib/overlaybd/",
-    "address": "/run/overlaybd-snapshotter/overlaybd.sock"
+    "root": "/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd",
+    "address": "/run/overlaybd-snapshotter/overlaybd.sock",
+    "verbose": "info",
+    "mode": "overlayfs",
+    "logReportCaller": false,
+    "autoRemoveDev": false
 }
 ```
-`root` is the root directory to store snapshots, `address` is the socket address used to connect withcontainerd.
+| Field | Description |
+| ----- | ----------- |
+| `root` | the root directory to store snapshots |
+| `address` | the socket address used to connect withcontainerd. |
+| `verbose` | log level, `info` or `debug` |
+| `mode` | rootfs mode about wether to use native writable layer. See [Native Support for Writable](docs/WRITABLE.md) for detail. |
+| `logReportCaller` | enable/disable the calling method |
+| `autoRemoveDev` | enable/disable auto clean-up overlaybd device after container removed |
+
 
 #### Start service
 

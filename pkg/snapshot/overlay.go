@@ -570,7 +570,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 // View returns a readonly view on parent snapshotter.
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 	log.G(ctx).Debugf("View (key: %s, parent: %s)", key, parent)
-
+	defer log.G(ctx).Debugf("return View (key: %s, parent: %s)", key, parent)
 	return o.createMountPoint(ctx, snapshots.KindView, key, parent, opts...)
 }
 
@@ -966,6 +966,9 @@ func (o *snapshotter) normalOverlayMount(s storage.Snapshot) []mount.Mount {
 			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
 			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
 		)
+		// if o.metacopyOption != "" {
+		// 	options = append(options, o.metacopyOption)
+		// }
 	} else if len(s.ParentIDs) == 1 {
 		return []mount.Mount{
 			{

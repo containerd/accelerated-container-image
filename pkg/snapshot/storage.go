@@ -551,6 +551,8 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			Data:  o.overlaybdWritableDataPath(id),
 		}
 	}
+	configBuffer, _ := json.MarshalIndent(configJSON, "", "  ")
+	log.G(ctx).Infoln(string(configBuffer))
 	return o.atomicWriteOverlaybdTargetConfig(id, &configJSON)
 }
 
