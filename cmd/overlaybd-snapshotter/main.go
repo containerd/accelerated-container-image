@@ -38,22 +38,14 @@ import (
 
 const defaultConfigPath = "/etc/overlaybd-snapshotter/config.json"
 
-type pluginConfig struct {
-	Address  string `json:"address"`
-	Root     string `json:"root"`
-	LogLevel string `json:"verbose"`
-	Mode     string `json:"mode"` // fs, dir or dev
-}
-
-var pconfig pluginConfig
+var pconfig *overlaybd.BootConfig
 
 func parseConfig(fpath string) error {
 	data, err := os.ReadFile(fpath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read plugin config from %s", fpath)
 	}
-
-	if err := json.Unmarshal(data, &pconfig); err != nil {
+	if err := json.Unmarshal(data, pconfig); err != nil {
 		return errors.Wrapf(err, "failed to parse plugin config from %s", string(data))
 	}
 	return nil
@@ -62,26 +54,23 @@ func parseConfig(fpath string) error {
 // TODO: use github.com/urfave/cli
 func main() {
 
+	pconfig = overlaybd.DefaultBootConfig()
 	if err := parseConfig(defaultConfigPath); err != nil {
 		logrus.Error(err)
 		os.Exit(1)
 	}
-
-	if pconfig.Mode == "" {
-		pconfig.Mode = "fs"
+	if pconfig.LogReportCaller {
+		logrus.SetReportCaller(true)
 	}
-	logrus.Infof("set mode: %s", pconfig.Mode)
+	logrus.Infof("%+v", *pconfig)
 
-	if pconfig.LogLevel == "" {
-		pconfig.LogLevel = "info"
-	}
 	if err := setLogLevel(pconfig.LogLevel); err != nil {
 		logrus.Errorf("failed to set log level: %v", err)
 	} else {
 		logrus.Infof("set log level: %s", pconfig.LogLevel)
 	}
 
-	sn, err := overlaybd.NewSnapshotter(pconfig.Root, pconfig.Mode)
+	sn, err := overlaybd.NewSnapshotter(pconfig)
 	if err != nil {
 		logrus.Errorf("failed to init overlaybd snapshotter: %v", err)
 		os.Exit(1)

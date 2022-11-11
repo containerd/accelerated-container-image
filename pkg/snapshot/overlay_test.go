@@ -27,7 +27,9 @@ import (
 
 func newSnapshotterWithOpts(opts ...Opt) testsuite.SnapshotterFunc {
 	return func(ctx context.Context, root string) (snapshots.Snapshotter, func() error, error) {
-		snapshotter, err := NewSnapshotter(root, "fs", opts...)
+		cfg := DefaultBootConfig()
+		cfg.Root = root
+		snapshotter, err := NewSnapshotter(cfg, opts...)
 		if err != nil {
 			return nil, nil, err
 		}
