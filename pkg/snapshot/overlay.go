@@ -147,14 +147,14 @@ type BootConfig struct {
 	Root            string `json:"root"`
 	LogLevel        string `json:"verbose"`
 	LogReportCaller bool   `json:"logReportCaller"`
-	Mode            string `json:"mode"` // fs, dir or dev
+	RwMode          string `json:"rwMode"` // overlayfs, dir or dev
 	AutoRemoveDev   bool   `json:"autoRemoveDev"`
 }
 
 func DefaultBootConfig() *BootConfig {
 	return &BootConfig{
 		LogLevel:        "info",
-		Mode:            "overlayfs",
+		RwMode:          "overlayfs",
 		LogReportCaller: false,
 		AutoRemoveDev:   false,
 	}
@@ -209,7 +209,7 @@ type Opt func(config *SnapshotterConfig) error
 //	- metadata.db
 type snapshotter struct {
 	root           string
-	mode           string
+	rwMode         string
 	config         SnapshotterConfig
 	metacopyOption string
 	ms             *storage.MetaStore
@@ -254,7 +254,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 
 	return &snapshotter{
 		root:           bootConfig.Root,
-		mode:           bootConfig.Mode,
+		rwMode:         bootConfig.RwMode,
 		ms:             ms,
 		indexOff:       indexOff,
 		config:         config,
@@ -357,7 +357,7 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	}
 	m, ok := info.Labels[LabelSupportReadWriteMode]
 	if !ok {
-		return rwMode(o.mode)
+		return rwMode(o.rwMode)
 	}
 
 	return rwMode(m)
@@ -593,10 +593,12 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
 
 	if len(s.ParentIDs) > 0 {
-		o.locker.Lock(s.ID)
-		defer o.locker.Unlock(s.ID)
-		o.locker.Lock(s.ParentIDs[0])
-		defer o.locker.Unlock(s.ParentIDs[0])
+		if o.autoRemoveDev {
+			o.locker.Lock(s.ID)
+			defer o.locker.Unlock(s.ID)
+			o.locker.Lock(s.ParentIDs[0])
+			defer o.locker.Unlock(s.ParentIDs[0])
+		}
 
 		_, info, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
