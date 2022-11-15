@@ -29,6 +29,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/containerd/archive/compression"
@@ -72,7 +73,7 @@ func prepareWritableLayer(ctx context.Context, dir string) error {
 	indexPath := path.Join(dir, "writable_index")
 	os.RemoveAll(dataPath)
 	os.RemoveAll(indexPath)
-	out, err := exec.CommandContext(ctx, binpath, "-s",
+	out, err := exec.CommandContext(ctx, binpath,
 		dataPath, indexPath, "64").CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to prepare writable layer: %s", out)
@@ -257,29 +258,51 @@ func convert() error {
 		File: "/opt/overlaybd/baselayers/ext4_64",
 	})
 
+	results := make(chan error)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(manifest.Layers))
+	for idx, layer := range manifest.Layers {
+		go func(idx int, layer specs.Descriptor) {
+			rc, err := fetcher.Fetch(ctx, layer)
+			if err != nil {
+				results <- errors.Wrapf(err, "failed to download for layer %d", idx)
+				return
+			}
+			drc, err := compression.DecompressStream(rc)
+			if err != nil {
+				results <- errors.Wrapf(err, "failed to decompress for layer %d", idx)
+				return
+			}
+			layerDir := path.Join(dir, fmt.Sprintf("%04d_", idx)+layer.Digest.String())
+			if err = os.MkdirAll(layerDir, 0644); err != nil {
+				results <- err
+				return
+			}
+			ftar, err := os.Create(path.Join(layerDir, "layer.tar"))
+			if err != nil {
+				results <- err
+				return
+			}
+			if _, err = io.Copy(ftar, drc); err != nil {
+				results <- errors.Wrapf(err, "failed to decompress copy for layer %d", idx)
+				return
+			}
+			logrus.Infof("downloaded layer %d, dir %s", idx, layerDir)
+			waitGroup.Done()
+		}(idx, layer)
+	}
+
+	waitGroup.Wait()
+	close(results)
+	for result := range results {
+		if result != nil {
+			return result
+		}
+	}
+
 	lastDigest := ""
 	for idx, layer := range manifest.Layers {
-		rc, err := fetcher.Fetch(ctx, layer)
-		if err != nil {
-			return errors.Wrapf(err, "failed to download for layer %d", idx)
-		}
-		drc, err := compression.DecompressStream(rc)
-		if err != nil {
-			return errors.Wrapf(err, "failed to decompress for layer %d", idx)
-		}
-		layerDir := path.Join(dir, layer.Digest.String())
-		if err = os.MkdirAll(layerDir, 0644); err != nil {
-			return err
-		}
-
-		ftar, err := os.Create(path.Join(layerDir, "layer.tar"))
-		if err != nil {
-			return err
-		}
-		if _, err = io.Copy(ftar, drc); err != nil {
-			return errors.Wrapf(err, "failed to decompress copy for layer %d", idx)
-		}
-		logrus.Infof("downloaded layer %d", idx)
+		layerDir := path.Join(dir, fmt.Sprintf("%04d_", idx)+layer.Digest.String())
 		// TODO check diffID
 
 		// make writable layer
@@ -323,9 +346,14 @@ func convert() error {
 		}
 		logrus.Infof("layer %d uploaded", idx)
 
-		lastDigest = manifest.Layers[idx].Digest.String()
+		lastDigest = fmt.Sprintf("%04d_", idx) + manifest.Layers[idx].Digest.String()
 		manifest.Layers[idx] = desc
 		config.RootFS.DiffIDs[idx] = desc.Digest
+
+		// clean unused file
+		os.Remove(path.Join(dir, lastDigest, "layer.tar"))
+		os.Remove(path.Join(dir, lastDigest, "writable_data"))
+		os.Remove(path.Join(dir, lastDigest, "writable_index"))
 	}
 
 	// add baselayer
