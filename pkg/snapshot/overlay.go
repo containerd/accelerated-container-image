@@ -18,6 +18,7 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,6 +108,9 @@ const (
 	// labelKeyRecordTracePath is the the file path to record trace
 	labelKeyRecordTracePath = "containerd.io/snapshot/overlaybd/record-trace-path"
 
+	// labelKeyZFileConfig is the config of ZFile
+	labelKeyZFileConfig = "containerd.io/snapshot/overlaybd/zfile-config"
+
 	// labelKeyCriImageRef is thr image-ref from cri
 	labelKeyCriImageRef = "containerd.io/snapshot/cri.image-ref"
 
@@ -158,6 +162,11 @@ func DefaultBootConfig() *BootConfig {
 		LogReportCaller: false,
 		AutoRemoveDev:   false,
 	}
+}
+
+type ZFileConfig struct {
+	Algorithm string `json:"algorithm"`
+	BlockSize int    `json:"blockSize"`
 }
 
 // SnapshotterConfig is used to configure the snapshotter instance
@@ -668,7 +677,14 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
 
-			if err := o.commitWritableOverlaybd(ctx, id); err != nil {
+			var zfileCfg ZFileConfig
+			if cfgStr, ok := oinfo.Labels[labelKeyZFileConfig]; ok {
+				if err := json.Unmarshal([]byte(cfgStr), &zfileCfg); err != nil {
+					return err
+				}
+			}
+
+			if err := o.commitWritableOverlaybd(ctx, id, zfileCfg); err != nil {
 				return err
 			}
 
