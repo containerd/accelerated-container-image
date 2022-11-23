@@ -58,6 +58,7 @@ const (
 	labelOverlayBDBlobWritable = "containerd.io/snapshot/overlaybd.writable"
 	labelKeyAccelerationLayer  = "containerd.io/snapshot/overlaybd/acceleration-layer"
 	labelBuildLayerFrom        = "containerd.io/snapshot/overlaybd/build.layer-from"
+	labelKeyZFileConfig        = "containerd.io/snapshot/overlaybd/zfile-config"
 	labelDistributionSource    = "containerd.io/distribution.source"
 )
 
@@ -69,6 +70,11 @@ var (
 	convSnapshotNameFormat = "overlaybd-conv-%s"
 	convContentNameFormat  = convSnapshotNameFormat
 )
+
+type ZFileConfig struct {
+	Algorithm string `json:"algorithm"`
+	BlockSize int    `json:"blockSize"`
+}
 
 type ImageConvertor interface {
 	Convert(ctx context.Context, srcManifest ocispec.Manifest, fsType string) (ocispec.Descriptor, error)
@@ -187,21 +193,23 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 
 type overlaybdConvertor struct {
 	ImageConvertor
-	cs      content.Store
-	sn      snapshots.Snapshotter
-	remote  bool
-	fetcher remotes.Fetcher
-	pusher  remotes.Pusher
-	db      *sql.DB
-	host    string
-	repo    string
+	cs       content.Store
+	sn       snapshots.Snapshotter
+	remote   bool
+	fetcher  remotes.Fetcher
+	pusher   remotes.Pusher
+	db       *sql.DB
+	host     string
+	repo     string
+	zfileCfg ZFileConfig
 }
 
-func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.Snapshotter, resolver remotes.Resolver, ref string, dbstr string) (ImageConvertor, error) {
+func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.Snapshotter, resolver remotes.Resolver, ref string, dbstr string, zfileCfg ZFileConfig) (ImageConvertor, error) {
 	c := &overlaybdConvertor{
-		cs:     cs,
-		sn:     sn,
-		remote: false,
+		cs:       cs,
+		sn:       sn,
+		remote:   false,
+		zfileCfg: zfileCfg,
 	}
 	var err error
 	if dbstr != "" {
@@ -505,6 +513,13 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 				labelOverlayBDBlobFsType:   fsType,
 			}),
 		}
+		cfgStr, err := json.Marshal(c.zfileCfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, snapshots.WithLabels(map[string]string{
+			labelKeyZFileConfig: string(cfgStr),
+		}))
 		lastParentID, err = c.applyOCIV1LayerInZfile(ctx, lastParentID, desc, opts, nil)
 		if err != nil {
 			return nil, err
@@ -606,7 +621,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 	}
 
 	commitID := fmt.Sprintf(convSnapshotNameFormat, digester.Digest())
-	if err = c.sn.Commit(ctx, commitID, key); err != nil {
+	if err = c.sn.Commit(ctx, commitID, key, snOpts...); err != nil {
 		if !errdefs.IsAlreadyExists(err) {
 			return emptyString, err
 		}
@@ -638,11 +653,13 @@ func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.6.8/images/converter/converter.go#L29-L71
 type options struct {
-	fsType   string
-	dbstr    string
-	imgRef   string
-	resolver remotes.Resolver
-	client   *containerd.Client
+	fsType    string
+	dbstr     string
+	imgRef    string
+	algorithm string
+	blockSize int
+	resolver  remotes.Resolver
+	client    *containerd.Client
 }
 
 type Option func(o *options) error
@@ -664,6 +681,20 @@ func WithDbstr(dbstr string) Option {
 func WithImageRef(imgRef string) Option {
 	return func(o *options) error {
 		o.imgRef = imgRef
+		return nil
+	}
+}
+
+func WithAlgorithm(algorithm string) Option {
+	return func(o *options) error {
+		o.algorithm = algorithm
+		return nil
+	}
+}
+
+func WithBlockSize(blockSize int) Option {
+	return func(o *options) error {
+		o.blockSize = blockSize
 		return nil
 	}
 }
@@ -703,8 +734,11 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read manifest")
 		}
-
-		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr)
+		zfileCfg := ZFileConfig{
+			Algorithm: copts.algorithm,
+			BlockSize: copts.blockSize,
+		}
+		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr, zfileCfg)
 		if err != nil {
 			return nil, err
 		}

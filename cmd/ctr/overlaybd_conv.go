@@ -58,6 +58,16 @@ var convertCommand = cli.Command{
 			Usage: "data base config string used for layer deduplication",
 			Value: "",
 		},
+		cli.StringFlag{
+			Name:  "algorithm",
+			Usage: "compress algorithm uses in zfile, [lz4|zstd]",
+			Value: "",
+		},
+		cli.IntFlag{
+			Name:  "bs",
+			Usage: "The size of a compressed data block in KB. Must be a power of two between 4K~64K [4/8/16/32/64])",
+			Value: 0,
+		},
 	),
 	Action: func(context *cli.Context) error {
 		var (
@@ -97,6 +107,10 @@ var convertCommand = cli.Command{
 			obdOpts = append(obdOpts, obdconv.WithDbstr(dbstr))
 			fmt.Printf("database config string: %s\n", dbstr)
 		}
+		algorithm := context.String("algorithm")
+		obdOpts = append(obdOpts, obdconv.WithAlgorithm(algorithm))
+		blockSize := context.Int("bs")
+		obdOpts = append(obdOpts, obdconv.WithBlockSize(blockSize))
 
 		resolver, err := commands.GetResolver(ctx, context)
 		if err != nil {
