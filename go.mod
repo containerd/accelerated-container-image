@@ -62,3 +62,6 @@ require (
 	google.golang.org/protobuf v1.27.1 // indirect
 	gotest.tools/v3 v3.0.3 // indirect
 )
+
+// v0.5.2 was retagged: 71d70d4e738679154f62e2869e94784558cb9b36 -> fd022b910830015d8665a7b497f47bba1f90dd18
+retract v0.5.2
