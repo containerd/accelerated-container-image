@@ -1,4 +1,4 @@
-# Image Convertor
+# Embedded Image Convertor
 
 We provide a ctr command tool to convert OCIv1 images into overlaybd format, which is stored in `bin` after `make` or downloading the release package.
 
