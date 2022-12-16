@@ -38,11 +38,17 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     It is a [containerd](https://containerd.io/) snapshotter plugin for overlaybd image. This snapshotter is compatible for OCI image, as well as overlayfs snapshotter.
 
-* image-convertor
+* embedded image-convertor
 
     We provide a modified CLI tool(ctr) to facilitate image pull, and custom conversion from traditional OCI tarball format to overlaybd format.
 
     The convertor supports layer deduplication, which prevents duplication of layer conversion for every image conversion.
+
+* standalone userspace image-convertor
+
+    Standalone userspace image-convertor has similar functionality to embedded image-convertor but runs in the userspace. It does not require root privilege and dependence on tcmu, configfs, snapshotter, or even on containerd. which makes it much more convenient to run in a container.
+
+    Standalone userspace image-convertor can be faster than embedded image-convertor when used with our [customized libext2fs](https://github.com/data-accelerator/e2fsprogs). See [USERSPACE_CONVERTOR](https://github.com/containerd/accelerated-container-image/blob/main/docs/USERSPACE_CONVERTOR.md) for more details.
 
 * [buildkit for overlaybd](https://github.com/data-accelerator/buildkit) (Experimental)
 
@@ -62,9 +68,11 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 * See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
 
-* See how to use layer deduplication for image conversion at [IMAGE_CONVERTOR](docs/IMAGE_CONVERTOR.md)
+* See how to use layer deduplication for image conversion at [IMAGE_CONVERTOR](docs/IMAGE_CONVERTOR.md).
 
-* See how to use overlaybd writable layer at [WRITABLE](docs/WRITABLE.md)
+* See how to use standalone userspace image-convertor with our [customized libext2fs](https://github.com/data-accelerator/e2fsprogs) at [USERSPACE_CONVERTOR](https://github.com/containerd/accelerated-container-image/blob/main/docs/USERSPACE_CONVERTOR.md).
+
+* See how to use overlaybd writable layer at [WRITABLE](docs/WRITABLE.md).
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 

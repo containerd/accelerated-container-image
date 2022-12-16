@@ -1,4 +1,4 @@
-# Userspace Image Convertor
+# Standalone Userspace Image Convertor
 
 We provide a tool to convert OCIv1 images into overlaybd format in userspace, without the dependences of containerd and tcmu. Only several ovelraybd tools binary are required.
 
@@ -12,13 +12,9 @@ This is an experimental feature and will be continuously improved.
 There's no need to install containerd, no need to launch and mount tcmu devices, no need to run as root.
 Only several tools are required:
 
-- overlaybd-create and overlaybd-commit
+- overlaybd-create, overlaybd-commit and overlaybd-apply
 
-  Two overlaybd tools provided in [overlaybd](https://github.com/containerd/overlaybd), stored at `/opt/overlaybd/bin`.
-
-- overlaybd-apply
-
-  A tool to apply oci layers into overlaybd, provided in [overlaybd-apply](https://github.com/data-accelerator/overlaybd-apply), stored at `/opt/overlaybd/bin`.
+  Three overlaybd tools provided in [overlaybd](https://github.com/containerd/overlaybd), stored at `/opt/overlaybd/bin`.
 
 - baselayer
 
@@ -50,3 +46,7 @@ Flags:
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
 
 ```
+
+# Make Conversion Faster
+
+We have provided a [customized libext2fs](https://github.com/data-accelerator/e2fsprogs), which is easy to use and can significantly improve the efficiency of this standalone userspace image-convertor. See [USERSPACE_IMAGE_CONVERTOR](https://github.com/containerd/overlaybd/blob/main/docs/USERSPACE_IMAGE_CONVERTOR.md) for more details.

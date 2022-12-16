@@ -95,8 +95,9 @@ Install dependencies:
 - cmake 3.15+
 - gcc/g++ 7+
 - development dependencies:
-    - CentOS/Fedora: sudo yum install libaio-devel libcurl-devel openssl-devel libnl3-devel
-    - Debian/Ubuntu: sudo apt install libcurl4-openssl-dev libssl-dev libaio-dev libnl-3-dev libnl-genl-3-dev libgflags-dev
+    - CentOS 7/Fedora: `sudo yum install libaio-devel libcurl-devel openssl-devel libnl3-devel libzstd-static e2fsprogs-devel`
+    - CentOS 8: `sudo yum install libaio-devel libcurl-devel openssl-devel libnl3-devel libzstd-devel e2fsprogs-devel`
+    - Debian/Ubuntu: `sudo apt install libcurl4-openssl-dev libssl-dev libaio-dev libnl-3-dev libnl-genl-3-dev libgflags-dev libzstd-dev libext2fs-dev`
 
 Run the following commands to build:
 ```bash
@@ -196,13 +197,15 @@ There are several methods.
     sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo
     ```
 
-- usr k8s/cri
+- use k8s/cri
 
     Run with k8s or crictl, refer to [EXAMPLES_CRI](https://github.com/containerd/accelerated-container-image/blob/main/docs/EXAMPLES_CRI.md).
 
 ## Image conversion
 
-Images can be convert from oci format to overlaybd format by the following commands.
+There are 2 ways to convert images from oci format to overlaybd format, by using embedded image-convertor or using standalone userspace image-convertor respectively.
+
+- use embedded image-convertor
 
 ```bash
 # pull the source image (nerdctl or ctr)
@@ -216,6 +219,13 @@ sudo nerdctl push registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
 
 # remove the local overlaybd image
 sudo nerdctl rmi registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
+```
+
+- use standalone userspace image-convertor
+
+```bash
+# userspace-image-convertor will automatically pull and push images from and to the registry
+sudo /opt/overlaybd/snapshotter/convertor -r registry.hub.docker.com/library -i redis:6.2.1 -o 6.2.1_obd_new
 ```
 
 ## Image build
