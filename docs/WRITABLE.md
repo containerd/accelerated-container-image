@@ -55,6 +55,7 @@ There are two kinds of mount mode, `dir` mod and `dev` mod:
     {
         "root": "/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd",
         "address": "/run/overlaybd-snapshotter/overlaybd.sock",
-        "mode": "dev"
+        "rwMode": "dev", // overlayfs, dir or dev
+        "writableLayerType": "sparse" // append or sparse
     }
     ```

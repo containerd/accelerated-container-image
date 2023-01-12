@@ -637,9 +637,15 @@ func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string)
 	binpath := filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-create")
 
 	// TODO(fuweid): 256GB can be configurable?
-	out, err := exec.CommandContext(ctx, binpath,
+	args := []string{
 		o.overlaybdWritableDataPath(snID),
-		o.overlaybdWritableIndexPath(snID), "64").CombinedOutput()
+		o.overlaybdWritableIndexPath(snID),
+		"64",
+	}
+	if o.writableLayerType == "sparse" {
+		args = append(args, "-s")
+	}
+	out, err := exec.CommandContext(ctx, binpath, args...).CombinedOutput()
 	if err != nil {
 		err := errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
 		log.G(ctx).Errorln(err)
