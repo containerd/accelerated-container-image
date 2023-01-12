@@ -24,7 +24,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
+
+	"github.com/containerd/accelerated-container-image/pkg/metrics"
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
@@ -147,12 +150,13 @@ const (
 )
 
 type BootConfig struct {
-	Address         string `json:"address"`
-	Root            string `json:"root"`
-	LogLevel        string `json:"verbose"`
-	LogReportCaller bool   `json:"logReportCaller"`
-	RwMode          string `json:"rwMode"` // overlayfs, dir or dev
-	AutoRemoveDev   bool   `json:"autoRemoveDev"`
+	Address         string                 `json:"address"`
+	Root            string                 `json:"root"`
+	LogLevel        string                 `json:"verbose"`
+	LogReportCaller bool                   `json:"logReportCaller"`
+	RwMode          string                 `json:"rwMode"` // overlayfs, dir or dev
+	AutoRemoveDev   bool                   `json:"autoRemoveDev"`
+	ExporterConfig  metrics.ExporterConfig `json:"exporterConfig"`
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -161,6 +165,11 @@ func DefaultBootConfig() *BootConfig {
 		RwMode:          "overlayfs",
 		LogReportCaller: false,
 		AutoRemoveDev:   false,
+		ExporterConfig: metrics.ExporterConfig{
+			Enable:    false,
+			UriPrefix: "/metrics",
+			Port:      9863,
+		},
 	}
 }
 
@@ -274,9 +283,15 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 }
 
 // Stat returns the info for an active or committed snapshot by the key.
-func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, error) {
+func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, retErr error) {
 	log.G(ctx).Debugf("Stat (key: %s)", key)
-
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Stat").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Stat").Observe(time.Since(start).Seconds())
+	}()
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return snapshots.Info{}, err
@@ -295,8 +310,15 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (snapshots.Info, err
 // NOTE: It supports patch-update.
 //
 // TODO(fuweid): should not touch the interface-like or internal label!
-func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (snapshots.Info, error) {
+func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (_ snapshots.Info, retErr error) {
 	log.G(ctx).Debugf("Update (fieldpaths: %s)", fieldpaths)
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Update").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Update").Observe(time.Since(start).Seconds())
+	}()
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
@@ -316,8 +338,15 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 }
 
 // Usage returns the resources taken by the snapshot identified by key.
-func (o *snapshotter) Usage(ctx context.Context, key string) (snapshots.Usage, error) {
+func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage, retErr error) {
 	log.G(ctx).Debugf("Usage (key: %s)", key)
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Usage").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Usage").Observe(time.Since(start).Seconds())
+	}()
 
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
@@ -572,7 +601,13 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 // Prepare creates an active snapshot identified by key descending from the provided parent.
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
-
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Prepare").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Prepare").Observe(time.Since(start).Seconds())
+	}()
 	return o.createMountPoint(ctx, snapshots.KindActive, key, parent, opts...)
 }
 
@@ -580,6 +615,13 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 	log.G(ctx).Debugf("View (key: %s, parent: %s)", key, parent)
 	defer log.G(ctx).Debugf("return View (key: %s, parent: %s)", key, parent)
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("View").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("View").Observe(time.Since(start).Seconds())
+	}()
 	return o.createMountPoint(ctx, snapshots.KindView, key, parent, opts...)
 }
 
@@ -587,7 +629,14 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 // called on an read-write or readonly transaction.
 //
 // This can be used to recover mounts after calling View or Prepare.
-func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, error) {
+func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, retErr error) {
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Mounts").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Mounts").Observe(time.Since(start).Seconds())
+	}()
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {
 		return nil, err
@@ -646,6 +695,13 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 // Commit
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) (retErr error) {
 	log.G(ctx).Debugf("Commit (key: %s, name: %s)", key, name)
+	start := time.Now()
+	defer func() {
+		if retErr != nil {
+			metrics.GRPCErrCount.WithLabelValues("Commit").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Commit").Observe(time.Since(start).Seconds())
+	}()
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
@@ -762,6 +818,13 @@ func (o *snapshotter) commit(ctx context.Context, name, key string, opts ...snap
 // immediately become unavailable and unrecoverable.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	log.G(ctx).Debugf("Remove (key: %s)", key)
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			metrics.GRPCErrCount.WithLabelValues("Remove").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Remove").Observe(time.Since(start).Seconds())
+	}()
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
@@ -829,8 +892,15 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 }
 
 // Walk the snapshots.
-func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) error {
+func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) (err error) {
 	log.G(ctx).Debugf("Walk (fs: %s)", fs)
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			metrics.GRPCErrCount.WithLabelValues("Walk").Inc()
+		}
+		metrics.GRPCLatency.WithLabelValues("Walk").Observe(time.Since(start).Seconds())
+	}()
 
 	ctx, t, err := o.ms.TransactionContext(ctx, false)
 	if err != nil {

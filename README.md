@@ -66,6 +66,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 * See how to use overlaybd writable layer at [WRITABLE](docs/WRITABLE.md)
 
+* See how to use Prometheus to monitor metrics like latency/error count of snapshotter GRPC APIs at [PROMETHEUS](docs/PROMETHEUS.md).
+
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
 ## Overview
