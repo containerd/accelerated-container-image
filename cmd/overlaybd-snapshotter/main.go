@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
@@ -53,7 +54,6 @@ func parseConfig(fpath string) error {
 
 // TODO: use github.com/urfave/cli
 func main() {
-
 	pconfig = overlaybd.DefaultBootConfig()
 	if err := parseConfig(defaultConfigPath); err != nil {
 		logrus.Error(err)
@@ -62,7 +62,12 @@ func main() {
 	if pconfig.LogReportCaller {
 		logrus.SetReportCaller(true)
 	}
-	logrus.Infof("%+v", *pconfig)
+
+	metrics.Config = pconfig.ExporterConfig
+	if pconfig.ExporterConfig.Enable {
+		go metrics.Init()
+		logrus.Infof("set Prometheus metrics exporter in http://localhost:%d%s", metrics.Config.Port, metrics.Config.UriPrefix)
+	}
 
 	if err := setLogLevel(pconfig.LogLevel); err != nil {
 		logrus.Errorf("failed to set log level: %v", err)
@@ -117,6 +122,10 @@ func main() {
 	signal.Notify(signals, unix.SIGTERM, unix.SIGINT, unix.SIGPIPE)
 
 	<-handleSignals(context.TODO(), signals, srv)
+
+	if pconfig.ExporterConfig.Enable {
+		metrics.IsAlive.Set(0)
+	}
 }
 
 func handleSignals(ctx context.Context, signals chan os.Signal, server *grpc.Server) chan struct{} {
