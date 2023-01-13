@@ -150,13 +150,14 @@ const (
 )
 
 type BootConfig struct {
-	Address         string                 `json:"address"`
-	Root            string                 `json:"root"`
-	LogLevel        string                 `json:"verbose"`
-	LogReportCaller bool                   `json:"logReportCaller"`
-	RwMode          string                 `json:"rwMode"` // overlayfs, dir or dev
-	AutoRemoveDev   bool                   `json:"autoRemoveDev"`
-	ExporterConfig  metrics.ExporterConfig `json:"exporterConfig"`
+	Address           string                 `json:"address"`
+	Root              string                 `json:"root"`
+	LogLevel          string                 `json:"verbose"`
+	LogReportCaller   bool                   `json:"logReportCaller"`
+	RwMode            string                 `json:"rwMode"` // overlayfs, dir or dev
+	AutoRemoveDev     bool                   `json:"autoRemoveDev"`
+	ExporterConfig    metrics.ExporterConfig `json:"exporterConfig"`
+	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -170,6 +171,7 @@ func DefaultBootConfig() *BootConfig {
 			UriPrefix: "/metrics",
 			Port:      9863,
 		},
+		WritableLayerType: "append",
 	}
 }
 
@@ -226,13 +228,14 @@ type Opt func(config *SnapshotterConfig) error
 //	#
 //	- metadata.db
 type snapshotter struct {
-	root           string
-	rwMode         string
-	config         SnapshotterConfig
-	metacopyOption string
-	ms             *storage.MetaStore
-	indexOff       bool
-	autoRemoveDev  bool
+	root              string
+	rwMode            string
+	config            SnapshotterConfig
+	metacopyOption    string
+	ms                *storage.MetaStore
+	indexOff          bool
+	autoRemoveDev     bool
+	writableLayerType string
 
 	locker *locker.Locker
 }
@@ -271,14 +274,15 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 	}
 
 	return &snapshotter{
-		root:           bootConfig.Root,
-		rwMode:         bootConfig.RwMode,
-		ms:             ms,
-		indexOff:       indexOff,
-		config:         config,
-		metacopyOption: metacopyOption,
-		autoRemoveDev:  bootConfig.AutoRemoveDev,
-		locker:         locker.New(),
+		root:              bootConfig.Root,
+		rwMode:            bootConfig.RwMode,
+		ms:                ms,
+		indexOff:          indexOff,
+		config:            config,
+		metacopyOption:    metacopyOption,
+		autoRemoveDev:     bootConfig.AutoRemoveDev,
+		writableLayerType: bootConfig.WritableLayerType,
+		locker:            locker.New(),
 	}, nil
 }
 

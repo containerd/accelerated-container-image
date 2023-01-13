@@ -49,6 +49,8 @@ func parseConfig(fpath string) error {
 	if err := json.Unmarshal(data, pconfig); err != nil {
 		return errors.Wrapf(err, "failed to parse plugin config from %s", string(data))
 	}
+	logrus.Infof("snapshotter rwMode: %s, autoRemove: %v, writableLayerType: %s",
+		pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType)
 	return nil
 }
 
