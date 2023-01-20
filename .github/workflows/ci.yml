@@ -147,8 +147,8 @@ jobs:
         run: |
           sudo apt update && sudo apt install -y containerd.io libnl-3-200 libnl-genl-3-200
           sudo modprobe -a target_core_user tcm_loop
-          wget https://github.com/containerd/overlaybd/releases/download/v0.5.2/overlaybd-0.5.2-1.x86_64.deb &&
-          sudo dpkg -i overlaybd-0.5.2-1.x86_64.deb
+          wget https://github.com/containerd/overlaybd/releases/download/v0.6.0/overlaybd-0.6.0-1.x86_64.deb &&
+          sudo dpkg -i overlaybd-0.6.0-1.x86_64.deb
           sudo systemctl enable /opt/overlaybd/overlaybd-tcmu.service
           sudo systemctl start overlaybd-tcmu
           sudo systemctl status overlaybd-tcmu
