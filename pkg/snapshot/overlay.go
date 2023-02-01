@@ -117,6 +117,9 @@ const (
 	// labelKeyCriImageRef is thr image-ref from cri
 	labelKeyCriImageRef = "containerd.io/snapshot/cri.image-ref"
 
+	// labelKeyFastOCIImageRef is the digest of remote oci image
+	labelKeyFastOCIDigest = "containerd.io/snapshot/overlaybd/fastoci"
+
 	remoteLabel    = "containerd.io/snapshot/remote"
 	remoteLabelVal = "remote snapshot"
 )
@@ -483,6 +486,10 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		if err != nil {
 			return nil, err
 		}
+		if _, ok := info.Labels[labelKeyFastOCIDigest]; ok {
+			log.G(ctx).Debugf("layer %s is foci", s.ID)
+			stype = storageTypeNormal
+		}
 		if stype == storageTypeRemoteBlock {
 			info.Labels[remoteLabel] = remoteLabelVal // Mark this snapshot as remote
 			if _, _, err = o.commit(ctx, targetRef, key,
@@ -605,6 +612,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 // Prepare creates an active snapshot identified by key descending from the provided parent.
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+	log.G(ctx).Debugf("Prepare (key: %s, parent: %s)", key, parent)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -1228,6 +1236,10 @@ func (o *snapshotter) overlaybdWritableDataPath(id string) string {
 
 func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
+}
+
+func (o *snapshotter) fociFsMeta(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
 }
 
 // Close closes the snapshotter

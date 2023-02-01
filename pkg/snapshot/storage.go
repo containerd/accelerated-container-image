@@ -72,10 +72,12 @@ type OverlayBDBSConfig struct {
 
 // OverlayBDBSConfigLower
 type OverlayBDBSConfigLower struct {
-	File   string `json:"file,omitempty"`
-	Digest string `json:"digest,omitempty"`
-	Size   int64  `json:"size,omitempty"`
-	Dir    string `json:"dir,omitempty"`
+	File       string `json:"file,omitempty"`
+	Digest     string `json:"digest,omitempty"`
+	DataFile   string `json:"dataFile,omitempty"`
+	DataDigest string `json:"dataDigest,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	Dir        string `json:"dir,omitempty"`
 }
 
 type OverlayBDBSConfigUpper struct {
@@ -522,11 +524,21 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		configJSON.RepoBlobURL = blobPrefixURL
-		configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
-			Digest: blobDigest,
-			Size:   int64(blobSize),
-			Dir:    o.upperPath(id),
-		})
+		if dataDgst, isFastOCI := info.Labels[labelKeyFastOCIDigest]; isFastOCI {
+			configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
+				Digest:     blobDigest,
+				Size:       int64(blobSize),
+				Dir:        o.upperPath(id),
+				File:       o.fociFsMeta(id),
+				DataDigest: dataDgst,
+			})
+		} else {
+			configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
+				Digest: blobDigest,
+				Size:   int64(blobSize),
+				Dir:    o.upperPath(id),
+			})
+		}
 
 	case storageTypeLocalBlock:
 		if writable {
