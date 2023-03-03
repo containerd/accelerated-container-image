@@ -53,11 +53,12 @@ var (
 	tagInput  string
 	tagOutput string
 	dir       string
+	oci       bool
 
 	rootCmd = &cobra.Command{
-		Use:   "overlaybd-convertor",
+		Use:   "convertor",
 		Short: "An image conversion tool from oci image to overlaybd image.",
-		Long:  "overlaybd-convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images",
+		Long:  "overlaybd convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := convert(); err != nil {
 				logrus.Errorf("run with error: %v", err)
@@ -119,7 +120,7 @@ func overlaybdCommit(ctx context.Context, dir string) error {
 	return nil
 }
 
-func makeDesc(dir string) (specs.Descriptor, error) {
+func makeDesc(dir string, layerMediaType string) (specs.Descriptor, error) {
 	commitFile := path.Join(dir, "overlaybd.commit")
 	file, err := os.Open(commitFile)
 	if err != nil {
@@ -134,7 +135,7 @@ func makeDesc(dir string) (specs.Descriptor, error) {
 	}
 	dgst := digest.NewDigest(digest.SHA256, h)
 	return specs.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Layer,
+		MediaType: layerMediaType,
 		Digest:    dgst,
 		Size:      size,
 		Annotations: map[string]string{
@@ -300,6 +301,10 @@ func convert() error {
 		}
 	}
 
+	layerMediaType := images.MediaTypeDockerSchema2Layer
+	if oci {
+		layerMediaType = specs.MediaTypeImageLayer
+	}
 	lastDigest := ""
 	for idx, layer := range manifest.Layers {
 		layerDir := path.Join(dir, fmt.Sprintf("%04d_", idx)+layer.Digest.String())
@@ -335,7 +340,7 @@ func convert() error {
 		// os.Rename(path.Join(layerDir, "layer.tar"), path.Join(layerDir, "overlaybd.commit"))
 
 		//calc digest
-		desc, err := makeDesc(layerDir)
+		desc, err := makeDesc(layerDir, layerMediaType)
 		if err != nil {
 			return errors.Wrapf(err, "failed to make descriptor for layer %d", idx)
 		}
@@ -358,7 +363,7 @@ func convert() error {
 
 	// add baselayer
 	baseDesc := specs.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Layer,
+		MediaType: layerMediaType,
 		Digest:    "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
 		Size:      4737695,
 		Annotations: map[string]string{
@@ -377,21 +382,29 @@ func convert() error {
 	if err != nil {
 		return err
 	}
+	configMediaType := images.MediaTypeDockerSchema2Config
+	if oci {
+		configMediaType = specs.MediaTypeImageConfig
+	}
 	manifest.Config = specs.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Config,
+		MediaType: configMediaType,
 		Digest:    digest.FromBytes(cbuf),
 		Size:      (int64)(len(cbuf)),
 	}
 	if err = uploadBytes(ctx, pusher, manifest.Config, cbuf); err != nil {
 		return errors.Wrapf(err, "failed to upload config")
 	}
-
+	manifestMediaType := images.MediaTypeDockerSchema2Manifest
+	if oci {
+		manifestMediaType = specs.MediaTypeImageManifest
+	}
+	manifest.MediaType = manifestMediaType
 	cbuf, err = json.Marshal(manifest)
 	if err != nil {
 		return err
 	}
 	manifestDesc := specs.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Manifest,
+		MediaType: manifestMediaType,
 		Digest:    digest.FromBytes(cbuf),
 		Size:      (int64)(len(cbuf)),
 	}
@@ -412,6 +425,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&tagInput, "input-tag", "i", "", "tag for image converting from (required)")
 	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to (required)")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
+	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
 
 	rootCmd.MarkFlagRequired("repository")
 	rootCmd.MarkFlagRequired("input-tag")
