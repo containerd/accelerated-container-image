@@ -24,6 +24,7 @@ import (
 	"path"
 	"path/filepath"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -31,18 +32,6 @@ import (
 )
 
 const (
-	// labelKeyOverlayBDBlobDigest is the annotation key in the manifest to
-	// describe the digest of blob in OverlayBD format.
-	//
-	// NOTE: The annotation is part of image layer blob's descriptor.
-	labelKeyOverlayBDBlobDigest = "containerd.io/snapshot/overlaybd/blob-digest"
-
-	// labelKeyOverlayBDBlobSize is the annotation key in the manifest to
-	// describe the size of blob in OverlayBD format.
-	//
-	// NOTE: The annotation is part of image layer blob's descriptor.
-	labelKeyOverlayBDBlobSize = "containerd.io/snapshot/overlaybd/blob-size"
-
 	overlaybdBaseLayer = "/opt/overlaybd/baselayers/ext4_64"
 
 	commitFile = "overlaybd.commit"
@@ -110,8 +99,8 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	}
 	desc.MediaType = e.mediaTypeImageLayerGzip()
 	desc.Annotations = map[string]string{
-		labelKeyOverlayBDBlobDigest: desc.Digest.String(),
-		labelKeyOverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
+		label.OverlayBDBlobDigest: desc.Digest.String(),
+		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
 	}
 	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, commitFile), desc); err != nil {
 		return errors.Wrapf(err, "failed to upload layer %d", idx)
@@ -130,8 +119,8 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 		Digest:    "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
 		Size:      4737695,
 		Annotations: map[string]string{
-			labelKeyOverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
-			labelKeyOverlayBDBlobSize:   "4737695",
+			label.OverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
+			label.OverlayBDBlobSize:   "4737695",
 		},
 	}
 	if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {

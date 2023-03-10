@@ -24,6 +24,7 @@ import (
 	"path"
 	"path/filepath"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/images"
@@ -33,13 +34,6 @@ import (
 )
 
 const (
-	// labelKeyFastOCIImageRef is the index annotation key for image layer digest
-	labelKeyFastOCIDigest = "containerd.io/snapshot/overlaybd/fastoci/target-digest"
-
-	// labelKeyFastOCIMediaType is the index annotation key for image layer media type,
-	// indicate if image layer is in gzip format or not
-	labelKeyFastOCIMediaType = "containerd.io/snapshot/overlaybd/fastoci/target-media-type"
-
 	// index of OCI layers (gzip)
 	gzipMetaFile = "gzip.meta"
 
@@ -139,9 +133,9 @@ func (e *fastOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
 	}
 	desc.MediaType = e.mediaTypeImageLayerGzip()
 	desc.Annotations = map[string]string{
-		labelKeyOverlayBDBlobDigest: desc.Digest.String(),
-		labelKeyOverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
-		labelKeyFastOCIDigest:       e.manifest.Layers[idx].Digest.String(),
+		label.OverlayBDBlobDigest: desc.Digest.String(),
+		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
+		label.FastOCIDigest:       e.manifest.Layers[idx].Digest.String(),
 	}
 	targetMediaType := ""
 	if images.IsDockerType(e.manifest.Layers[idx].MediaType) {
@@ -157,7 +151,7 @@ func (e *fastOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
 			targetMediaType = specs.MediaTypeImageLayer
 		}
 	}
-	desc.Annotations[labelKeyFastOCIMediaType] = targetMediaType
+	desc.Annotations[label.FastOCIMediaType] = targetMediaType
 	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, fociLayerTar), desc); err != nil {
 		return errors.Wrapf(err, "failed to upload layer %d", idx)
 	}
@@ -180,8 +174,8 @@ func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
 		Digest:    "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
 		Size:      4737695,
 		Annotations: map[string]string{
-			labelKeyOverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
-			labelKeyOverlayBDBlobSize:   "4737695",
+			label.OverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
+			label.OverlayBDBlobSize:   "4737695",
 		},
 	}
 	if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {

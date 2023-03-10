@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
@@ -508,15 +509,15 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			return errors.Errorf("remote block device is readonly, not support writable")
 		}
 
-		blobSize, err := strconv.Atoi(info.Labels[labelKeyOverlayBDBlobSize])
+		blobSize, err := strconv.Atoi(info.Labels[label.OverlayBDBlobSize])
 		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of label %s of snapshot %s", labelKeyOverlayBDBlobSize, key)
+			return errors.Wrapf(err, "failed to parse value of label %s of snapshot %s", label.OverlayBDBlobSize, key)
 		}
 
-		blobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
-		ref, hasRef := info.Labels[labelKeyImageRef]
+		blobDigest := info.Labels[label.OverlayBDBlobDigest]
+		ref, hasRef := info.Labels[label.TargetImageRef]
 		if !hasRef {
-			criRef, hasCriRef := info.Labels[labelKeyCriImageRef]
+			criRef, hasCriRef := info.Labels[label.CRIImageRef]
 			if !hasCriRef {
 				return errors.Errorf("no image-ref label")
 			}
@@ -529,13 +530,13 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		configJSON.RepoBlobURL = blobPrefixURL
-		if dataDgst, isFastOCI := info.Labels[labelKeyFastOCIDigest]; isFastOCI {
+		if dataDgst, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
 			lower := OverlayBDBSConfigLower{
 				Dir:          o.upperPath(id),
 				File:         o.fastociFsMeta(id),
 				TargetDigest: dataDgst,
 			}
-			if isGzipLayerType(info.Labels[labelKeyFastOCIMediaType]) {
+			if isGzipLayerType(info.Labels[label.FastOCIMediaType]) {
 				lower.GzipIndex = o.fastociGzipIndex(id)
 			}
 			configJSON.Lowers = append(configJSON.Lowers, lower)
