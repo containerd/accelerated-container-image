@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
+	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
 	"github.com/containerd/containerd/reference"
@@ -38,6 +40,7 @@ import (
 	"github.com/containerd/containerd/snapshots/storage"
 	"github.com/containerd/continuity"
 	"github.com/moby/sys/mountinfo"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -72,15 +75,20 @@ type OverlayBDBSConfig struct {
 
 // OverlayBDBSConfigLower
 type OverlayBDBSConfigLower struct {
-	File   string `json:"file,omitempty"`
-	Digest string `json:"digest,omitempty"`
-	Size   int64  `json:"size,omitempty"`
-	Dir    string `json:"dir,omitempty"`
+	GzipIndex    string `json:"gzipIndex,omitempty"`
+	File         string `json:"file,omitempty"`
+	Digest       string `json:"digest,omitempty"`
+	TargetFile   string `json:"targetFile,omitempty"`
+	TargetDigest string `json:"targetDigest,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	Dir          string `json:"dir,omitempty"`
 }
 
 type OverlayBDBSConfigUpper struct {
-	Index string `json:"index,omitempty"`
-	Data  string `json:"data,omitempty"`
+	Index     string `json:"index,omitempty"`
+	Data      string `json:"data,omitempty"`
+	Target    string `json:"target,omitempty"`
+	GzipIndex string `json:"gzipIndex,omitempty"`
 }
 
 func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
@@ -501,15 +509,15 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			return errors.Errorf("remote block device is readonly, not support writable")
 		}
 
-		blobSize, err := strconv.Atoi(info.Labels[labelKeyOverlayBDBlobSize])
+		blobSize, err := strconv.Atoi(info.Labels[label.OverlayBDBlobSize])
 		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of label %s of snapshot %s", labelKeyOverlayBDBlobSize, key)
+			return errors.Wrapf(err, "failed to parse value of label %s of snapshot %s", label.OverlayBDBlobSize, key)
 		}
 
-		blobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
-		ref, hasRef := info.Labels[labelKeyImageRef]
+		blobDigest := info.Labels[label.OverlayBDBlobDigest]
+		ref, hasRef := info.Labels[label.TargetImageRef]
 		if !hasRef {
-			criRef, hasCriRef := info.Labels[labelKeyCriImageRef]
+			criRef, hasCriRef := info.Labels[label.CRIImageRef]
 			if !hasCriRef {
 				return errors.Errorf("no image-ref label")
 			}
@@ -522,11 +530,23 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		configJSON.RepoBlobURL = blobPrefixURL
-		configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
-			Digest: blobDigest,
-			Size:   int64(blobSize),
-			Dir:    o.upperPath(id),
-		})
+		if dataDgst, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
+			lower := OverlayBDBSConfigLower{
+				Dir:          o.upperPath(id),
+				File:         o.fastociFsMeta(id),
+				TargetDigest: dataDgst,
+			}
+			if isGzipLayerType(info.Labels[label.FastOCIMediaType]) {
+				lower.GzipIndex = o.fastociGzipIndex(id)
+			}
+			configJSON.Lowers = append(configJSON.Lowers, lower)
+		} else {
+			configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
+				Digest: blobDigest,
+				Size:   int64(blobSize),
+				Dir:    o.upperPath(id),
+			})
+		}
 
 	case storageTypeLocalBlock:
 		if writable {
@@ -710,4 +730,8 @@ func lookup(dir string) error {
 		return errors.Errorf("failed to find the mount info for %q", dir)
 	}
 	return nil
+}
+
+func isGzipLayerType(mediaType string) bool {
+	return mediaType == specs.MediaTypeImageLayerGzip || mediaType == images.MediaTypeDockerSchema2LayerGzip
 }

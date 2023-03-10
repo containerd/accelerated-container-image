@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
+
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/archive"
 	"github.com/containerd/containerd/archive/compression"
@@ -52,14 +54,8 @@ import (
 )
 
 const (
-	labelOverlayBDBlobDigest   = "containerd.io/snapshot/overlaybd/blob-digest"
-	labelOverlayBDBlobSize     = "containerd.io/snapshot/overlaybd/blob-size"
-	labelOverlayBDBlobFsType   = "containerd.io/snapshot/overlaybd/blob-fs-type"
-	labelOverlayBDBlobWritable = "containerd.io/snapshot/overlaybd.writable"
-	labelKeyAccelerationLayer  = "containerd.io/snapshot/overlaybd/acceleration-layer"
-	labelBuildLayerFrom        = "containerd.io/snapshot/overlaybd/build.layer-from"
-	labelKeyZFileConfig        = "containerd.io/snapshot/overlaybd/zfile-config"
-	labelDistributionSource    = "containerd.io/distribution.source"
+	labelBuildLayerFrom     = "containerd.io/snapshot/overlaybd/build.layer-from"
+	labelDistributionSource = "containerd.io/distribution.source"
 )
 
 var (
@@ -176,17 +172,17 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 			Digest:    digester.Digest(),
 			Size:      countWriter.c,
 			Annotations: map[string]string{
-				labelOverlayBDBlobDigest: digester.Digest().String(),
-				labelOverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
+				label.OverlayBDBlobDigest: digester.Digest().String(),
+				label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
 			},
 		},
 		diffID: digester.Digest(),
 	}
 	if loader.isAccelLayer {
-		l.desc.Annotations[labelKeyAccelerationLayer] = "yes"
+		l.desc.Annotations[label.AccelerationLayer] = "yes"
 	}
 	if loader.fsType != "" {
-		l.desc.Annotations[labelOverlayBDBlobFsType] = loader.fsType
+		l.desc.Annotations[label.OverlayBDBlobFsType] = loader.fsType
 	}
 	return l, nil
 }
@@ -478,8 +474,8 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 				snapshots.WithLabels(map[string]string{
 					"containerd.io/snapshot.ref":       key,
 					"containerd.io/snapshot/image-ref": c.host + "/" + c.repo,
-					labelOverlayBDBlobDigest:           remoteDesc.Digest.String(),
-					labelOverlayBDBlobSize:             fmt.Sprintf("%d", remoteDesc.Size),
+					label.OverlayBDBlobDigest:          remoteDesc.Digest.String(),
+					label.OverlayBDBlobSize:            fmt.Sprintf("%d", remoteDesc.Size),
 				}),
 			}
 			_, err = c.sn.Prepare(ctx, "prepare-"+key, lastParentID, opts...)
@@ -498,8 +494,8 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 					Digest:    remoteDesc.Digest,
 					Size:      remoteDesc.Size,
 					Annotations: map[string]string{
-						labelOverlayBDBlobDigest: remoteDesc.Digest.String(),
-						labelOverlayBDBlobSize:   fmt.Sprintf("%d", remoteDesc.Size),
+						label.OverlayBDBlobDigest: remoteDesc.Digest.String(),
+						label.OverlayBDBlobSize:   fmt.Sprintf("%d", remoteDesc.Size),
 					},
 				},
 				diffID: remoteDesc.Digest,
@@ -509,8 +505,8 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 
 		opts := []snapshots.Opt{
 			snapshots.WithLabels(map[string]string{
-				labelOverlayBDBlobWritable: "dir",
-				labelOverlayBDBlobFsType:   fsType,
+				label.SupportReadWriteMode: "dir",
+				label.OverlayBDBlobFsType:  fsType,
 			}),
 		}
 		cfgStr, err := json.Marshal(c.zfileCfg)
@@ -518,7 +514,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			return nil, err
 		}
 		opts = append(opts, snapshots.WithLabels(map[string]string{
-			labelKeyZFileConfig: string(cfgStr),
+			label.ZFileConfig: string(cfgStr),
 		}))
 		lastParentID, err = c.applyOCIV1LayerInZfile(ctx, lastParentID, desc, opts, nil)
 		if err != nil {

@@ -1,0 +1,227 @@
+/*
+   Copyright The Accelerated Container Image Authors
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package builder
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"io"
+	"os"
+	"path"
+
+	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	"github.com/containerd/containerd/archive/compression"
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/continuity"
+	"github.com/opencontainers/go-digest"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+)
+
+func fetchManifestAndConfig(ctx context.Context, fetcher remotes.Fetcher, manifestDesc specs.Descriptor) (specs.Manifest, specs.Image, error) {
+	// get manifest
+	rc, err := fetcher.Fetch(ctx, manifestDesc)
+	if err != nil {
+		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to fetch manifest")
+	}
+	buf, err := io.ReadAll(rc)
+	if err != nil {
+		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to read manifest")
+	}
+	rc.Close()
+	manifest := specs.Manifest{}
+	err = json.Unmarshal(buf, &manifest)
+	if err != nil {
+		return specs.Manifest{}, specs.Image{}, err
+	}
+	// get config
+	rc, err = fetcher.Fetch(ctx, manifest.Config)
+	if err != nil {
+		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to fetch config")
+	}
+	buf, err = io.ReadAll(rc)
+	if err != nil {
+		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to read config")
+	}
+	rc.Close()
+	config := specs.Image{}
+	if err = json.Unmarshal(buf, &config); err != nil {
+		return specs.Manifest{}, specs.Image{}, err
+	}
+	return manifest, config, nil
+}
+
+func downloadLayer(ctx context.Context, fetcher remotes.Fetcher, targetFile string, desc specs.Descriptor, decompress bool) error {
+	rc, err := fetcher.Fetch(ctx, desc)
+	if err != nil {
+		return err
+	}
+	dir := path.Dir(targetFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	ftar, err := os.Create(targetFile)
+	if err != nil {
+		return err
+	}
+	if decompress {
+		rc, err = compression.DecompressStream(rc)
+		if err != nil {
+			return err
+		}
+	}
+	if _, err = io.Copy(ftar, rc); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TODO maybe refactor this
+func writeConfig(dir string, configJSON *snapshot.OverlayBDBSConfig) error {
+	data, err := json.Marshal(configJSON)
+	if err != nil {
+		return err
+	}
+
+	confPath := path.Join(dir, "config.json")
+	if err := continuity.AtomicWriteFile(confPath, data, 0600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func getFileDesc(filepath string, decompress bool) (specs.Descriptor, error) {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return specs.Descriptor{}, err
+	}
+	defer file.Close()
+	var rc io.ReadCloser
+	if decompress {
+		rc, err = compression.DecompressStream(file)
+		if err != nil {
+			return specs.Descriptor{}, err
+		}
+	} else {
+		rc = file
+	}
+
+	h := sha256.New()
+	size, err := io.Copy(h, rc)
+	if err != nil {
+		return specs.Descriptor{}, err
+	}
+	dgst := digest.NewDigest(digest.SHA256, h)
+	return specs.Descriptor{
+		Digest: dgst,
+		Size:   size,
+	}, nil
+}
+
+func uploadBlob(ctx context.Context, pusher remotes.Pusher, path string, desc specs.Descriptor) error {
+	cw, err := pusher.Push(ctx, desc)
+	if err != nil {
+		if errdefs.IsAlreadyExists(err) {
+			logrus.Infof("layer %s exists", desc.Digest.String())
+			return nil
+		}
+		return err
+	}
+
+	defer cw.Close()
+	fobd, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer fobd.Close()
+	if err = content.Copy(ctx, cw, fobd, desc.Size, desc.Digest); err != nil {
+		return err
+	}
+	return nil
+}
+
+func uploadBytes(ctx context.Context, pusher remotes.Pusher, desc specs.Descriptor, data []byte) error {
+	cw, err := pusher.Push(ctx, desc)
+	if err != nil {
+		if errdefs.IsAlreadyExists(err) {
+			logrus.Infof("content %s exists", desc.Digest.String())
+			return nil
+		}
+		return err
+	}
+	defer cw.Close()
+
+	err = content.Copy(ctx, cw, bytes.NewReader(data), desc.Size, desc.Digest)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildArchiveFromFiles(ctx context.Context, target string, compress compression.Compression, files ...string) error {
+	archive, err := os.Create(target)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create tgz file: %q", target)
+	}
+	defer archive.Close()
+	fzip, err := compression.CompressStream(archive, compress)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create compression %v", compress)
+	}
+	defer fzip.Close()
+	ftar := tar.NewWriter(fzip)
+	defer ftar.Close()
+	for _, file := range files {
+		if err := addFileToArchive(ctx, ftar, file); err != nil {
+			return errors.Wrapf(err, "failed to add file %q to archive %q", file, target)
+		}
+	}
+	return nil
+}
+
+func addFileToArchive(ctx context.Context, ftar *tar.Writer, filepath string) error {
+	file, err := os.Open(filepath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return errors.Wrapf(err, "failed to open file: %q", filepath)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	header, err := tar.FileInfoHeader(info, info.Name())
+	if err != nil {
+		return err
+	}
+	if err = ftar.WriteHeader(header); err != nil {
+		return err
+	}
+	_, err = io.Copy(ftar, file)
+	if err != nil {
+		return err
+	}
+	return nil
+}

@@ -27,6 +27,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 
 	"github.com/containerd/containerd/errdefs"
@@ -58,89 +59,6 @@ const (
 	// storageTypeRemoteBlock means that there is no unpacked layer data.
 	// But there are labels to mark data that will be pulling on demand.
 	storageTypeRemoteBlock
-)
-
-// support on-demand loading by the labels
-const (
-	// labelKeyTargetSnapshotRef is the interface to know that Prepare
-	// action is to pull image, not for container Writable snapshot.
-	//
-	// NOTE: Only available in >= containerd 1.4.0 and containerd.Pull
-	// with Unpack option.
-	//
-	// FIXME(fuweid): With containerd design, we don't know that what purpose
-	// snapshotter.Prepare does for. For unpacked image, prepare is for
-	// container's rootfs. For pulling image, the prepare is for committed.
-	// With label "containerd.io/snapshot.ref" in preparing, snapshotter
-	// author will know it is for pulling image. It will be useful.
-	//
-	// The label is only propagated during pulling image. So, is it possible
-	// to propagate by image.Unpack()?
-	labelKeyTargetSnapshotRef = "containerd.io/snapshot.ref"
-
-	// labelKeyImageRef is the label to mark where the snapshot comes from.
-	//
-	// TODO(fuweid): Is it possible to use it in upstream?
-	labelKeyImageRef = "containerd.io/snapshot/image-ref"
-
-	// labelKeyOverlayBDBlobDigest is the annotation key in the manifest to
-	// describe the digest of blob in OverlayBD format.
-	//
-	// NOTE: The annotation is part of image layer blob's descriptor.
-	labelKeyOverlayBDBlobDigest = "containerd.io/snapshot/overlaybd/blob-digest"
-
-	// labelKeyOverlayBDBlobSize is the annotation key in the manifest to
-	// describe the size of blob in OverlayBD format.
-	//
-	// NOTE: The annotation is part of image layer blob's descriptor.
-	labelKeyOverlayBDBlobSize = "containerd.io/snapshot/overlaybd/blob-size"
-
-	// labelKeyOverlayBDBlobFsType is the annotation key in the manifest to
-	// describe the filesystem type to be mounted as of blob in OverlayBD format.
-	//
-	// NOTE: The annotation is part of image layer blob's descriptor.
-	labelKeyOverlayBDBlobFsType = "containerd.io/snapshot/overlaybd/blob-fs-type"
-
-	// labelKeyAccelerationLayer is the annotation key in the manifest to indicate
-	// whether a top layer is acceleration layer or not.
-	labelKeyAccelerationLayer = "containerd.io/snapshot/overlaybd/acceleration-layer"
-
-	// labelKeyRecordTrace tells snapshotter to record trace
-	labelKeyRecordTrace = "containerd.io/snapshot/overlaybd/record-trace"
-
-	// labelKeyRecordTracePath is the the file path to record trace
-	labelKeyRecordTracePath = "containerd.io/snapshot/overlaybd/record-trace-path"
-
-	// labelKeyZFileConfig is the config of ZFile
-	labelKeyZFileConfig = "containerd.io/snapshot/overlaybd/zfile-config"
-
-	// labelKeyCriImageRef is thr image-ref from cri
-	labelKeyCriImageRef = "containerd.io/snapshot/cri.image-ref"
-
-	remoteLabel    = "containerd.io/snapshot/remote"
-	remoteLabelVal = "remote snapshot"
-)
-
-// interface
-const (
-	// LabelSupportReadWriteMode is used to support writable block device
-	// for active snapshotter.
-	//
-	// By default, multiple active snapshotters can share one block device
-	// from parent snapshotter(committed). Like image builder and
-	// sandboxed-like container runtime(KataContainer, Firecracker), those
-	// cases want to use the block device alone or as writable.
-	// There are two ways to provide writable devices:
-	//  - 'dir' mark the snapshotter
-	//    as wriable block device and mount it on rootfs.
-	//  - 'dev' mark the snapshotter
-	//    as wriable block device without mount.
-	LabelSupportReadWriteMode = "containerd.io/snapshot/overlaybd.writable"
-
-	// LabelLocalOverlayBDPath is used to export the commit file path.
-	//
-	// NOTE: Only used in image build.
-	LabelLocalOverlayBDPath = "containerd.io/snapshot/overlaybd.localcommitpath"
 )
 
 const (
@@ -397,7 +315,7 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 		}
 		return roDir
 	}
-	m, ok := info.Labels[LabelSupportReadWriteMode]
+	m, ok := info.Labels[label.SupportReadWriteMode]
 	if !ok {
 		return rwMode(o.rwMode)
 	}
@@ -454,11 +372,11 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	// If the layer is in overlaybd format, construct backstore spec and saved it into snapshot dir.
 	// Return ErrAlreadyExists to skip pulling and unpacking layer. See https://github.com/containerd/containerd/blob/master/docs/remote-snapshotter.md#snapshotter-apis-for-querying-remote-snapshots
 	// This part code is only for Pull.
-	if targetRef, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
+	if targetRef, ok := info.Labels[label.TargetSnapshotRef]; ok {
 
 		// Acceleration layer will not use remote snapshot. It still needs containerd to pull,
 		// unpack blob and commit snapshot. So return a normal mount point here.
-		isAccelLayer := info.Labels[labelKeyAccelerationLayer]
+		isAccelLayer := info.Labels[label.AccelerationLayer]
 		log.G(ctx).Debugf("Prepare (targetRefLabel: %s, accelLayerLabel: %s)", targetRef, isAccelLayer)
 		if isAccelLayer == "yes" {
 			if err := o.constructSpecForAccelLayer(id, parentID); err != nil {
@@ -483,8 +401,15 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		if err != nil {
 			return nil, err
 		}
+		if _, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
+			log.G(ctx).Debugf("%s is FastOCI layer", s.ID)
+			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
+				return nil, err
+			}
+			stype = storageTypeNormal
+		}
 		if stype == storageTypeRemoteBlock {
-			info.Labels[remoteLabel] = remoteLabelVal // Mark this snapshot as remote
+			info.Labels[label.RemoteLabel] = label.RemoteLabelVal // Mark this snapshot as remote
 			if _, _, err = o.commit(ctx, targetRef, key,
 				append(opts, snapshots.WithLabels(info.Labels))...); err != nil {
 				return nil, err
@@ -506,7 +431,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	writeType := o.getWritableType(ctx, parentID, info)
 
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
-	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; !ok {
+	if _, ok := info.Labels[label.TargetSnapshotRef]; !ok {
 		log.G(ctx).Infof("Preparing rootfs. writeType: %s", writeType)
 		if writeType != roDir {
 			stype = storageTypeLocalBlock
@@ -523,9 +448,9 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
 			if parent != "" {
-				parentIsAccelLayer := parentInfo.Labels[labelKeyAccelerationLayer] == "yes"
-				needRecordTrace := info.Labels[labelKeyRecordTrace] == "yes"
-				recordTracePath := info.Labels[labelKeyRecordTracePath]
+				parentIsAccelLayer := parentInfo.Labels[label.AccelerationLayer] == "yes"
+				needRecordTrace := info.Labels[label.RecordTrace] == "yes"
+				recordTracePath := info.Labels[label.RecordTracePath]
 				log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
 					parentIsAccelLayer, needRecordTrace, recordTracePath)
 
@@ -557,7 +482,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				obdID = parentID
 				obdInfo = &parentInfo
 			}
-			fsType, ok := obdInfo.Labels[labelKeyOverlayBDBlobFsType]
+			fsType, ok := obdInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
 				log.G(ctx).Warnf("cannot get fs type from label, %v", obdInfo.Labels)
 				fsType = "ext4"
@@ -683,7 +608,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		}
 
 		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
-			fsType, ok := parentInfo.Labels[labelKeyOverlayBDBlobFsType]
+			fsType, ok := parentInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
 				fsType = "ext4"
 			}
@@ -728,9 +653,9 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	}
 
 	// if writable, should commit the data and make it immutable.
-	if _, writableBD := oinfo.Labels[LabelSupportReadWriteMode]; writableBD {
+	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD {
 		// TODO(fuweid): how to rollback?
-		if oinfo.Labels[labelKeyAccelerationLayer] == "yes" {
+		if oinfo.Labels[label.AccelerationLayer] == "yes" {
 			log.G(ctx).Info("Commit accel-layer requires no writable_data")
 		} else {
 			if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
@@ -738,7 +663,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			}
 
 			var zfileCfg ZFileConfig
-			if cfgStr, ok := oinfo.Labels[labelKeyZFileConfig]; ok {
+			if cfgStr, ok := oinfo.Labels[label.ZFileConfig]; ok {
 				if err := json.Unmarshal([]byte(cfgStr), &zfileCfg); err != nil {
 					return err
 				}
@@ -758,7 +683,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 				os.Remove(o.overlaybdWritableIndexPath(id))
 			}()
 
-			opts = append(opts, snapshots.WithLabels(map[string]string{LabelLocalOverlayBDPath: o.magicFilePath(id)}))
+			opts = append(opts, snapshots.WithLabels(map[string]string{label.LocalOverlayBDPath: o.magicFilePath(id)}))
 		}
 	}
 
@@ -783,8 +708,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			info.Labels = make(map[string]string)
 		}
 
-		info.Labels[LabelLocalOverlayBDPath] = o.magicFilePath(id)
-		info, err = storage.UpdateInfo(ctx, info, fmt.Sprintf("labels.%s", LabelLocalOverlayBDPath))
+		info.Labels[label.LocalOverlayBDPath] = o.magicFilePath(id)
+		info, err = storage.UpdateInfo(ctx, info, fmt.Sprintf("labels.%s", label.LocalOverlayBDPath))
 		if err != nil {
 			return err
 		}
@@ -1147,11 +1072,11 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 }
 
 func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string, info snapshots.Info) (storageType, error) {
-	if _, ok := info.Labels[labelKeyTargetSnapshotRef]; ok {
-		_, hasBDBlobSize := info.Labels[labelKeyOverlayBDBlobSize]
-		_, hasBDBlobDigest := info.Labels[labelKeyOverlayBDBlobDigest]
-		_, hasRef := info.Labels[labelKeyImageRef]
-		_, hasCriRef := info.Labels[labelKeyCriImageRef]
+	if _, ok := info.Labels[label.TargetSnapshotRef]; ok {
+		_, hasBDBlobSize := info.Labels[label.OverlayBDBlobSize]
+		_, hasBDBlobDigest := info.Labels[label.OverlayBDBlobDigest]
+		_, hasRef := info.Labels[label.TargetImageRef]
+		_, hasCriRef := info.Labels[label.CRIImageRef]
 
 		if hasBDBlobSize && hasBDBlobDigest {
 			if hasRef || hasCriRef {
@@ -1228,6 +1153,14 @@ func (o *snapshotter) overlaybdWritableDataPath(id string) string {
 
 func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
+}
+
+func (o *snapshotter) fastociFsMeta(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
+}
+
+func (o *snapshotter) fastociGzipIndex(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "fs", "gzip.meta")
 }
 
 // Close closes the snapshotter
