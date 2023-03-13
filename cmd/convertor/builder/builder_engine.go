@@ -27,6 +27,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 type BuilderEngineType int
@@ -125,6 +126,7 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	if err = uploadBytes(ctx, e.pusher, e.manifest.Config, cbuf); err != nil {
 		return errors.Wrapf(err, "failed to upload config")
 	}
+	logrus.Infof("config uploaded")
 
 	e.manifest.MediaType = e.mediaTypeManifest()
 	cbuf, err = json.Marshal(e.manifest)
@@ -140,6 +142,8 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	if err = uploadBytes(ctx, e.pusher, manifestDesc, cbuf); err != nil {
 		return errors.Wrapf(err, "failed to upload manifest")
 	}
+	logrus.Infof("manifest uploaded")
+
 	return nil
 }
 

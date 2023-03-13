@@ -64,13 +64,13 @@ const (
 	// RecordTrace tells snapshotter to record trace
 	RecordTrace = "containerd.io/snapshot/overlaybd/record-trace"
 
-	// RecordTracePath is the the file path to record trace
+	// RecordTracePath is the file path to record trace
 	RecordTracePath = "containerd.io/snapshot/overlaybd/record-trace-path"
 
 	// ZFileConfig is the config of ZFile
 	ZFileConfig = "containerd.io/snapshot/overlaybd/zfile-config"
 
-	// CRIImageRef is thr image-ref from cri
+	// CRIImageRef is the image-ref from cri
 	CRIImageRef = "containerd.io/snapshot/cri.image-ref"
 
 	// FastOCIDigest is the index annotation key for image layer digest
@@ -78,6 +78,9 @@ const (
 
 	// FastOCIMediaType is the index annotation key for image layer media type
 	FastOCIMediaType = "containerd.io/snapshot/overlaybd/fastoci/target-media-type"
+
+	// DownloadRemoteBlob is a label for download remote blob
+	DownloadRemoteBlob = "containerd.io/snapshot/overlaybd/download-remote-blob"
 
 	RemoteLabel    = "containerd.io/snapshot/remote"
 	RemoteLabelVal = "remote snapshot"

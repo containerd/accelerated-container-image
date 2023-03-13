@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/containerd/accelerated-container-image/pkg/label"
+
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	ctrcontent "github.com/containerd/containerd/cmd/ctr/commands/content"
@@ -40,6 +42,10 @@ var rpullCommand = cli.Command{
 			Usage:  "snapshotter name. Empty value stands for the default value.",
 			Value:  "overlaybd",
 			EnvVar: "CONTAINERD_SNAPSHOTTER",
+		},
+		cli.BoolFlag{
+			Name:  "download-blobs",
+			Usage: "download overlaybd blobs",
 		},
 	),
 	Action: func(context *cli.Context) error {
@@ -67,7 +73,7 @@ var rpullCommand = cli.Command{
 			return err
 		}
 
-		if err := rpull(ctx, client, ref, context.String("snapshotter"), config); err != nil {
+		if err := rpull(ctx, client, ref, context.String("snapshotter"), config, context.Bool("download-blobs")); err != nil {
 			return err
 		}
 
@@ -79,7 +85,7 @@ var rpullCommand = cli.Command{
 // rpull pulls image with special labels
 //
 // NOTE: Based on https://github.com/containerd/containerd/blob/v1.5.0-beta.2/cmd/ctr/commands/content/fetch.go#L148.
-func rpull(ctx context.Context, client *containerd.Client, ref string, sn string, config *ctrcontent.FetchConfig) error {
+func rpull(ctx context.Context, client *containerd.Client, ref string, sn string, config *ctrcontent.FetchConfig, download bool) error {
 	ongoing := ctrcontent.NewJobs(ref)
 
 	pctx, stopProgress := context.WithCancel(ctx)
@@ -97,7 +103,10 @@ func rpull(ctx context.Context, client *containerd.Client, ref string, sn string
 		return nil, nil
 	})
 
-	snLabels := map[string]string{"containerd.io/snapshot/image-ref": ref}
+	snLabels := map[string]string{label.TargetImageRef: ref}
+	if download {
+		snLabels[label.DownloadRemoteBlob] = "download"
+	}
 
 	labels := commands.LabelArgs(config.Labels)
 

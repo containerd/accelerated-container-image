@@ -401,6 +401,29 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		if err != nil {
 			return nil, err
 		}
+
+		// Download blob
+		downloadBlob := info.Labels[label.DownloadRemoteBlob]
+		if downloadBlob == "download" && stype == storageTypeRemoteBlock {
+			log.G(ctx).Infof("download blob %s", targetRef)
+			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
+				return nil, err
+			}
+			rollback = false
+			if err := t.Commit(); err != nil {
+				return nil, err
+			}
+			return []mount.Mount{{
+				Source: o.upperPath(id),
+				Type:   "bind",
+				Options: []string{
+					"rw",
+					"bind",
+				}},
+			}, nil
+		}
+
+		// Normal prepare
 		if _, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
 			log.G(ctx).Debugf("%s is FastOCI layer", s.ID)
 			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
@@ -530,6 +553,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 // Prepare creates an active snapshot identified by key descending from the provided parent.
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+	log.G(ctx).Debugf("Prepare (key: %s, parent: %s)", key, parent)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
