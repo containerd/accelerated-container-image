@@ -17,8 +17,11 @@
 package builder
 
 import (
+	"archive/tar"
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -29,6 +32,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -97,7 +101,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	if err != nil {
 		return errors.Wrapf(err, "failed to get descriptor for layer %d", idx)
 	}
-	desc.MediaType = e.mediaTypeImageLayerGzip()
+	desc.MediaType = e.mediaTypeImageLayer()
 	desc.Annotations = map[string]string{
 		label.OverlayBDBlobDigest: desc.Digest.String(),
 		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
@@ -114,17 +118,9 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 		e.manifest.Layers[idx] = e.overlaybdLayers[idx]
 		e.config.RootFS.DiffIDs[idx] = e.overlaybdLayers[idx].Digest
 	}
-	baseDesc := specs.Descriptor{
-		MediaType: e.mediaTypeImageLayer(),
-		Digest:    "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
-		Size:      4737695,
-		Annotations: map[string]string{
-			label.OverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
-			label.OverlayBDBlobSize:   "4737695",
-		},
-	}
-	if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {
-		return errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
+	baseDesc, err := e.uploadBaseLayer(ctx)
+	if err != nil {
+		return err
 	}
 	e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 	e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
@@ -133,6 +129,58 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 
 func (e *overlaybdBuilderEngine) Cleanup() {
 	os.RemoveAll(e.workDir)
+}
+
+func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Descriptor, error) {
+	// add baselayer with tar header
+	tarFile := path.Join(e.workDir, "ext4_64.tar")
+	fdes, err := os.Create(tarFile)
+	if err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to create file %s", tarFile)
+	}
+	digester := digest.Canonical.Digester()
+	countWriter := &writeCountWrapper{w: io.MultiWriter(fdes, digester.Hash())}
+	tarWriter := tar.NewWriter(countWriter)
+
+	fsrc, err := os.Open(overlaybdBaseLayer)
+	if err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to open %s", overlaybdBaseLayer)
+	}
+	fstat, err := os.Stat(overlaybdBaseLayer)
+	if err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to get info of %s", overlaybdBaseLayer)
+	}
+
+	if err := tarWriter.WriteHeader(&tar.Header{
+		Name:     commitFile,
+		Mode:     0444,
+		Size:     fstat.Size(),
+		Typeflag: tar.TypeReg,
+	}); err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to write tar header")
+	}
+	if _, err := io.Copy(tarWriter, bufio.NewReader(fsrc)); err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to copy IO")
+	}
+	if err = tarWriter.Close(); err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to close tar file")
+	}
+
+	baseDesc := specs.Descriptor{
+		MediaType: e.mediaTypeImageLayer(),
+		Digest:    digester.Digest(),
+		Size:      countWriter.c,
+		Annotations: map[string]string{
+			"containerd.io/snapshot/overlaybd/blob-digest": digester.Digest().String(),
+			"containerd.io/snapshot/overlaybd/blob-size":   fmt.Sprintf("%d", countWriter.c),
+		},
+	}
+	if err = uploadBlob(ctx, e.pusher, tarFile, baseDesc); err != nil {
+		return specs.Descriptor{}, errors.Wrapf(err, "failed to upload baselayer")
+	}
+	logrus.Infof("baselayer uploaded")
+
+	return baseDesc, nil
 }
 
 func (e *overlaybdBuilderEngine) getLayerDir(idx int) string {
@@ -169,7 +217,7 @@ func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {
 func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string) error {
 	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-commit")
 
-	out, err := exec.CommandContext(ctx, binpath, "-z",
+	out, err := exec.CommandContext(ctx, binpath, "-z", "-t",
 		path.Join(dir, "writable_data"),
 		path.Join(dir, "writable_index"),
 		path.Join(dir, commitFile),
@@ -178,4 +226,15 @@ func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string) error {
 		return errors.Wrapf(err, "failed to overlaybd-commit: %s", out)
 	}
 	return nil
+}
+
+type writeCountWrapper struct {
+	w io.Writer
+	c int64
+}
+
+func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
+	n, err = wc.w.Write(p)
+	wc.c += int64(n)
+	return
 }
