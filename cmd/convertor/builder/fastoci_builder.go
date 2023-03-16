@@ -116,9 +116,10 @@ func (e *fastOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 		return errors.Wrapf(err, "failed to create foci archive for layer %d", idx)
 	}
 	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, snapshot.OverlayBDBSConfigLower{
-		TargetFile: path.Join(layerDir, "layer.tar"),
-		File:       path.Join(layerDir, fsMetaFile),
-		GzipIndex:  gzipIndexPath,
+		TargetFile:   path.Join(layerDir, "layer.tar"),
+		TargetDigest: string(e.manifest.Layers[idx].Digest), // TargetDigest should be set to work with gzip cache
+		File:         path.Join(layerDir, fsMetaFile),
+		GzipIndex:    gzipIndexPath,
 	})
 	os.Remove(path.Join(layerDir, "writable_data"))
 	os.Remove(path.Join(layerDir, "writable_index"))
