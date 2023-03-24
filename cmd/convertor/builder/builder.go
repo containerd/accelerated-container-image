@@ -21,7 +21,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
+	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/identity"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -37,11 +42,13 @@ type BuilderOptions struct {
 	PlainHTTP bool
 	WorkDir   string
 	OCI       bool
+	DB        database.ConversionDatabase
 	Engine    BuilderEngineType
 }
 
 type overlaybdBuilder struct {
 	layers int
+	config v1.Image
 	engine builderEngine
 }
 
@@ -62,6 +69,15 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 	}
 	engineBase.workDir = opt.WorkDir
 	engineBase.oci = opt.OCI
+	engineBase.db = opt.DB
+
+	refspec, err := reference.Parse(opt.Ref)
+	if err != nil {
+		return nil, err
+	}
+	engineBase.host = refspec.Hostname()
+	engineBase.repository = strings.TrimPrefix(refspec.Locator, engineBase.host+"/")
+
 	var engine builderEngine
 	switch opt.Engine {
 	case BuilderEngineTypeOverlayBD:
@@ -72,11 +88,13 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 	return &overlaybdBuilder{
 		layers: len(engineBase.manifest.Layers),
 		engine: engine,
+		config: engineBase.config,
 	}, nil
 }
 
 func (b *overlaybdBuilder) Build(ctx context.Context) error {
 	defer b.engine.Cleanup()
+	alreadyConverted := make([]chan *v1.Descriptor, b.layers)
 	downloaded := make([]chan error, b.layers)
 	converted := make([]chan error, b.layers)
 	var uploaded sync.WaitGroup
@@ -99,13 +117,49 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 		}
 	}()
 
+	var chain []digest.Digest
+	srcDiffIDs := b.config.RootFS.DiffIDs
+
 	for i := 0; i < b.layers; i++ {
 		downloaded[i] = make(chan error)
 		converted[i] = make(chan error)
+		alreadyConverted[i] = make(chan *v1.Descriptor)
+
+		chain = append(chain, srcDiffIDs[i])
+		chainID := identity.ChainID(chain).String()
+
+		// deduplication Goroutine
+		go func(idx int, chainID string) {
+			defer close(alreadyConverted[idx])
+			// try to find chainID -> converted digest conversion if available
+			desc, err := b.engine.CheckForConvertedLayer(ctx, idx, chainID)
+			if err != nil {
+				// in the event of failure fallback to regular process
+				return
+			}
+			alreadyConverted[idx] <- desc
+		}(i, chainID)
 
 		// download goroutine
 		go func(idx int) {
+			var cachedLayer *v1.Descriptor
+			select {
+			case <-ctx.Done():
+			case cachedLayer = <-alreadyConverted[idx]:
+			}
+
 			defer close(downloaded[idx])
+			if cachedLayer != nil {
+				// download the converted layer
+				err := b.engine.DownloadConvertedLayer(ctx, idx, cachedLayer)
+				if err == nil {
+					logrus.Infof("downloaded cached layer %d", idx)
+					sendToChannel(ctx, downloaded[idx], nil)
+					return
+				}
+				logrus.Infof("failed to download cached layer %d falling back to conversion : %s", idx, err)
+			}
+
 			if err := b.engine.DownloadLayer(ctx, idx); err != nil {
 				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to download layer %d", idx))
 				return
@@ -139,7 +193,7 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 
 		// upload goroutine
 		uploaded.Add(1)
-		go func(idx int) {
+		go func(idx int, chainID string) {
 			defer uploaded.Done()
 			if waitForChannel(ctx, converted[idx]); ctx.Err() != nil {
 				return
@@ -148,8 +202,9 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to upload layer %d", idx))
 				return
 			}
+			b.engine.StoreConvertedLayerDetails(ctx, chainID, idx)
 			logrus.Infof("layer %d uploaded", idx)
-		}(i)
+		}(i, chainID)
 	}
 	uploaded.Wait()
 	if retErr != nil {

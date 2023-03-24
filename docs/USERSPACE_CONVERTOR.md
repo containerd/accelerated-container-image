@@ -41,10 +41,47 @@ Flags:
   -o, --output-tag string   tag for image converting to (required)
   -d, --dir string          directory used for temporary data (default "tmp_conv")
   -h, --help                help for overlaybd-convertor
+      --oci                 export image with oci spec
+      --fastoci             build fastoci format
+      --overlaybd           build overlaybd format
+      --db-str              db str for overlaybd conversion
+      --db-type             type of db to use for conversion deduplication. Available: mysql. Default none
+
+# examples
+$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
+$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
+
+```
+
+### Layer Deduplication
+
+To avoid converting the same layer for every image conversion, a database is required to store the correspondence between OCIv1 image layer and overlaybd layer.
+
+We provide a default implementation based on mysql database, but others can be added through the ConversionDatabase abstraction. To use the default:
+
+First, create a database and the `overlaybd_layers` table, the table schema is as follows:
+
+```sql
+CREATE TABLE `overlaybd_layers` (
+  `host` varchar(255) NOT NULL,
+  `repo` varchar(255) NOT NULL,
+  `chain_id` varchar(255) NOT NULL COMMENT 'chain-id of the normal image layer',
+  `data_digest` varchar(255) NOT NULL COMMENT 'digest of overlaybd layer',
+  `data_size` bigint(20) NOT NULL COMMENT 'size of overlaybd layer',
+  PRIMARY KEY (`host`,`repo`,`chain_id`),
+  KEY `index_registry_chainId` (`host`,`chain_id`) USING BTREE
+) DEFAULT CHARSET=utf8;
+```
+
+with this database you can then provide the following flags:
+
+```bash
+Flags:
+    --db-str          db str for overlaybd conversion
+    --db-type         type of db to use for conversion deduplication. Available: mysql. Default none
 
 # example
-$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
-
+$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd --db-str "dbuser:dbpass@tcp(127.0.0.1:3306)/dedup" --db-type mysql
 ```
 
 ## libext2fs
