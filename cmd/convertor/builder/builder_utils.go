@@ -22,52 +22,99 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path"
 
-	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/log"
+	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
 	"github.com/containerd/continuity"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+
+	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 )
 
-func fetchManifestAndConfig(ctx context.Context, fetcher remotes.Fetcher, manifestDesc specs.Descriptor) (specs.Manifest, specs.Image, error) {
-	// get manifest
-	rc, err := fetcher.Fetch(ctx, manifestDesc)
+func fetch(ctx context.Context, fetcher remotes.Fetcher, desc specs.Descriptor, target any) error {
+	rc, err := fetcher.Fetch(ctx, desc)
 	if err != nil {
-		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to fetch manifest")
+		return fmt.Errorf("failed to fetch digest %v: %w", desc.Digest, err)
 	}
+	defer func() {
+		rc.Close()
+	}()
+
 	buf, err := io.ReadAll(rc)
 	if err != nil {
-		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to read manifest")
+		return fmt.Errorf("failed to read digest %v: %w", desc.Digest, err)
 	}
-	rc.Close()
-	manifest := specs.Manifest{}
-	err = json.Unmarshal(buf, &manifest)
-	if err != nil {
-		return specs.Manifest{}, specs.Image{}, err
+	if err = json.Unmarshal(buf, target); err != nil {
+		return fmt.Errorf("failed to unmarshal digest %v: %w", desc.Digest, err)
 	}
-	// get config
-	rc, err = fetcher.Fetch(ctx, manifest.Config)
-	if err != nil {
-		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to fetch config")
+	return nil
+}
+
+func fetchManifest(ctx context.Context, fetcher remotes.Fetcher, desc specs.Descriptor) (*specs.Manifest, error) {
+	platformMatcher := platforms.Default()
+	log.G(ctx).Infof("fetching manifest %v with type %v", desc.Digest, desc.MediaType)
+	switch desc.MediaType {
+	case images.MediaTypeDockerSchema2Manifest, specs.MediaTypeImageManifest:
+		manifest := specs.Manifest{}
+		if err := fetch(ctx, fetcher, desc, &manifest); err != nil {
+			return nil, fmt.Errorf("failed to fetch manifest: %w", err)
+		}
+		return &manifest, nil
+	case images.MediaTypeDockerSchema2ManifestList, specs.MediaTypeImageIndex:
+		var target *specs.Descriptor
+		manifestList := specs.Index{}
+		if err := fetch(ctx, fetcher, desc, &manifestList); err != nil {
+			return nil, fmt.Errorf("failed to fetch manifest list: %w", err)
+		}
+		for _, manifest := range manifestList.Manifests {
+			if platformMatcher.Match(*manifest.Platform) {
+				target = &manifest
+				break
+			}
+		}
+		if target == nil {
+			return nil, fmt.Errorf("no match platform found in manifest list")
+		} else {
+			return fetchManifest(ctx, fetcher, *target)
+		}
+	default:
+		return nil, fmt.Errorf("non manifest type digest fetched")
 	}
-	buf, err = io.ReadAll(rc)
-	if err != nil {
-		return specs.Manifest{}, specs.Image{}, errors.Wrapf(err, "failed to read config")
-	}
-	rc.Close()
+}
+
+func fetchConfig(ctx context.Context, fetcher remotes.Fetcher, desc specs.Descriptor) (*specs.Image, error) {
 	config := specs.Image{}
-	if err = json.Unmarshal(buf, &config); err != nil {
-		return specs.Manifest{}, specs.Image{}, err
+	if err := fetch(ctx, fetcher, desc, &config); err != nil {
+		return nil, fmt.Errorf("failed to fetch config: %w", err)
 	}
+	return &config, nil
+}
+
+func fetchManifestAndConfig(ctx context.Context, fetcher remotes.Fetcher, desc specs.Descriptor) (*specs.Manifest, *specs.Image, error) {
+	var manifest *specs.Manifest
+	var config *specs.Image
+	manifest, err := fetchManifest(ctx, fetcher, desc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("builder: failed to fetch manifest: %w", err)
+	}
+
+	config, err = fetchConfig(ctx, fetcher, manifest.Config)
+	if err != nil {
+		return nil, nil, fmt.Errorf("builder: failed to fetch config: %w", err)
+	}
+
 	return manifest, config, nil
 }
 

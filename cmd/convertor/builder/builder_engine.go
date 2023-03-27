@@ -167,7 +167,7 @@ func getBuilderEngineBase(ctx context.Context, resolver remotes.Resolver, ref, t
 	return &builderEngineBase{
 		fetcher:  fetcher,
 		pusher:   pusher,
-		manifest: manifest,
-		config:   config,
+		manifest: *manifest,
+		config:   *config,
 	}, nil
 }
