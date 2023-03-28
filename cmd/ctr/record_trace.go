@@ -17,22 +17,16 @@
 package main
 
 import (
-	"archive/tar"
-	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -62,7 +56,6 @@ import (
 
 const (
 	uniqueObjectFormat = "record-trace-%s-%s"
-	traceNameInLayer   = ".trace"
 	cniConf            = `{
   "cniVersion": "0.3.1",
   "name": "record-trace-cni",
@@ -90,8 +83,6 @@ const (
   ]
 }
 `
-	containerdDir = "/var/lib/containerd/"
-	v1ContentsDir = "io.containerd.content.v1.content/blobs/"
 )
 
 var (
@@ -420,17 +411,6 @@ func collectTrace(traceFile string) error {
 	}
 }
 
-type countingWriter struct {
-	writer io.Writer
-	count  int64
-}
-
-func (w *countingWriter) Write(p []byte) (n int, err error) {
-	n, err = w.writer.Write(p)
-	w.count += int64(n)
-	return
-}
-
 func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l convertor.Layer) (ocispec.Descriptor, error) {
 	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
 	if err != nil {
@@ -470,192 +450,6 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 	newManifest.SchemaVersion = oldManifest.SchemaVersion
 	newManifest.Config = newConfigDesc
 	newManifest.Layers = append(oldManifest.Layers, l.Desc)
-
-	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
-	var newManifestV2 = struct {
-		ocispec.Manifest
-		MediaType string `json:"mediaType"`
-	}{
-		Manifest:  newManifest,
-		MediaType: images.MediaTypeDockerSchema2Manifest,
-	}
-
-	newManifestData, err := json.MarshalIndent(newManifestV2, "", "   ")
-	if err != nil {
-		return emptyDesc, err
-	}
-
-	newManifestDesc := ocispec.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Manifest,
-		Digest:    digest.Canonical.FromBytes(newManifestData),
-		Size:      int64(len(newManifestData)),
-	}
-
-	labels := map[string]string{}
-	labels["containerd.io/gc.ref.content.config"] = newConfigDesc.Digest.String()
-	for i, layer := range newManifest.Layers {
-		labels[fmt.Sprintf("containerd.io/gc.ref.content.l.%d", i)] = layer.Digest.String()
-	}
-
-	ref = remotes.MakeRefKey(ctx, newManifestDesc)
-	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newManifestData), newManifestDesc, content.WithLabels(labels)); err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to write image manifest")
-	}
-	return newManifestDesc, nil
-}
-
-func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManifest ocispec.Manifest, traceFile string) (l layer, err error) {
-	configData, err := content.ReadBlob(ctx, cs, imgManifest.Config)
-	if err != nil {
-		return emptyLayer, err
-	}
-	config := ocispec.Image{}
-	if err := json.Unmarshal(configData, &config); err != nil {
-		return emptyLayer, err
-	}
-	diffID := config.RootFS.DiffIDs[len(config.RootFS.DiffIDs)-1]
-	contentDigest := ""
-
-	var walker content.WalkFunc = func(info content.Info) error {
-		for k, v := range info.Labels {
-			if contentDigest == "" && k == "containerd.io/uncompressed" && v == diffID.String() {
-				contentDigest = info.Digest.String()
-			}
-		}
-		return nil
-	}
-	if err = cs.Walk(ctx, walker); err != nil {
-		return emptyLayer, errors.Wrapf(err, "walk contents failed")
-	}
-
-	contentFilePath := containerdDir + v1ContentsDir + strings.Replace(contentDigest, ":", "/", 1)
-	tmpDirPath, err := os.MkdirTemp("", "top-layer")
-	if err != nil {
-		return emptyLayer, err
-	}
-	defer os.RemoveAll(tmpDirPath)
-
-	if err = exec.Command("tar", "-C", tmpDirPath, "-xf", contentFilePath).Run(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "extract content failed")
-	}
-
-	if err = copyFile(traceFile, path.Join(tmpDirPath, traceNameInLayer)); err != nil {
-		return emptyLayer, errors.Wrapf(err, "copy file failed")
-	}
-
-	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(uniqueObjectString()))
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
-	}
-	defer contentWriter.Close()
-
-	tarGzipDigester := digest.Canonical.Digester()
-	tarGzipCountingWriter := &countingWriter{writer: io.MultiWriter(contentWriter, tarGzipDigester.Hash())}
-	gzipWriter := gzip.NewWriter(tarGzipCountingWriter)
-
-	tarDigester := digest.Canonical.Digester()
-	tarWriter := tar.NewWriter(io.MultiWriter(gzipWriter, tarDigester.Hash()))
-
-	entries, err := os.ReadDir(tmpDirPath)
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to read dir")
-	}
-
-	for _, entry := range entries {
-		fileInfo, err := entry.Info()
-		if err != nil {
-			return emptyLayer, fmt.Errorf("failed to read file info for %s: %w", entry.Name(), err)
-		}
-		fd, err := os.Open(path.Join(tmpDirPath, fileInfo.Name()))
-		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to open file of %s", fileInfo.Name())
-		}
-
-		if err := tarWriter.WriteHeader(&tar.Header{
-			Name:     entry.Name(),
-			Mode:     0444,
-			Size:     fileInfo.Size(),
-			Typeflag: tar.TypeReg,
-			ModTime:  fileInfo.ModTime(),
-		}); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
-		}
-
-		if _, err := io.Copy(tarWriter, bufio.NewReader(fd)); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to copy IO")
-		}
-	}
-
-	if err = tarWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close tar writer")
-	}
-	if err = gzipWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close gzip writer")
-	}
-
-	annotationsCopy := make(map[string]string)
-	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
-		annotationsCopy[k] = v
-	}
-
-	if err := contentWriter.Commit(ctx, tarGzipCountingWriter.count, tarGzipDigester.Digest()); err != nil {
-		if !errdefs.IsAlreadyExists(err) {
-			return emptyLayer, errors.Wrapf(err, "failed to commit content")
-		}
-	}
-
-	l = layer{
-		desc: ocispec.Descriptor{
-			MediaType:   images.MediaTypeDockerSchema2LayerGzip,
-			Digest:      tarGzipDigester.Digest(),
-			Size:        tarGzipCountingWriter.count,
-			Annotations: annotationsCopy,
-		},
-		diffID: tarDigester.Digest(),
-	}
-	return l, nil
-}
-
-func createImageWithNewTopLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
-	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
-	if err != nil {
-		return emptyDesc, err
-	}
-
-	oldConfig := make(map[string]interface{})
-	if err := json.Unmarshal(oldConfigData, &oldConfig); err != nil {
-		return emptyDesc, err
-	}
-
-	rootfs, ok := oldConfig["rootfs"].(map[string]interface{})
-	if !ok {
-		return emptyDesc, errors.New("failed to parse rootfs")
-	}
-	diffIds, ok := rootfs["diff_ids"].([]interface{})
-	if !ok {
-		return emptyDesc, errors.New("failed to parse diff_ids")
-	}
-	diffIds[len(diffIds)-1] = l.diffID.String()
-
-	newConfigData, err := json.MarshalIndent(oldConfig, "", "   ")
-	if err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to marshal image")
-	}
-
-	newConfigDesc := ocispec.Descriptor{
-		MediaType: oldManifest.Config.MediaType,
-		Digest:    digest.Canonical.FromBytes(newConfigData),
-		Size:      int64(len(newConfigData)),
-	}
-	ref := remotes.MakeRefKey(ctx, newConfigDesc)
-	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newConfigData), newConfigDesc); err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to write image config")
-	}
-
-	newManifest := ocispec.Manifest{}
-	newManifest.SchemaVersion = oldManifest.SchemaVersion
-	newManifest.Config = newConfigDesc
-	newManifest.Layers = append(oldManifest.Layers[:len(oldManifest.Layers)-1], l.desc)
 
 	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
 	var newManifestV2 = struct {
@@ -840,30 +634,4 @@ func registerSignalsForTask(ctx context.Context, task containerd.Task, sigStop c
 // Go 1.14 started to use non-cooperative goroutine preemption, SIGURG should be ignored
 func canIgnoreSignal(s os.Signal) bool {
 	return s == unix.SIGURG
-}
-
-func copyFile(src, dst string) (err error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if err = out.Truncate(0); err != nil {
-		return err
-	}
-	defer func() {
-		cerr := out.Close()
-		if err == nil {
-			err = cerr
-		}
-	}()
-	if _, err = io.Copy(out, in); err != nil {
-		return err
-	}
-	err = out.Sync()
-	return err
 }
