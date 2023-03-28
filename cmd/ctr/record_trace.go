@@ -36,6 +36,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/containerd/accelerated-container-image/pkg/convertor"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
 	"github.com/containerd/containerd/cmd/ctr/commands/tasks"
@@ -165,27 +166,40 @@ var recordTraceCommand = cli.Command{
 		// Validate arguments
 		ref := cliCtx.Args().Get(0)
 		if ref == "" {
-			return errors.New("image ref must be provided")
+			return errors.New("Image ref must be provided")
 		}
 		newRef := cliCtx.Args().Get(1)
 		if newRef == "" {
-			return errors.New("new image ref must be provided")
+			return errors.New("New image ref must be provided")
 		}
 		if _, err = client.ImageService().Get(ctx, newRef); err == nil {
-			return errors.Errorf("few image %s exists", newRef)
+			return errors.Errorf("New image %s exists", newRef)
 		} else if !errdefs.IsNotFound(err) {
-			return errors.Errorf("fail to lookup image %s", newRef)
+			return errors.Errorf("Fail to lookup image %s", newRef)
 		}
 
 		// Get image instance
 		imgModel, err := client.ImageService().Get(ctx, ref)
 		if err != nil {
-			return errors.Errorf("fail to get image %s", ref)
+			return errors.Errorf("Fail to get image %s", ref)
 		}
 		image := containerd.NewImage(client, imgModel)
 		imageManifest, err := images.Manifest(ctx, cs, image.Target(), platforms.Default())
 		if err != nil {
 			return err
+		}
+
+		// Validate top layer. Get fs type
+		topLayer := imageManifest.Layers[len(imageManifest.Layers)-1]
+		if _, ok := topLayer.Annotations["containerd.io/snapshot/overlaybd/blob-digest"]; !ok {
+			return errors.New("Must be an overlaybd image")
+		}
+		if topLayer.Annotations["containerd.io/snapshot/overlaybd/acceleration-layer"] == "yes" {
+			return errors.New("Acceleration layer already exists")
+		}
+		fsType, ok := topLayer.Annotations["containerd.io/snapshot/overlaybd/blob-fs-type"]
+		if !ok {
+			fsType = ""
 		}
 
 		// Create trace file
@@ -237,6 +251,7 @@ var recordTraceCommand = cli.Command{
 		}
 
 		// Create container and run task
+		fmt.Println("Create container")
 		container, err := createContainer(ctx, client, cliCtx, image, traceFile)
 		if err != nil {
 			return err
@@ -276,19 +291,22 @@ var recordTraceCommand = cli.Command{
 			fmt.Println("Task finished before timeout ...")
 		}
 
+		// Collect trace
 		if err = collectTrace(traceFile); err != nil {
 			return err
 		}
 
-		// Make a duplicated top layer and fill in trace
-		newTopLayer, err := duplicateTopLayerWithTrace(ctx, cs, imageManifest, traceFile)
+		// Load trace file into content, and generate an acceleration layer
+		loader := convertor.NewContentLoaderWithFsType(true, fsType, convertor.ContentFile{SrcFilePath: traceFile, DstFileName: "trace"})
+		accelLayer, err := loader.Load(ctx, cs)
 		if err != nil {
-			return err
+			return fmt.Errorf("loadCommittedSnapshotInContent failed: %v", err)
 		}
 
-		newManifestDesc, err := createImageWithNewTopLayer(ctx, cs, imageManifest, newTopLayer)
+		// Create image with the acceleration layer on top
+		newManifestDesc, err := createImageWithAccelLayer(ctx, cs, imageManifest, accelLayer)
 		if err != nil {
-			return fmt.Errorf("createImageWithNewTopLayer failed: %v", err)
+			return fmt.Errorf("createImageWithAccelLayer failed: %v", err)
 		}
 
 		imgName := cliCtx.Args().Get(1)
@@ -413,6 +431,79 @@ func (w *countingWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l convertor.Layer) (ocispec.Descriptor, error) {
+	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
+	if err != nil {
+		return emptyDesc, err
+	}
+
+	var oldConfig ocispec.Image
+	if err := json.Unmarshal(oldConfigData, &oldConfig); err != nil {
+		return emptyDesc, err
+	}
+
+	buildTime := time.Now()
+	var newHistory = []ocispec.History{{
+		Created:   &buildTime,
+		CreatedBy: "Acceleration Layer",
+	}}
+	oldConfig.History = append(newHistory, oldConfig.History...)
+	oldConfig.RootFS.DiffIDs = append(oldConfig.RootFS.DiffIDs, l.DiffID)
+	oldConfig.Created = &buildTime
+
+	newConfigData, err := json.MarshalIndent(oldConfig, "", "   ")
+	if err != nil {
+		return emptyDesc, errors.Wrap(err, "failed to marshal image")
+	}
+
+	newConfigDesc := ocispec.Descriptor{
+		MediaType: oldManifest.Config.MediaType,
+		Digest:    digest.Canonical.FromBytes(newConfigData),
+		Size:      int64(len(newConfigData)),
+	}
+	ref := remotes.MakeRefKey(ctx, newConfigDesc)
+	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newConfigData), newConfigDesc); err != nil {
+		return emptyDesc, errors.Wrap(err, "failed to write image config")
+	}
+
+	newManifest := ocispec.Manifest{}
+	newManifest.SchemaVersion = oldManifest.SchemaVersion
+	newManifest.Config = newConfigDesc
+	newManifest.Layers = append(oldManifest.Layers, l.Desc)
+
+	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
+	var newManifestV2 = struct {
+		ocispec.Manifest
+		MediaType string `json:"mediaType"`
+	}{
+		Manifest:  newManifest,
+		MediaType: images.MediaTypeDockerSchema2Manifest,
+	}
+
+	newManifestData, err := json.MarshalIndent(newManifestV2, "", "   ")
+	if err != nil {
+		return emptyDesc, err
+	}
+
+	newManifestDesc := ocispec.Descriptor{
+		MediaType: images.MediaTypeDockerSchema2Manifest,
+		Digest:    digest.Canonical.FromBytes(newManifestData),
+		Size:      int64(len(newManifestData)),
+	}
+
+	labels := map[string]string{}
+	labels["containerd.io/gc.ref.content.config"] = newConfigDesc.Digest.String()
+	for i, layer := range newManifest.Layers {
+		labels[fmt.Sprintf("containerd.io/gc.ref.content.l.%d", i)] = layer.Digest.String()
+	}
+
+	ref = remotes.MakeRefKey(ctx, newManifestDesc)
+	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newManifestData), newManifestDesc, content.WithLabels(labels)); err != nil {
+		return emptyDesc, errors.Wrap(err, "failed to write image manifest")
+	}
+	return newManifestDesc, nil
+}
+
 func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManifest ocispec.Manifest, traceFile string) (l layer, err error) {
 	configData, err := content.ReadBlob(ctx, cs, imgManifest.Config)
 	if err != nil {
@@ -524,92 +615,6 @@ func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManife
 	}
 	return l, nil
 }
-
-//func duplicateTopLayerWithTrace2(ctx context.Context, ss snapshots.Snapshotter, cs content.Store, imgManifest ocispec.Manifest, container containerd.Container, traceFile string) (l layer, err error) {
-//	containerInfo, err := container.Info(ctx)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	snapshotInfo, err := ss.Stat(ctx, containerInfo.SnapshotKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	parentSnapshotInfo, err := ss.Stat(ctx, snapshotInfo.Parent)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	grandParentKey := parentSnapshotInfo.Parent
-//	parentKey := snapshotInfo.Parent
-//
-//	lowerSnapshotKey := uniqueObjectString()
-//	lowerMounts, err := ss.View(ctx, lowerSnapshotKey, grandParentKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	defer func() {
-//		if nextErr := ss.Remove(ctx, lowerSnapshotKey); nextErr != nil && err == nil {
-//			err = errors.Wrapf(nextErr, "failed to remove lower snapshot")
-//		}
-//	}()
-//
-//	upperSnapshotKey := uniqueObjectString()
-//	upperMounts, err := ss.Prepare(ctx, upperSnapshotKey, parentKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	defer func() {
-//		if nextErr := ss.Remove(ctx, upperSnapshotKey); nextErr != nil && err == nil {
-//			err = errors.Wrapf(nextErr, "failed to remove upper snapshot")
-//		}
-//	}()
-//	if len(upperMounts) != 1 {
-//		return emptyLayer, errors.New("prepare upper returned unknown mounts")
-//	}
-//
-//	upperdir := ""
-//	for _, opt := range upperMounts[0].Options {
-//		if strings.HasPrefix(opt, "upperdir=") {
-//			upperdir = opt[len("upperdir="):]
-//			break
-//		}
-//	}
-//	if upperdir == "" {
-//		return emptyLayer, errors.New("cannot find upperdir, unable to fill in trace file")
-//	}
-//
-//	if err = copyFile(traceFile, path.Join(upperdir, traceNameInLayer)); err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	diffComparer := walking.NewWalkingDiff(cs)
-//	opt := diff.WithMediaType(ocispec.MediaTypeImageLayerGzip)
-//	contentDesc, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	opt = diff.WithMediaType(ocispec.MediaTypeImageLayer)
-//	contentDescUncompressed, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	annotationsCopy := make(map[string]string)
-//	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
-//		annotationsCopy[k] = v
-//	}
-//
-//	// Remain media type the same as the old images
-//	contentDesc.MediaType = images.MediaTypeDockerSchema2LayerGzip
-//	contentDesc.Annotations = annotationsCopy
-//
-//	l = layer{
-//		desc:   contentDesc,
-//		diffID: contentDescUncompressed.Digest,
-//	}
-//	return l, nil
-//}
 
 func createImageWithNewTopLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
 	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
