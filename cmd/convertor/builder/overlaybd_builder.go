@@ -109,7 +109,7 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 		if err := e.apply(ctx, layerDir); err != nil {
 			return err
 		}
-		if err := e.commit(ctx, layerDir); err != nil {
+		if err := e.commit(ctx, layerDir, idx); err != nil {
 			return err
 		}
 		os.Remove(path.Join(layerDir, "layer.tar"))
@@ -313,17 +313,32 @@ func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string) error {
+func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string, idx int) error {
 	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-commit")
+	var parentUUID string
+	if idx > 0 {
+		parentUUID = chainIDtoUUID(e.overlaybdLayers[idx-1].chainID)
+	} else {
+		parentUUID = ""
+	}
+	curUUID := chainIDtoUUID(e.overlaybdLayers[idx].chainID)
 
-	out, err := exec.CommandContext(ctx, binpath, "-z", "-t",
+	opts := []string{
+		"-z", "-t",
 		path.Join(dir, "writable_data"),
 		path.Join(dir, "writable_index"),
 		path.Join(dir, commitFile),
-	).CombinedOutput()
+		"--uuid", curUUID,
+	}
+	if parentUUID != "" {
+		opts = append(opts, "--parent-uuid", parentUUID)
+	}
+
+	out, err := exec.CommandContext(ctx, binpath, opts...).CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to overlaybd-commit: %s", out)
 	}
+	logrus.Infof("layer %d committed, uuid: %s, parent uuid: %s", idx, curUUID, parentUUID)
 	return nil
 }
 
@@ -336,4 +351,10 @@ func (wc *writeCountWrapper) Write(p []byte) (n int, err error) {
 	n, err = wc.w.Write(p)
 	wc.c += int64(n)
 	return
+}
+
+// UUID: 8-4-4-4-12
+func chainIDtoUUID(chainID string) string {
+	dStr := chainID[7:]
+	return fmt.Sprintf("%s-%s-%s-%s-%s", dStr[0:8], dStr[8:12], dStr[12:16], dStr[16:20], dStr[20:32])
 }
