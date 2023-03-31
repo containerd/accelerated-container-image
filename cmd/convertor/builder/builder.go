@@ -24,8 +24,6 @@ import (
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
 	"github.com/containerd/containerd/reference"
 	"github.com/containerd/containerd/remotes/docker"
-	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/identity"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -117,28 +115,22 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 		}
 	}()
 
-	var chain []digest.Digest
-	srcDiffIDs := b.config.RootFS.DiffIDs
-
 	for i := 0; i < b.layers; i++ {
 		downloaded[i] = make(chan error)
 		converted[i] = make(chan error)
 		alreadyConverted[i] = make(chan *v1.Descriptor)
 
-		chain = append(chain, srcDiffIDs[i])
-		chainID := identity.ChainID(chain).String()
-
 		// deduplication Goroutine
-		go func(idx int, chainID string) {
+		go func(idx int) {
 			defer close(alreadyConverted[idx])
 			// try to find chainID -> converted digest conversion if available
-			desc, err := b.engine.CheckForConvertedLayer(ctx, idx, chainID)
+			desc, err := b.engine.CheckForConvertedLayer(ctx, idx)
 			if err != nil {
 				// in the event of failure fallback to regular process
 				return
 			}
-			alreadyConverted[idx] <- desc
-		}(i, chainID)
+			alreadyConverted[idx] <- &desc
+		}(i)
 
 		// download goroutine
 		go func(idx int) {
@@ -151,7 +143,7 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 			defer close(downloaded[idx])
 			if cachedLayer != nil {
 				// download the converted layer
-				err := b.engine.DownloadConvertedLayer(ctx, idx, cachedLayer)
+				err := b.engine.DownloadConvertedLayer(ctx, idx, *cachedLayer)
 				if err == nil {
 					logrus.Infof("downloaded cached layer %d", idx)
 					sendToChannel(ctx, downloaded[idx], nil)
@@ -193,7 +185,7 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 
 		// upload goroutine
 		uploaded.Add(1)
-		go func(idx int, chainID string) {
+		go func(idx int) {
 			defer uploaded.Done()
 			if waitForChannel(ctx, converted[idx]); ctx.Err() != nil {
 				return
@@ -202,9 +194,9 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to upload layer %d", idx))
 				return
 			}
-			b.engine.StoreConvertedLayerDetails(ctx, chainID, idx)
+			b.engine.StoreConvertedLayerDetails(ctx, idx)
 			logrus.Infof("layer %d uploaded", idx)
-		}(i, chainID)
+		}(i)
 	}
 	uploaded.Wait()
 	if retErr != nil {

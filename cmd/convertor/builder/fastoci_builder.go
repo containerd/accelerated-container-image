@@ -188,18 +188,21 @@ func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
 	return e.uploadManifestAndConfig(ctx)
 }
 
+// Layer deduplication in FastOCI is not currently supported due to conversion not
+// being reproducible at the moment which can lead to occasional bugs.
+
 // CheckForConvertedLayer TODO
-func (e *fastOCIBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int, chainID string) (*specs.Descriptor, error) {
-	return nil, errdefs.ErrNotFound
+func (e *fastOCIBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {
+	return specs.Descriptor{}, errdefs.ErrNotFound
 }
 
 // StoreConvertedLayerDetails TODO
-func (e *fastOCIBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, chainID string, idx int) error {
+func (e *fastOCIBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
 	return nil
 }
 
 // DownloadConvertedLayer TODO
-func (e *fastOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc *specs.Descriptor) error {
+func (e *fastOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
 	return errdefs.ErrNotImplemented
 }
 

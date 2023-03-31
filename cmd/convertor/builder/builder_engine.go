@@ -51,13 +51,13 @@ type builderEngine interface {
 
 	// deduplication functions
 	// finds already converted layer in db and validates presence in registry
-	CheckForConvertedLayer(ctx context.Context, idx int, chainID string) (*specs.Descriptor, error)
+	CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error)
 
 	// downloads the already converted layer
-	DownloadConvertedLayer(ctx context.Context, idx int, desc *specs.Descriptor) error
+	DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error
 
 	// store chainID -> converted layer mapping for deduplication
-	StoreConvertedLayerDetails(ctx context.Context, chainID string, idx int) error
+	StoreConvertedLayerDetails(ctx context.Context, idx int) error
 
 	// Cleanup removes workdir
 	Cleanup()
