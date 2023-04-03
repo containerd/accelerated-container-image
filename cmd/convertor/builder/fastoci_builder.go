@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/containerd/archive/compression"
+	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
@@ -185,6 +186,24 @@ func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
 	e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 	e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	return e.uploadManifestAndConfig(ctx)
+}
+
+// Layer deduplication in FastOCI is not currently supported due to conversion not
+// being reproducible at the moment which can lead to occasional bugs.
+
+// CheckForConvertedLayer TODO
+func (e *fastOCIBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {
+	return specs.Descriptor{}, errdefs.ErrNotFound
+}
+
+// StoreConvertedLayerDetails TODO
+func (e *fastOCIBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
+	return nil
+}
+
+// DownloadConvertedLayer TODO
+func (e *fastOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
+	return errdefs.ErrNotImplemented
 }
 
 func (e *fastOCIBuilderEngine) Cleanup() {

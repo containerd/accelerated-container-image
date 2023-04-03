@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/remotes"
@@ -48,17 +49,30 @@ type builderEngine interface {
 	// UploadImage upload new manifest and config
 	UploadImage(ctx context.Context) error
 
-	// cleanup remove workdir
+	// deduplication functions
+	// finds already converted layer in db and validates presence in registry
+	CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error)
+
+	// downloads the already converted layer
+	DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error
+
+	// store chainID -> converted layer mapping for deduplication
+	StoreConvertedLayerDetails(ctx context.Context, idx int) error
+
+	// Cleanup removes workdir
 	Cleanup()
 }
 
 type builderEngineBase struct {
-	fetcher  remotes.Fetcher
-	pusher   remotes.Pusher
-	manifest specs.Manifest
-	config   specs.Image
-	workDir  string
-	oci      bool
+	fetcher    remotes.Fetcher
+	pusher     remotes.Pusher
+	manifest   specs.Manifest
+	config     specs.Image
+	workDir    string
+	oci        bool
+	db         database.ConversionDatabase
+	host       string
+	repository string
 }
 
 func (e *builderEngineBase) isGzipLayer(ctx context.Context, idx int) (bool, error) {

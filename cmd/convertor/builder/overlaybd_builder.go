@@ -29,22 +29,29 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	"github.com/containerd/containerd/errdefs"
 	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/identity"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	overlaybdBaseLayer = "/opt/overlaybd/baselayers/ext4_64"
-
-	commitFile = "overlaybd.commit"
+	overlaybdBaseLayer      = "/opt/overlaybd/baselayers/ext4_64"
+	commitFile              = "overlaybd.commit"
+	labelDistributionSource = "containerd.io/distribution.source"
 )
+
+type overlaybdConvertResult struct {
+	desc    specs.Descriptor
+	chainID string
+}
 
 type overlaybdBuilderEngine struct {
 	*builderEngineBase
 	overlaybdConfig *snapshot.OverlayBDBSConfig
-	overlaybdLayers []specs.Descriptor
+	overlaybdLayers []overlaybdConvertResult
 }
 
 func NewOverlayBDBuilderEngine(base *builderEngineBase) builderEngine {
@@ -55,10 +62,22 @@ func NewOverlayBDBuilderEngine(base *builderEngineBase) builderEngine {
 	config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
 		File: overlaybdBaseLayer,
 	})
+
+	overlaybdLayers := make([]overlaybdConvertResult, len(base.manifest.Layers))
+
+	var chain []digest.Digest
+	srcDiffIDs := base.config.RootFS.DiffIDs
+
+	for i := 0; i < len(base.manifest.Layers); i++ {
+		chain = append(chain, srcDiffIDs[i])
+		chainID := identity.ChainID(chain).String()
+		overlaybdLayers[i].chainID = chainID
+	}
+
 	return &overlaybdBuilderEngine{
 		builderEngineBase: base,
 		overlaybdConfig:   config,
-		overlaybdLayers:   make([]specs.Descriptor, len(base.manifest.Layers)),
+		overlaybdLayers:   overlaybdLayers,
 	}
 }
 
@@ -70,28 +89,36 @@ func (e *overlaybdBuilderEngine) DownloadLayer(ctx context.Context, idx int) err
 
 func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	layerDir := e.getLayerDir(idx)
-	if err := e.create(ctx, layerDir); err != nil {
-		return err
+
+	alreadyConverted := false
+	// check if we used a previously converted layer to skip conversion
+	if _, err := os.Stat(path.Join(layerDir, commitFile)); err == nil {
+		alreadyConverted = true
 	}
-	e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
-		Data:  path.Join(layerDir, "writable_data"),
-		Index: path.Join(layerDir, "writable_index"),
-	}
-	if err := writeConfig(layerDir, e.overlaybdConfig); err != nil {
-		return err
-	}
-	if err := e.apply(ctx, layerDir); err != nil {
-		return err
-	}
-	if err := e.commit(ctx, layerDir); err != nil {
-		return err
+	if !alreadyConverted {
+		if err := e.create(ctx, layerDir); err != nil {
+			return err
+		}
+		e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
+			Data:  path.Join(layerDir, "writable_data"),
+			Index: path.Join(layerDir, "writable_index"),
+		}
+		if err := writeConfig(layerDir, e.overlaybdConfig); err != nil {
+			return err
+		}
+		if err := e.apply(ctx, layerDir); err != nil {
+			return err
+		}
+		if err := e.commit(ctx, layerDir); err != nil {
+			return err
+		}
+		os.Remove(path.Join(layerDir, "layer.tar"))
+		os.Remove(path.Join(layerDir, "writable_data"))
+		os.Remove(path.Join(layerDir, "writable_index"))
 	}
 	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, snapshot.OverlayBDBSConfigLower{
 		File: path.Join(layerDir, commitFile),
 	})
-	os.Remove(path.Join(layerDir, "layer.tar"))
-	os.Remove(path.Join(layerDir, "writable_data"))
-	os.Remove(path.Join(layerDir, "writable_index"))
 	return nil
 }
 
@@ -109,14 +136,14 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, commitFile), desc); err != nil {
 		return errors.Wrapf(err, "failed to upload layer %d", idx)
 	}
-	e.overlaybdLayers[idx] = desc
+	e.overlaybdLayers[idx].desc = desc
 	return nil
 }
 
 func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 	for idx := range e.manifest.Layers {
-		e.manifest.Layers[idx] = e.overlaybdLayers[idx]
-		e.config.RootFS.DiffIDs[idx] = e.overlaybdLayers[idx].Digest
+		e.manifest.Layers[idx] = e.overlaybdLayers[idx].desc
+		e.config.RootFS.DiffIDs[idx] = e.overlaybdLayers[idx].desc.Digest
 	}
 	baseDesc, err := e.uploadBaseLayer(ctx)
 	if err != nil {
@@ -125,6 +152,78 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 	e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 	e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	return e.uploadManifestAndConfig(ctx)
+}
+
+func (e *overlaybdBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {
+	if e.db == nil {
+		return specs.Descriptor{}, errdefs.ErrNotFound
+	}
+	chainID := e.overlaybdLayers[idx].chainID
+
+	// try to find in the same repo then check existence on registry
+	entry := e.db.GetEntryForRepo(ctx, e.host, e.repository, chainID)
+	if entry != nil && entry.ChainID != "" {
+		desc := specs.Descriptor{
+			MediaType: e.mediaTypeImageLayer(),
+			Digest:    entry.ConvertedDigest,
+			Size:      entry.DataSize,
+		}
+		rc, err := e.fetcher.Fetch(ctx, desc)
+
+		if err == nil {
+			rc.Close()
+			logrus.Infof("layer %d found in remote with chainID %s", idx, chainID)
+			return desc, nil
+		}
+		if errdefs.IsNotFound(err) {
+			// invalid record in db, which is not found in registry, remove it
+			err := e.db.DeleteEntry(ctx, e.host, e.repository, chainID)
+			if err != nil {
+				return specs.Descriptor{}, err
+			}
+		}
+	}
+
+	// found record in other repos, try mounting it to the target repo
+	entries := e.db.GetCrossRepoEntries(ctx, e.host, chainID)
+	for _, entry := range entries {
+		desc := specs.Descriptor{
+			MediaType: e.mediaTypeImageLayer(),
+			Digest:    entry.ConvertedDigest,
+			Size:      entry.DataSize,
+			Annotations: map[string]string{
+				fmt.Sprintf("%s.%s", labelDistributionSource, e.host): entry.Repository,
+			},
+		}
+
+		_, err := e.pusher.Push(ctx, desc)
+		if errdefs.IsAlreadyExists(err) {
+			desc.Annotations = nil
+
+			if err := e.db.CreateEntry(ctx, e.host, e.repository, entry.ConvertedDigest, chainID, entry.DataSize); err != nil {
+				continue // try a different repo if available
+			}
+
+			logrus.Infof("layer %d mount from %s was successful", idx, entry.Repository)
+			logrus.Infof("layer %d found in remote with chainID %s", idx, chainID)
+			return desc, nil
+		}
+	}
+
+	logrus.Infof("layer %d not found in remote", idx)
+	return specs.Descriptor{}, errdefs.ErrNotFound
+}
+
+func (e *overlaybdBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
+	if e.db == nil {
+		return nil
+	}
+	return e.db.CreateEntry(ctx, e.host, e.repository, e.overlaybdLayers[idx].desc.Digest, e.overlaybdLayers[idx].chainID, e.overlaybdLayers[idx].desc.Size)
+}
+
+func (e *overlaybdBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
+	targetFile := path.Join(e.getLayerDir(idx), commitFile)
+	return downloadLayer(ctx, e.fetcher, targetFile, desc, true)
 }
 
 func (e *overlaybdBuilderEngine) Cleanup() {
@@ -171,8 +270,8 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 		Digest:    digester.Digest(),
 		Size:      countWriter.c,
 		Annotations: map[string]string{
-			"containerd.io/snapshot/overlaybd/blob-digest": digester.Digest().String(),
-			"containerd.io/snapshot/overlaybd/blob-size":   fmt.Sprintf("%d", countWriter.c),
+			label.OverlayBDBlobDigest: digester.Digest().String(),
+			label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
 		},
 	}
 	if err = uploadBlob(ctx, e.pusher, tarFile, baseDesc); err != nil {
