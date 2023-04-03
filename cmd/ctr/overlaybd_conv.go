@@ -17,10 +17,7 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
-	"strings"
 	"time"
 
 	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
@@ -28,18 +25,8 @@ import (
 	"github.com/containerd/containerd/images/converter"
 	"github.com/containerd/containerd/leases"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/opencontainers/go-digest"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/urfave/cli"
-)
-
-var (
-	emptyDesc  ocispec.Descriptor
-	emptyLayer layer
-
-	convSnapshotNameFormat = "overlaybd-conv-%s"
-	convLeaseNameFormat    = convSnapshotNameFormat
 )
 
 var convertCommand = cli.Command{
@@ -86,7 +73,7 @@ var convertCommand = cli.Command{
 		defer cancel()
 
 		ctx, done, err := cli.WithLease(ctx,
-			leases.WithID(fmt.Sprintf(convLeaseNameFormat, uniquePart())),
+			leases.WithID(fmt.Sprintf(obdconv.ConvContentNameFormat, obdconv.UniquePart())),
 			leases.WithExpiration(1*time.Hour),
 		)
 		if err != nil {
@@ -128,18 +115,4 @@ var convertCommand = cli.Command{
 		fmt.Printf("new image digest: %s\n", newImg.Target.Digest.String())
 		return nil
 	},
-}
-
-type layer struct {
-	desc   ocispec.Descriptor
-	diffID digest.Digest
-}
-
-// NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
-func uniquePart() string {
-	t := time.Now()
-	var b [3]byte
-	// Ignore read failures, just decreases uniqueness
-	rand.Read(b[:])
-	return fmt.Sprintf("%d-%s", t.Nanosecond(), strings.Replace(base64.URLEncoding.EncodeToString(b[:]), "_", "-", -1))
 }

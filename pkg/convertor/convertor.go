@@ -61,10 +61,10 @@ const (
 var (
 	emptyString string
 	emptyDesc   ocispec.Descriptor
-	emptyLayer  layer
+	emptyLayer  Layer
 
 	convSnapshotNameFormat = "overlaybd-conv-%s"
-	convContentNameFormat  = convSnapshotNameFormat
+	ConvContentNameFormat  = convSnapshotNameFormat
 )
 
 type ZFileConfig struct {
@@ -76,17 +76,17 @@ type ImageConvertor interface {
 	Convert(ctx context.Context, srcManifest ocispec.Manifest, fsType string) (ocispec.Descriptor, error)
 }
 
-type layer struct {
-	desc   ocispec.Descriptor
-	diffID digest.Digest
+type Layer struct {
+	Desc   ocispec.Descriptor
+	DiffID digest.Digest
 }
 
-func (l *layer) GetInfo() (ocispec.Descriptor, digest.Digest) {
-	return l.desc, l.diffID
+func (l *Layer) GetInfo() (ocispec.Descriptor, digest.Digest) {
+	return l.Desc, l.DiffID
 }
 
 // contentLoader can load multiple files into content.Store service, and return an oci.v1.tar layer.
-func newContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...contentFile) *contentLoader {
+func NewContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...ContentFile) *contentLoader {
 	return &contentLoader{
 		files:        files,
 		isAccelLayer: isAccelLayer,
@@ -94,19 +94,19 @@ func newContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...conte
 	}
 }
 
-type contentFile struct {
-	srcFilePath string
-	dstFileName string
+type ContentFile struct {
+	SrcFilePath string
+	DstFileName string
 }
 
 type contentLoader struct {
-	files        []contentFile
+	files        []ContentFile
 	isAccelLayer bool
 	fsType       string
 }
 
-func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l layer, err error) {
-	refName := fmt.Sprintf(convContentNameFormat, uniquePart())
+func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Layer, err error) {
+	refName := fmt.Sprintf(ConvContentNameFormat, UniquePart())
 	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
 	if err != nil {
 		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
@@ -126,20 +126,20 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 	}()
 
 	for _, loader := range loader.files {
-		srcPathList = append(srcPathList, loader.srcFilePath)
-		srcFile, err := os.Open(loader.srcFilePath)
+		srcPathList = append(srcPathList, loader.SrcFilePath)
+		srcFile, err := os.Open(loader.SrcFilePath)
 		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.srcFilePath)
+			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
 		}
 		openedSrcFile = append(openedSrcFile, srcFile)
 
-		fi, err := os.Stat(loader.srcFilePath)
+		fi, err := os.Stat(loader.SrcFilePath)
 		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.srcFilePath)
+			return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.SrcFilePath)
 		}
 
 		if err := tarWriter.WriteHeader(&tar.Header{
-			Name:     loader.dstFileName,
+			Name:     loader.DstFileName,
 			Mode:     0444,
 			Size:     fi.Size(),
 			Typeflag: tar.TypeReg,
@@ -166,8 +166,8 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 		}
 	}
 
-	l = layer{
-		desc: ocispec.Descriptor{
+	l = Layer{
+		Desc: ocispec.Descriptor{
 			MediaType: ocispec.MediaTypeImageLayer,
 			Digest:    digester.Digest(),
 			Size:      countWriter.c,
@@ -176,13 +176,13 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l laye
 				label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
 			},
 		},
-		diffID: digester.Digest(),
+		DiffID: digester.Digest(),
 	}
 	if loader.isAccelLayer {
-		l.desc.Annotations[label.AccelerationLayer] = "yes"
+		l.Desc.Annotations[label.AccelerationLayer] = "yes"
 	}
 	if loader.fsType != "" {
-		l.desc.Annotations[label.OverlayBDBlobFsType] = loader.fsType
+		l.Desc.Annotations[label.OverlayBDBlobFsType] = loader.fsType
 	}
 	return l, nil
 }
@@ -251,7 +251,7 @@ func (c *overlaybdConvertor) Convert(ctx context.Context, srcManifest ocispec.Ma
 	return c.commitImage(ctx, srcManifest, srcCfg, committedLayers)
 }
 
-func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispec.Manifest, imgCfg ocispec.Image, committedLayers []layer) (ocispec.Descriptor, error) {
+func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispec.Manifest, imgCfg ocispec.Image, committedLayers []Layer) (ocispec.Descriptor, error) {
 	var copyManifest = struct {
 		ocispec.Manifest `json:",omitempty"`
 		// MediaType is the media type of the object this schema refers to.
@@ -265,8 +265,8 @@ func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispe
 	copyManifest.Layers = nil
 
 	for _, l := range committedLayers {
-		copyManifest.Layers = append(copyManifest.Layers, l.desc)
-		imgCfg.RootFS.DiffIDs = append(imgCfg.RootFS.DiffIDs, l.diffID)
+		copyManifest.Layers = append(copyManifest.Layers, l.Desc)
+		imgCfg.RootFS.DiffIDs = append(imgCfg.RootFS.DiffIDs, l.DiffID)
 	}
 
 	configData, err := json.MarshalIndent(imgCfg, "", "   ")
@@ -432,22 +432,22 @@ func (c *overlaybdConvertor) sentToRemote(ctx context.Context, desc ocispec.Desc
 
 // convertLayers applys image layers on overlaybd with specified filesystem and
 // exports the layers based on zfile.
-func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]layer, error) {
+func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]Layer, error) {
 	var (
 		lastParentID string = ""
 		err          error
-		commitLayers = make([]layer, len(srcDescs))
+		commitLayers = make([]Layer, len(srcDescs))
 		chain        []digest.Digest
 	)
 
-	var sendToContentStore = func(ctx context.Context, snID string) (layer, error) {
+	var sendToContentStore = func(ctx context.Context, snID string) (Layer, error) {
 		info, err := c.sn.Stat(ctx, snID)
 		if err != nil {
 			return emptyLayer, err
 		}
 
-		loader := newContentLoaderWithFsType(false, fsType, contentFile{
-			info.Labels["containerd.io/snapshot/overlaybd.localcommitpath"],
+		loader := NewContentLoaderWithFsType(false, fsType, ContentFile{
+			info.Labels[label.LocalOverlayBDPath],
 			"overlaybd.commit"})
 		return loader.Load(ctx, c.cs)
 	}
@@ -488,8 +488,8 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 				return nil, errors.Wrapf(err, "failed to prepare remote snapshot")
 			}
 			lastParentID = key
-			commitLayers[idx] = layer{
-				desc: ocispec.Descriptor{
+			commitLayers[idx] = Layer{
+				Desc: ocispec.Descriptor{
 					MediaType: ocispec.MediaTypeImageLayer,
 					Digest:    remoteDesc.Digest,
 					Size:      remoteDesc.Size,
@@ -498,7 +498,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 						label.OverlayBDBlobSize:   fmt.Sprintf("%d", remoteDesc.Size),
 					},
 				},
-				diffID: remoteDesc.Digest,
+				DiffID: remoteDesc.Digest,
 			}
 			continue
 		}
@@ -527,7 +527,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			if err != nil {
 				return nil, err
 			}
-			err = c.sentToRemote(ctx, commitLayers[idx].desc, chainID)
+			err = c.sentToRemote(ctx, commitLayers[idx].Desc, chainID)
 			if err != nil {
 				return nil, err
 			}
@@ -569,7 +569,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 	)
 
 	for {
-		key = fmt.Sprintf(convSnapshotNameFormat, uniquePart())
+		key = fmt.Sprintf(convSnapshotNameFormat, UniquePart())
 		mounts, err = c.sn.Prepare(ctx, key, parentID, snOpts...)
 		if err != nil {
 			// retry other key
@@ -628,7 +628,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
 }
 
 // NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
-func uniquePart() string {
+func UniquePart() string {
 	t := time.Now()
 	var b [3]byte
 	// Ignore read failures, just decreases uniqueness
