@@ -145,6 +145,7 @@ jobs:
       - name: e2e
         working-directory: src/github.com/containerd/accelerated-container-image
         run: |
+          echo "[ init env ]"
           sudo apt update && sudo apt install -y containerd.io libnl-3-200 libnl-genl-3-200
           sudo modprobe -a target_core_user tcm_loop
           wget https://github.com/containerd/overlaybd/releases/download/v0.6.0/overlaybd-0.6.0-1.x86_64.deb &&
@@ -163,8 +164,25 @@ jobs:
           sudo systemctl restart containerd
           sudo containerd -v
           sudo ctr plugin ls
+          echo "[ run container ]"
           sudo bin/ctr rpull docker.io/overlaybd/redis:6.2.1_obd
-          sudo bin/ctr run -d --net-host --rm --snapshotter=overlaybd docker.io/overlaybd/redis:6.2.1_obd test
+          sudo ctr run -d --net-host --snapshotter=overlaybd docker.io/overlaybd/redis:6.2.1_obd test
           sudo ctr t ls
+          echo "[ obdconv ]"
           sudo ctr i pull registry.hub.docker.com/library/redis:6.2.1
           sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
+          echo "[ record trace ]"
+          sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
+          # sudo bin/ctr record-trace --disable-network-isolation --time 15 registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv_trace
+          sudo ctr i ls
+          touch /tmp/trace_file
+          sudo ctr run -d --snapshotter=overlaybd --snapshotter-label containerd.io/snapshot/overlaybd/record-trace=yes --snapshotter-label containerd.io/snapshot/overlaybd/record-trace-path=/tmp/trace_file registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv demo
+          ls -l /tmp/
+          sleep 15s
+          sudo ctr t ls
+          sudo ctr t kill -s 9 demo && sleep 5s && sudo ctr t ls
+          sudo ctr c rm demo && sudo ctr c ls
+          sudo ctr i rm registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
+          sleep 5s
+          ls -l /tmp/
+          sudo cat /var/log/overlaybd.log

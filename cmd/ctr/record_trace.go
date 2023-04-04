@@ -17,24 +17,21 @@
 package main
 
 import (
-	"archive/tar"
-	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
+
+	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
+	"github.com/containerd/accelerated-container-image/pkg/label"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cmd/ctr/commands"
@@ -99,6 +96,7 @@ var (
 	maxCollectTraceTime time.Duration // In case there are back-store bugs and the trace file is not generated
 	maxTaskRunningTime  time.Duration // In case the task is not able to respond to SIGTERM
 	maxLeaseTime        time.Duration // After which the temporary resources shall be cleaned
+	emptyDesc           ocispec.Descriptor
 )
 
 var recordTraceCommand = cli.Command{
@@ -188,6 +186,19 @@ var recordTraceCommand = cli.Command{
 			return err
 		}
 
+		// Validate top layer. Get fs type
+		topLayer := imageManifest.Layers[len(imageManifest.Layers)-1]
+		if _, ok := topLayer.Annotations[label.OverlayBDBlobDigest]; !ok {
+			return errors.New("Must be an overlaybd image")
+		}
+		if topLayer.Annotations[label.AccelerationLayer] == "yes" {
+			return errors.New("Acceleration layer already exists")
+		}
+		fsType, ok := topLayer.Annotations[label.OverlayBDBlobFsType]
+		if !ok {
+			fsType = ""
+		}
+
 		// Create trace file
 		if err := os.Mkdir(cliCtx.String("working-dir"), 0644); err != nil && !os.IsExist(err) {
 			return errors.Wrapf(err, "failed to create working dir")
@@ -237,6 +248,7 @@ var recordTraceCommand = cli.Command{
 		}
 
 		// Create container and run task
+		fmt.Println("Create container")
 		container, err := createContainer(ctx, client, cliCtx, image, traceFile)
 		if err != nil {
 			return err
@@ -276,19 +288,22 @@ var recordTraceCommand = cli.Command{
 			fmt.Println("Task finished before timeout ...")
 		}
 
+		// Collect trace
 		if err = collectTrace(traceFile); err != nil {
 			return err
 		}
 
-		// Make a duplicated top layer and fill in trace
-		newTopLayer, err := duplicateTopLayerWithTrace(ctx, cs, imageManifest, traceFile)
+		// Load trace file into content, and generate an acceleration layer
+		loader := obdconv.NewContentLoaderWithFsType(true, fsType, obdconv.ContentFile{SrcFilePath: traceFile, DstFileName: "trace"})
+		accelLayer, err := loader.Load(ctx, cs)
 		if err != nil {
-			return err
+			return fmt.Errorf("loadCommittedSnapshotInContent failed: %v", err)
 		}
 
-		newManifestDesc, err := createImageWithNewTopLayer(ctx, cs, imageManifest, newTopLayer)
+		// Create image with the acceleration layer on top
+		newManifestDesc, err := createImageWithAccelLayer(ctx, cs, imageManifest, accelLayer)
 		if err != nil {
-			return fmt.Errorf("createImageWithNewTopLayer failed: %v", err)
+			return fmt.Errorf("createImageWithAccelLayer failed: %v", err)
 		}
 
 		imgName := cliCtx.Args().Get(1)
@@ -402,235 +417,25 @@ func collectTrace(traceFile string) error {
 	}
 }
 
-type countingWriter struct {
-	writer io.Writer
-	count  int64
-}
-
-func (w *countingWriter) Write(p []byte) (n int, err error) {
-	n, err = w.writer.Write(p)
-	w.count += int64(n)
-	return
-}
-
-func duplicateTopLayerWithTrace(ctx context.Context, cs content.Store, imgManifest ocispec.Manifest, traceFile string) (l layer, err error) {
-	configData, err := content.ReadBlob(ctx, cs, imgManifest.Config)
-	if err != nil {
-		return emptyLayer, err
-	}
-	config := ocispec.Image{}
-	if err := json.Unmarshal(configData, &config); err != nil {
-		return emptyLayer, err
-	}
-	diffID := config.RootFS.DiffIDs[len(config.RootFS.DiffIDs)-1]
-	contentDigest := ""
-
-	var walker content.WalkFunc = func(info content.Info) error {
-		for k, v := range info.Labels {
-			if contentDigest == "" && k == "containerd.io/uncompressed" && v == diffID.String() {
-				contentDigest = info.Digest.String()
-			}
-		}
-		return nil
-	}
-	if err = cs.Walk(ctx, walker); err != nil {
-		return emptyLayer, errors.Wrapf(err, "walk contents failed")
-	}
-
-	contentFilePath := containerdDir + v1ContentsDir + strings.Replace(contentDigest, ":", "/", 1)
-	tmpDirPath, err := os.MkdirTemp("", "top-layer")
-	if err != nil {
-		return emptyLayer, err
-	}
-	defer os.RemoveAll(tmpDirPath)
-
-	if err = exec.Command("tar", "-C", tmpDirPath, "-xf", contentFilePath).Run(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "extract content failed")
-	}
-
-	if err = copyFile(traceFile, path.Join(tmpDirPath, traceNameInLayer)); err != nil {
-		return emptyLayer, errors.Wrapf(err, "copy file failed")
-	}
-
-	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(uniqueObjectString()))
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
-	}
-	defer contentWriter.Close()
-
-	tarGzipDigester := digest.Canonical.Digester()
-	tarGzipCountingWriter := &countingWriter{writer: io.MultiWriter(contentWriter, tarGzipDigester.Hash())}
-	gzipWriter := gzip.NewWriter(tarGzipCountingWriter)
-
-	tarDigester := digest.Canonical.Digester()
-	tarWriter := tar.NewWriter(io.MultiWriter(gzipWriter, tarDigester.Hash()))
-
-	entries, err := os.ReadDir(tmpDirPath)
-	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to read dir")
-	}
-
-	for _, entry := range entries {
-		fileInfo, err := entry.Info()
-		if err != nil {
-			return emptyLayer, fmt.Errorf("failed to read file info for %s: %w", entry.Name(), err)
-		}
-		fd, err := os.Open(path.Join(tmpDirPath, fileInfo.Name()))
-		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to open file of %s", fileInfo.Name())
-		}
-
-		if err := tarWriter.WriteHeader(&tar.Header{
-			Name:     entry.Name(),
-			Mode:     0444,
-			Size:     fileInfo.Size(),
-			Typeflag: tar.TypeReg,
-			ModTime:  fileInfo.ModTime(),
-		}); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
-		}
-
-		if _, err := io.Copy(tarWriter, bufio.NewReader(fd)); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to copy IO")
-		}
-	}
-
-	if err = tarWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close tar writer")
-	}
-	if err = gzipWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close gzip writer")
-	}
-
-	annotationsCopy := make(map[string]string)
-	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
-		annotationsCopy[k] = v
-	}
-
-	if err := contentWriter.Commit(ctx, tarGzipCountingWriter.count, tarGzipDigester.Digest()); err != nil {
-		if !errdefs.IsAlreadyExists(err) {
-			return emptyLayer, errors.Wrapf(err, "failed to commit content")
-		}
-	}
-
-	l = layer{
-		desc: ocispec.Descriptor{
-			MediaType:   images.MediaTypeDockerSchema2LayerGzip,
-			Digest:      tarGzipDigester.Digest(),
-			Size:        tarGzipCountingWriter.count,
-			Annotations: annotationsCopy,
-		},
-		diffID: tarDigester.Digest(),
-	}
-	return l, nil
-}
-
-//func duplicateTopLayerWithTrace2(ctx context.Context, ss snapshots.Snapshotter, cs content.Store, imgManifest ocispec.Manifest, container containerd.Container, traceFile string) (l layer, err error) {
-//	containerInfo, err := container.Info(ctx)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	snapshotInfo, err := ss.Stat(ctx, containerInfo.SnapshotKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	parentSnapshotInfo, err := ss.Stat(ctx, snapshotInfo.Parent)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	grandParentKey := parentSnapshotInfo.Parent
-//	parentKey := snapshotInfo.Parent
-//
-//	lowerSnapshotKey := uniqueObjectString()
-//	lowerMounts, err := ss.View(ctx, lowerSnapshotKey, grandParentKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	defer func() {
-//		if nextErr := ss.Remove(ctx, lowerSnapshotKey); nextErr != nil && err == nil {
-//			err = errors.Wrapf(nextErr, "failed to remove lower snapshot")
-//		}
-//	}()
-//
-//	upperSnapshotKey := uniqueObjectString()
-//	upperMounts, err := ss.Prepare(ctx, upperSnapshotKey, parentKey)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	defer func() {
-//		if nextErr := ss.Remove(ctx, upperSnapshotKey); nextErr != nil && err == nil {
-//			err = errors.Wrapf(nextErr, "failed to remove upper snapshot")
-//		}
-//	}()
-//	if len(upperMounts) != 1 {
-//		return emptyLayer, errors.New("prepare upper returned unknown mounts")
-//	}
-//
-//	upperdir := ""
-//	for _, opt := range upperMounts[0].Options {
-//		if strings.HasPrefix(opt, "upperdir=") {
-//			upperdir = opt[len("upperdir="):]
-//			break
-//		}
-//	}
-//	if upperdir == "" {
-//		return emptyLayer, errors.New("cannot find upperdir, unable to fill in trace file")
-//	}
-//
-//	if err = copyFile(traceFile, path.Join(upperdir, traceNameInLayer)); err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	diffComparer := walking.NewWalkingDiff(cs)
-//	opt := diff.WithMediaType(ocispec.MediaTypeImageLayerGzip)
-//	contentDesc, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//	opt = diff.WithMediaType(ocispec.MediaTypeImageLayer)
-//	contentDescUncompressed, err := diffComparer.Compare(ctx, lowerMounts, upperMounts, opt)
-//	if err != nil {
-//		return emptyLayer, err
-//	}
-//
-//	annotationsCopy := make(map[string]string)
-//	for k, v := range imgManifest.Layers[len(imgManifest.Layers)-1].Annotations {
-//		annotationsCopy[k] = v
-//	}
-//
-//	// Remain media type the same as the old images
-//	contentDesc.MediaType = images.MediaTypeDockerSchema2LayerGzip
-//	contentDesc.Annotations = annotationsCopy
-//
-//	l = layer{
-//		desc:   contentDesc,
-//		diffID: contentDescUncompressed.Digest,
-//	}
-//	return l, nil
-//}
-
-func createImageWithNewTopLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l layer) (ocispec.Descriptor, error) {
+func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifest ocispec.Manifest, l obdconv.Layer) (ocispec.Descriptor, error) {
 	oldConfigData, err := content.ReadBlob(ctx, cs, oldManifest.Config)
 	if err != nil {
 		return emptyDesc, err
 	}
 
-	oldConfig := make(map[string]interface{})
+	var oldConfig ocispec.Image
 	if err := json.Unmarshal(oldConfigData, &oldConfig); err != nil {
 		return emptyDesc, err
 	}
 
-	rootfs, ok := oldConfig["rootfs"].(map[string]interface{})
-	if !ok {
-		return emptyDesc, errors.New("failed to parse rootfs")
-	}
-	diffIds, ok := rootfs["diff_ids"].([]interface{})
-	if !ok {
-		return emptyDesc, errors.New("failed to parse diff_ids")
-	}
-	diffIds[len(diffIds)-1] = l.diffID.String()
+	buildTime := time.Now()
+	var newHistory = []ocispec.History{{
+		Created:   &buildTime,
+		CreatedBy: "Acceleration Layer",
+	}}
+	oldConfig.History = append(newHistory, oldConfig.History...)
+	oldConfig.RootFS.DiffIDs = append(oldConfig.RootFS.DiffIDs, l.DiffID)
+	oldConfig.Created = &buildTime
 
 	newConfigData, err := json.MarshalIndent(oldConfig, "", "   ")
 	if err != nil {
@@ -650,7 +455,7 @@ func createImageWithNewTopLayer(ctx context.Context, cs content.Store, oldManife
 	newManifest := ocispec.Manifest{}
 	newManifest.SchemaVersion = oldManifest.SchemaVersion
 	newManifest.Config = newConfigDesc
-	newManifest.Layers = append(oldManifest.Layers[:len(oldManifest.Layers)-1], l.desc)
+	newManifest.Layers = append(oldManifest.Layers, l.Desc)
 
 	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
 	var newManifestV2 = struct {
@@ -771,8 +576,8 @@ func withNewSnapshot(key string, img containerd.Image, snapshotter, traceFile st
 			return errors.Wrapf(errdefs.ErrNotFound, "snapshotter %s was not found", snapshotter)
 		}
 		opt := snapshots.WithLabels(map[string]string{
-			"containerd.io/snapshot/overlaybd/record-trace":      "yes",
-			"containerd.io/snapshot/overlaybd/record-trace-path": traceFile,
+			label.RecordTrace:     "yes",
+			label.RecordTracePath: traceFile,
 		})
 		if _, err := s.Prepare(ctx, key, parent, opt); err != nil {
 			return err
@@ -835,30 +640,4 @@ func registerSignalsForTask(ctx context.Context, task containerd.Task, sigStop c
 // Go 1.14 started to use non-cooperative goroutine preemption, SIGURG should be ignored
 func canIgnoreSignal(s os.Signal) bool {
 	return s == unix.SIGURG
-}
-
-func copyFile(src, dst string) (err error) {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	if err = out.Truncate(0); err != nil {
-		return err
-	}
-	defer func() {
-		cerr := out.Close()
-		if err == nil {
-			err = cerr
-		}
-	}()
-	if _, err = io.Copy(out, in); err != nil {
-		return err
-	}
-	err = out.Sync()
-	return err
 }

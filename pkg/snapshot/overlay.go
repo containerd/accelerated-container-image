@@ -474,11 +474,11 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				parentIsAccelLayer := parentInfo.Labels[label.AccelerationLayer] == "yes"
 				needRecordTrace := info.Labels[label.RecordTrace] == "yes"
 				recordTracePath := info.Labels[label.RecordTracePath]
-				log.G(ctx).Debugf("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
+				log.G(ctx).Infof("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
 					parentIsAccelLayer, needRecordTrace, recordTracePath)
 
 				if parentIsAccelLayer {
-					log.G(ctx).Debugf("get accel-layer in parent (id: %s)", id)
+					log.G(ctx).Infof("get accel-layer in parent (id: %s)", id)
 					// If parent is already an acceleration layer, there is certainly no need to record trace.
 					// Just mark this layer to get accelerated (trace replay)
 					err = o.updateSpec(parentID, true, "")

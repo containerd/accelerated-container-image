@@ -42,14 +42,24 @@ After Recording and Pushing, users could pull and run the specific image somewhe
 
 The example usage of building a new image with trace layer would be as follows:
 ```
-ctr record-trace --time 20 <old_image> <local>
+bin/ctr rpull --download-blobs <old_image>
 
-ctr push <new_image> <local>
+bin/ctr record-trace --time 20 <old_image> <local>
+
+ctr i push <new_image> <local>
 ```
 
-Note the old image must be in overlaybd format. A temporary container will be created and do the recording. The recording progress will be terminated by either timeout, or user signals.
+Note the `old_image` must be in overlaybd format. A temporary container will be created and do the recording. The recording progress will be terminated by either timeout, or user signals.
 
 Due to current limitations, this command might ask you remove the old image locally, in order to prepare a clean environment for the recording.
+
+We also support triggering `record` and `replay` process by passing labels through `--snapshotter-label` when `run` container, which needing containerd/ctr 1.6+.
+```
+ctr run --snapshotter=overlaybd --snapshotter-label containerd.io/snapshot/overlaybd/record-trace=yes --snapshotter-label containerd.io/snapshot/overlaybd/record-trace-path=<trace_file> --rm -t <obd_image> demo
+```
+Setting label `containerd.io/snapshot/overlaybd/record-trace` to `yes` to enable this feature, setting label `containerd.io/snapshot/overlaybd/record-trace-path` to `<trace_file>` for tracing.
+
+Noting that, `<trace_file>` should exist before running. If `<trace_file>` is `0` sized, `record` process will be triggered, otherwise will be `replay`. `record` process will stop when overlaybd device stops, and `<trace_file>` will be generated.
 
 ## Performance
 
