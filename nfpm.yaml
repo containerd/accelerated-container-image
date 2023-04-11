@@ -5,7 +5,7 @@
 name: "overlaybd-snapshotter"
 arch: "amd64"
 platform: "linux"
-version: "v0.6.0"
+version: "v0.6.1"
 section: "default"
 priority: "extra"
 
