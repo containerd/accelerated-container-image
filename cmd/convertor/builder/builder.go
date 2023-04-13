@@ -18,8 +18,8 @@ package builder
 
 import (
 	"context"
+	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
 	"github.com/containerd/containerd/reference"
@@ -27,6 +27,7 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 type Builder interface {
@@ -95,112 +96,93 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 	alreadyConverted := make([]chan *v1.Descriptor, b.layers)
 	downloaded := make([]chan error, b.layers)
 	converted := make([]chan error, b.layers)
-	var uploaded sync.WaitGroup
-
-	errCh := make(chan error)
-	defer close(errCh)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// collect error and kill all builder goroutines
-	var retErr error
-	retErr = nil
-	go func() {
-		select {
-		case <-ctx.Done():
-		case retErr = <-errCh:
-		}
-		if retErr != nil {
-			cancel()
-		}
-	}()
+	// Errgroups will close the context after wait returns so the operations need their own
+	// derived context.
+	g, rctx := errgroup.WithContext(ctx)
 
 	for i := 0; i < b.layers; i++ {
-		downloaded[i] = make(chan error)
-		converted[i] = make(chan error)
-		alreadyConverted[i] = make(chan *v1.Descriptor)
+		idx := i
+		downloaded[idx] = make(chan error)
+		converted[idx] = make(chan error)
+		alreadyConverted[idx] = make(chan *v1.Descriptor)
 
 		// deduplication Goroutine
-		go func(idx int) {
+		g.Go(func() error {
 			defer close(alreadyConverted[idx])
 			// try to find chainID -> converted digest conversion if available
-			desc, err := b.engine.CheckForConvertedLayer(ctx, idx)
+			desc, err := b.engine.CheckForConvertedLayer(rctx, idx)
 			if err != nil {
 				// in the event of failure fallback to regular process
-				return
+				return nil
 			}
 			alreadyConverted[idx] <- &desc
-		}(i)
+			return nil
+		})
 
 		// download goroutine
-		go func(idx int) {
+		g.Go(func() error {
 			var cachedLayer *v1.Descriptor
 			select {
-			case <-ctx.Done():
+			case <-rctx.Done():
 			case cachedLayer = <-alreadyConverted[idx]:
 			}
 
 			defer close(downloaded[idx])
 			if cachedLayer != nil {
 				// download the converted layer
-				err := b.engine.DownloadConvertedLayer(ctx, idx, *cachedLayer)
+				err := b.engine.DownloadConvertedLayer(rctx, idx, *cachedLayer)
 				if err == nil {
 					logrus.Infof("downloaded cached layer %d", idx)
-					sendToChannel(ctx, downloaded[idx], nil)
-					return
+					return err
 				}
 				logrus.Infof("failed to download cached layer %d falling back to conversion : %s", idx, err)
 			}
 
-			if err := b.engine.DownloadLayer(ctx, idx); err != nil {
-				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to download layer %d", idx))
-				return
+			if err := b.engine.DownloadLayer(rctx, idx); err != nil {
+				return err
 			}
 			logrus.Infof("downloaded layer %d", idx)
-			sendToChannel(ctx, downloaded[idx], nil)
-		}(i)
+			sendToChannel(rctx, downloaded[idx], nil)
+			return nil
+		})
 
 		// convert goroutine
-		go func(idx int) {
+		g.Go(func() error {
 			defer close(converted[idx])
-			if waitForChannel(ctx, downloaded[idx]); ctx.Err() != nil {
-				return
+			if waitForChannel(rctx, downloaded[idx]); rctx.Err() != nil {
+				return rctx.Err()
 			}
 			if idx > 0 {
-				if waitForChannel(ctx, converted[idx-1]); ctx.Err() != nil {
-					return
+				if waitForChannel(rctx, converted[idx-1]); rctx.Err() != nil {
+					return rctx.Err()
 				}
 			}
-			if err := b.engine.BuildLayer(ctx, idx); err != nil {
-				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to convert layer %d", idx))
-				return
+			if err := b.engine.BuildLayer(rctx, idx); err != nil {
+				return fmt.Errorf("failed to convert layer %d: %w", idx, err)
 			}
 			logrus.Infof("layer %d converted", idx)
 			// send to upload(idx) and convert(idx+1) once each
-			sendToChannel(ctx, converted[idx], nil)
+			sendToChannel(rctx, converted[idx], nil)
 			if idx+1 < b.layers {
-				sendToChannel(ctx, converted[idx], nil)
+				sendToChannel(rctx, converted[idx], nil)
 			}
-		}(i)
+			return nil
+		})
 
-		// upload goroutine
-		uploaded.Add(1)
-		go func(idx int) {
-			defer uploaded.Done()
-			if waitForChannel(ctx, converted[idx]); ctx.Err() != nil {
-				return
+		g.Go(func() error {
+			if waitForChannel(rctx, converted[idx]); rctx.Err() != nil {
+				return rctx.Err()
 			}
-			if err := b.engine.UploadLayer(ctx, idx); err != nil {
-				sendToChannel(ctx, errCh, errors.Wrapf(err, "failed to upload layer %d", idx))
-				return
+			if err := b.engine.UploadLayer(rctx, idx); err != nil {
+				return fmt.Errorf("failed to upload layer %d: %w", idx, err)
 			}
-			b.engine.StoreConvertedLayerDetails(ctx, idx)
+			b.engine.StoreConvertedLayerDetails(rctx, idx)
 			logrus.Infof("layer %d uploaded", idx)
-		}(i)
+			return nil
+		})
 	}
-	uploaded.Wait()
-	if retErr != nil {
-		return retErr
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	if err := b.engine.UploadImage(ctx); err != nil {
