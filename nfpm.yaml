@@ -3,9 +3,9 @@
 # check https://nfpm.goreleaser.com/configuration for detailed usage
 #
 name: "overlaybd-snapshotter"
-arch: "amd64"
-platform: "linux"
-version: "v0.6.1"
+arch: ${GOARCH}
+platform: ${GOOS}
+version: ${SEMVER}
 section: "default"
 priority: "extra"
 

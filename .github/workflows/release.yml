@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+env:
+  GO_VERSION: "1.19"
+
+jobs:
+  build:
+    name: "Build Release"
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set Release Version
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+      shell: bash
+      run: |
+        releasever=${{ github.ref }}
+        releasever="${releasever#refs/tags/}"
+        echo "RELEASE_VERSION=${releasever}" >> $GITHUB_ENV
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 100
+    - name: Setup buildx instance
+      uses: docker/setup-buildx-action@v2
+      with:
+        use: true
+    - name: Build
+      shell: bash
+      run: |
+        RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+        if [[ -z ${RELEASE_VERSION} ]]; then
+          git fetch --tags
+          RELEASE_VERSION=$(git tag -l v* | tail -1)
+        fi
+        echo "RELEASE_VERSION=${RELEASE_VERSION}"
+        docker buildx build --build-arg RELEASE_VERSION=${RELEASE_VERSION} --build-arg GO_VERSION=${{ env.GO_VERSION }} -f .github/workflows/release/Dockerfile --platform=linux/amd64,linux/arm64 -o releases/ .
+        ls -l releases/*/
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: releases
+        path: releases/*/overlaybd-snapshotter*
+
+  dev-release:
+    name: "Development Release"
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Download builds and release notes
+        uses: actions/download-artifact@v3
+      - name: Display downloaded files
+        shell: bash
+        run: ls -l releases/*/
+      - name: Create Release
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "latest"
+          prerelease: true
+          title: "Development Build"
+          files: |
+            releases/*/overlaybd-snapshotter*
+
+  release:
+    name: "Tagged Release"
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Download builds and release notes
+        uses: actions/download-artifact@v3
+      - name: Display downloaded files
+        shell: bash
+        run: ls -l releases/*/
+      - name: Create Release
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            releases/*/overlaybd-snapshotter*
