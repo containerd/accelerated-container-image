@@ -29,6 +29,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
@@ -287,17 +288,7 @@ func (e *overlaybdBuilderEngine) getLayerDir(idx int) string {
 }
 
 func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-create")
-	dataPath := path.Join(dir, "writable_data")
-	indexPath := path.Join(dir, "writable_index")
-	os.RemoveAll(dataPath)
-	os.RemoveAll(indexPath)
-	out, err := exec.CommandContext(ctx, binpath, "-s",
-		dataPath, indexPath, "64").CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-create: %s", out)
-	}
-	return nil
+	return utils.Create(ctx, dir, "-s", "64")
 }
 
 func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {
@@ -314,7 +305,6 @@ func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {
 }
 
 func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string, idx int) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-commit")
 	var parentUUID string
 	if idx > 0 {
 		parentUUID = chainIDtoUUID(e.overlaybdLayers[idx-1].chainID)
@@ -323,20 +313,8 @@ func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string, idx int
 	}
 	curUUID := chainIDtoUUID(e.overlaybdLayers[idx].chainID)
 
-	opts := []string{
-		"-z", "-t",
-		path.Join(dir, "writable_data"),
-		path.Join(dir, "writable_index"),
-		path.Join(dir, commitFile),
-		"--uuid", curUUID,
-	}
-	if parentUUID != "" {
-		opts = append(opts, "--parent-uuid", parentUUID)
-	}
-
-	out, err := exec.CommandContext(ctx, binpath, opts...).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-commit: %s", out)
+	if err := utils.Commit(ctx, dir, dir, false, "-z", "-t", "--uuid", curUUID); err != nil {
+		return err
 	}
 	logrus.Infof("layer %d committed, uuid: %s, parent uuid: %s", idx, curUUID, parentUUID)
 	return nil

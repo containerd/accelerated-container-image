@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/log"
 	"github.com/containerd/containerd/mount"
@@ -653,47 +654,16 @@ func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *
 
 // prepareWritableOverlaybd
 func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string) error {
-
-	binpath := filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-create")
-
 	// TODO(fuweid): 256GB can be configurable?
-	args := []string{
-		o.overlaybdWritableDataPath(snID),
-		o.overlaybdWritableIndexPath(snID),
-		"64",
-	}
+	args := []string{"64"}
 	if o.writableLayerType == "sparse" {
 		args = append(args, "-s")
 	}
-	out, err := exec.CommandContext(ctx, binpath, args...).CombinedOutput()
-	if err != nil {
-		err := errors.Wrapf(err, "failed to prepare writable overlaybd: %s", out)
-		log.G(ctx).Errorln(err)
-		return err
-	}
-	return nil
+	return utils.Create(ctx, o.blockPath(snID), args...)
 }
 
-// commitWritableOverlaybd
-func (o *snapshotter) commitWritableOverlaybd(ctx context.Context, snID string, cfg ZFileConfig) (retErr error) {
-	binpath := filepath.Join(o.config.OverlayBDUtilBinDir, "overlaybd-commit")
-	opts := []string{
-		"-z",
-		o.overlaybdWritableDataPath(snID),
-		o.overlaybdWritableIndexPath(snID),
-		o.magicFilePath(snID),
-	}
-	if cfg.BlockSize != 0 {
-		opts = append(opts, "--bs", strconv.Itoa(cfg.BlockSize))
-	}
-	if cfg.Algorithm != "" {
-		opts = append(opts, "--algorithm", cfg.Algorithm)
-	}
-	out, err := exec.CommandContext(ctx, binpath, opts...).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to commit writable overlaybd: %s", out)
-	}
-	return nil
+func (o *snapshotter) sealWritableOverlaybd(ctx context.Context, snID string) (retErr error) {
+	return utils.Seal(ctx, o.blockPath(snID), o.upperPath(snID))
 }
 
 func (o *snapshotter) overlaybdTargetPath(id string) string {
