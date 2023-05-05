@@ -26,6 +26,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -225,17 +226,7 @@ func (e *fastOCIBuilderEngine) createIdentifier(idx int) error {
 }
 
 func (e *fastOCIBuilderEngine) create(ctx context.Context, dir string) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-create")
-	dataPath := path.Join(dir, "writable_data")
-	indexPath := path.Join(dir, "writable_index")
-	os.RemoveAll(dataPath)
-	os.RemoveAll(indexPath)
-	out, err := exec.CommandContext(ctx, binpath, "-s",
-		dataPath, indexPath, "64", "--fastoci").CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-create: %s", out)
-	}
-	return nil
+	return utils.Create(ctx, dir, "-s", "64", "--fastoci")
 }
 
 func (e *fastOCIBuilderEngine) apply(ctx context.Context, dir string) error {
@@ -253,16 +244,5 @@ func (e *fastOCIBuilderEngine) apply(ctx context.Context, dir string) error {
 }
 
 func (e *fastOCIBuilderEngine) commit(ctx context.Context, dir string) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-commit")
-
-	out, err := exec.CommandContext(ctx, binpath, "-z",
-		path.Join(dir, "writable_data"),
-		path.Join(dir, "writable_index"),
-		path.Join(dir, fsMetaFile),
-		"--fastoci",
-	).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-commit: %s", out)
-	}
-	return nil
+	return utils.Commit(ctx, dir, dir, false, "-z", "--fastoci")
 }

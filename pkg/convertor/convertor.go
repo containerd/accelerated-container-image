@@ -17,7 +17,6 @@
 package convertor
 
 import (
-	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -28,10 +27,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
+	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/archive"
@@ -95,8 +97,8 @@ func NewContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...Conte
 }
 
 type ContentFile struct {
-	SrcFilePath string
-	DstFileName string
+	SrcFilePath string // .../{ID}/fs/overlaybd.sealed
+	DstFileName string // overlaybd.commit
 }
 
 type contentLoader struct {
@@ -116,7 +118,6 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	srcPathList := make([]string, 0)
 	digester := digest.Canonical.Digester()
 	countWriter := &writeCountWrapper{w: io.MultiWriter(contentWriter, digester.Hash())}
-	tarWriter := tar.NewWriter(countWriter)
 
 	openedSrcFile := make([]*os.File, 0)
 	defer func() {
@@ -126,36 +127,26 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	}()
 
 	for _, loader := range loader.files {
-		srcPathList = append(srcPathList, loader.SrcFilePath)
-		srcFile, err := os.Open(loader.SrcFilePath)
+		commitPath := filepath.Dir(loader.SrcFilePath)
+		commitFile := filepath.Join(commitPath, "overlaybd.commit")
+		srcPathList = append(srcPathList, commitFile)
+
+		err := utils.Commit(ctx, commitPath, commitPath, true, "-z", "-t")
+		if err != nil {
+			return emptyLayer, errors.Wrapf(err, "failed to overlaybd-commit for sealed file")
+		}
+
+		srcFile, err := os.Open(commitFile)
 		if err != nil {
 			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
 		}
 		openedSrcFile = append(openedSrcFile, srcFile)
-
-		fi, err := os.Stat(loader.SrcFilePath)
+		_, err = io.Copy(countWriter, bufio.NewReader(srcFile))
 		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.SrcFilePath)
-		}
-
-		if err := tarWriter.WriteHeader(&tar.Header{
-			Name:     loader.DstFileName,
-			Mode:     0444,
-			Size:     fi.Size(),
-			Typeflag: tar.TypeReg,
-		}); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to write tar header")
-		}
-
-		if _, err := io.Copy(tarWriter, bufio.NewReader(srcFile)); err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to copy IO")
+			logrus.Errorf("failed to do io.Copy(), error: %v", err)
+			return emptyLayer, err
 		}
 	}
-
-	if err = tarWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close tar file")
-	}
-
 	labels := map[string]string{
 		labelBuildLayerFrom: strings.Join(srcPathList, ","),
 	}
@@ -516,7 +507,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 		opts = append(opts, snapshots.WithLabels(map[string]string{
 			label.ZFileConfig: string(cfgStr),
 		}))
-		lastParentID, err = c.applyOCIV1LayerInZfile(ctx, lastParentID, desc, opts, nil)
+		lastParentID, err = c.applyOCIV1LayerInObd(ctx, lastParentID, desc, opts, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -548,8 +539,8 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 	return commitLayers, nil
 }
 
-// applyOCIV1LayerInZfile applys the OCIv1 tarfile in zfile format and commit it.
-func (c *overlaybdConvertor) applyOCIV1LayerInZfile(
+// applyOCIV1LayerInObd applys the OCIv1 tarfile in overlaybd format and commit it.
+func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	ctx context.Context,
 	parentID string, // the ID of parent snapshot
 	desc ocispec.Descriptor, // the descriptor of layer

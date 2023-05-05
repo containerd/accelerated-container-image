@@ -18,7 +18,6 @@ package snapshot
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -507,7 +506,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			fsType, ok := obdInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
-				log.G(ctx).Warnf("cannot get fs type from label, %v", obdInfo.Labels)
+				log.G(ctx).Warnf("cannot get fs type from label, %v, using ext4", obdInfo.Labels)
 				fsType = "ext4"
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
@@ -686,28 +685,11 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
 			}
 
-			var zfileCfg ZFileConfig
-			if cfgStr, ok := oinfo.Labels[label.ZFileConfig]; ok {
-				if err := json.Unmarshal([]byte(cfgStr), &zfileCfg); err != nil {
-					return err
-				}
-			}
-
-			if err := o.commitWritableOverlaybd(ctx, id, zfileCfg); err != nil {
+			if err := o.sealWritableOverlaybd(ctx, id); err != nil {
 				return err
 			}
 
-			defer func() {
-				if retErr != nil {
-					return
-				}
-
-				// clean up the temporary data
-				os.Remove(o.overlaybdWritableDataPath(id))
-				os.Remove(o.overlaybdWritableIndexPath(id))
-			}()
-
-			opts = append(opts, snapshots.WithLabels(map[string]string{label.LocalOverlayBDPath: o.magicFilePath(id)}))
+			opts = append(opts, snapshots.WithLabels(map[string]string{label.LocalOverlayBDPath: o.overlaybdSealedFilePath(id)}))
 		}
 	}
 
@@ -732,7 +714,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			info.Labels = make(map[string]string)
 		}
 
-		info.Labels[label.LocalOverlayBDPath] = o.magicFilePath(id)
+		info.Labels[label.LocalOverlayBDPath] = o.overlaybdSealedFilePath(id)
 		info, err = storage.UpdateInfo(ctx, info, fmt.Sprintf("labels.%s", label.LocalOverlayBDPath))
 		if err != nil {
 			return err
@@ -1118,6 +1100,13 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	}
 	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
 
+	// check sealed data file
+	filePath = o.overlaybdSealedFilePath(id)
+	st, err = o.identifyLocalStorageType(filePath)
+	if err == nil {
+		return st, nil
+	}
+
 	// check writable data file
 	filePath = o.overlaybdWritableDataPath(id)
 	st, err = o.identifyLocalStorageType(filePath)
@@ -1151,8 +1140,16 @@ func (o *snapshotter) workPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "work")
 }
 
+func (o *snapshotter) blockPath(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "block")
+}
+
 func (o *snapshotter) magicFilePath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "fs", "overlaybd.commit")
+}
+
+func (o *snapshotter) overlaybdSealedFilePath(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "fs", "overlaybd.sealed")
 }
 
 func (o *snapshotter) overlaybdMountpoint(id string) string {
