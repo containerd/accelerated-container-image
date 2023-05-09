@@ -1,0 +1,14 @@
+# accelerated-container-image maintainers
+#
+# As a containerd sub-project, containerd maintainers are also included from https://github.com/containerd/project/blob/main/MAINTAINERS.
+# See https://github.com/containerd/project/blob/main/GOVERNANCE.md for description of maintainer role
+#
+# COMMITTERS
+# GitHub ID, Name, Email address
+"liulanzheng", "Lanzheng Liu", "lanzheng.liulz@alibaba-inc.com"
+"bigvan", "Yifan Yuan", "tuji.yyf@alibaba-inc.com"
+"yuchen0cc", "yuchen.cc", "yuchen.cc@alibaba-inc.com"
+
+# REVIEWERS
+# GitHub ID, Name, Email address
+"estebanreyl", "Esteban Rey", "esrey@microsoft.com"
