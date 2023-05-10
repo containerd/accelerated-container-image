@@ -1,0 +1,48 @@
+#  Copyright The Accelerated Container Image Authors
+
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+
+#      http://www.apache.org/licenses/LICENSE-2.0
+
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+name: Feature Request
+description: File a feature request
+labels: [enhancement]
+body:
+  - type: markdown
+    id: preface
+    attributes:
+      value: "Thank you for submitting new features for Accelerated Container Image."
+  - type: input
+    id: version
+    attributes:
+      label: "What is the version of your Accelerated Container Image"
+      description: "You can find the released versions from https://github.com/containerd/accelerated-container-image/releases."
+  - type: textarea
+    id: description
+    attributes:
+      label: "What would you like to be added?"
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Why is this needed for Accelerated Container Image?"
+      description: "Please describe your user story or scenario."
+    validations:
+      required: true
+  - type: checkboxes
+    id: idea
+    attributes:
+      label: "Are you willing to submit PRs to contribute to this feature?"
+      description: "This is absolutely not required, but we are happy to guide you in the contribution process
+        especially when you already have a good proposal or understanding of how to implement it. Join us at https://slack.cncf.io/ and choose #overlaybd channel."
+      options:
+        - label: Yes, I am willing to implement it.
