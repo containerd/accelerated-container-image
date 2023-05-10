@@ -86,6 +86,14 @@ const (
 	RemoteLabelVal = "remote snapshot"
 )
 
+// used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)
+var OverlayBDAnnotations = []string{
+	LocalOverlayBDPath,
+	OverlayBDBlobDigest,
+	OverlayBDBlobSize,
+	OverlayBDBlobFsType,
+}
+
 // interface
 const (
 	// SupportReadWriteMode is used to support writable block device
