@@ -296,12 +296,12 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 		log.G(ctx).Infof("snapshot R/W label: %s", mode)
 	}()
 	// check image type (OCIv1 or overlaybd)
-	if id != "" {
-		if _, err := o.loadBackingStoreConfig(id); err != nil {
-			log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
-			return roDir
-		}
-	} else {
+	if id != "" && !o.checkOverlaybdConfig(ctx, id) {
+		log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
+		return roDir
+	}
+	if id == "" {
+		// this is in image building
 		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
 	}
 	// overlaybd
@@ -676,7 +676,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	}
 
 	// if writable, should commit the data and make it immutable.
-	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD {
+	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD && o.checkOverlaybdConfig(ctx, id) {
 		// TODO(fuweid): how to rollback?
 		if oinfo.Labels[label.AccelerationLayer] == "yes" {
 			log.G(ctx).Info("Commit accel-layer requires no writable_data")
@@ -1126,6 +1126,15 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	log.G(ctx).Debugf("storageType(sn: %s): %d", id, st)
 
 	return st, err
+}
+
+// check if config.v1.json exist to determine whether overlaybd format
+func (o *snapshotter) checkOverlaybdConfig(ctx context.Context, id string) bool {
+	if _, err := o.loadBackingStoreConfig(id); err != nil {
+		log.G(ctx).Debugf("[%s] is not an overlaybd layer.", id)
+		return false
+	}
+	return true
 }
 
 func (o *snapshotter) snPath(id string) string {
