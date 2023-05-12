@@ -527,6 +527,11 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			// do nothing
 		}
 	}
+	if _, writableBD := info.Labels[label.SupportReadWriteMode]; stype == storageTypeNormal && writableBD {
+		// if is not overlaybd writable layer, delete label before commit
+		delete(info.Labels, label.SupportReadWriteMode)
+		storage.UpdateInfo(ctx, info)
+	}
 
 	rollback = false
 	if err := t.Commit(); err != nil {
