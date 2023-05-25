@@ -192,7 +192,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	if err != nil {
 		log.G(ctx).Errorf("read device name failed: %s, err: %v", o.overlaybdBackstoreMarkFile(snID), err)
 	}
-	if writeType != rwDev {
+	if writeType != RwDev {
 		mountPoint := o.overlaybdMountpoint(snID)
 		log.G(ctx).Debugf("check overlaybd mountpoint is in use: %s", mountPoint)
 		busy, err := o.checkOverlaybdInUse(ctx, mountPoint)
@@ -394,7 +394,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 			}
 
 			var mflag uintptr = unix.MS_RDONLY
-			if writable != roDir {
+			if writable != RoDir {
 				mflag = 0
 			}
 
@@ -426,7 +426,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 				}
 			}
 
-			if writable != rwDev {
+			if writable != RwDev {
 				if fstype != "ntfs" {
 					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, data, writable)
 					//if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
@@ -444,7 +444,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					}
 				} else {
 					args := []string{"-t", fstype}
-					if writable == roDir {
+					if writable == RoDir {
 						args = append(args, "-r")
 					}
 					if data != "" {

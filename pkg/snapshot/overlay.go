@@ -61,9 +61,9 @@ const (
 )
 
 const (
-	roDir = "overlayfs" // overlayfs as rootfs. upper + lower (overlaybd)
-	rwDir = "dir"       // mount overlaybd as rootfs
-	rwDev = "dev"       // use overlaybd directly
+	RoDir = "overlayfs" // overlayfs as rootfs. upper + lower (overlaybd)
+	RwDir = "dir"       // mount overlaybd as rootfs
+	RwDev = "dev"       // use overlaybd directly
 )
 
 type BootConfig struct {
@@ -299,7 +299,7 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	if id != "" {
 		if _, err := o.loadBackingStoreConfig(id); err != nil {
 			log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
-			return roDir
+			return RoDir
 		}
 	} else {
 		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
@@ -307,12 +307,12 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	// overlaybd
 	rwMode := func(m string) string {
 		if m == "dir" {
-			return rwDir
+			return RwDir
 		}
 		if m == "dev" {
-			return rwDev
+			return RwDev
 		}
-		return roDir
+		return RoDir
 	}
 	m, ok := info.Labels[label.SupportReadWriteMode]
 	if !ok {
@@ -455,7 +455,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if _, ok := info.Labels[label.TargetSnapshotRef]; !ok {
 		log.G(ctx).Infof("Preparing rootfs. writeType: %s", writeType)
-		if writeType != roDir {
+		if writeType != RoDir {
 			stype = storageTypeLocalBlock
 			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
 				log.G(ctx).Errorln(err.Error())
@@ -481,7 +481,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 					// If parent is already an acceleration layer, there is certainly no need to record trace.
 					// Just mark this layer to get accelerated (trace replay)
 					err = o.updateSpec(parentID, true, "")
-					if writeType != roDir {
+					if writeType != RoDir {
 						o.updateSpec(id, true, "")
 					}
 				} else if needRecordTrace && recordTracePath != "" {
@@ -497,7 +497,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 			var obdID string
 			var obdInfo *snapshots.Info
-			if writeType != roDir {
+			if writeType != RoDir {
 				obdID = id
 				obdInfo = &info
 			} else {
@@ -517,7 +517,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 
 			defer func() {
-				if retErr != nil && writeType == rwDir { // It's unnecessary to umount overlay block device if writeType == writeTypeRawDev
+				if retErr != nil && writeType == RwDir { // It's unnecessary to umount overlay block device if writeType == writeTypeRawDev
 					if rerr := mount.Unmount(o.overlaybdMountpoint(obdID), 0); rerr != nil {
 						log.G(ctx).WithError(rerr).Warnf("failed to umount writable block %s", o.overlaybdMountpoint(obdID))
 					}
@@ -621,7 +621,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		}
 
 		writeType := o.getWritableType(ctx, s.ID, info)
-		if writeType != roDir {
+		if writeType != RoDir {
 			return o.basedOnBlockDeviceMount(ctx, s, writeType)
 		}
 
@@ -640,10 +640,10 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 			if !ok {
 				fsType = "ext4"
 			}
-			if err := o.attachAndMountBlockDevice(ctx, parentID, roDir, fsType, false); err != nil {
+			if err := o.attachAndMountBlockDevice(ctx, parentID, RoDir, fsType, false); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
 			}
-			return o.basedOnBlockDeviceMount(ctx, s, roDir)
+			return o.basedOnBlockDeviceMount(ctx, s, RoDir)
 		}
 	}
 	return o.normalOverlayMount(s), nil
@@ -889,11 +889,11 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		}
 	}()
 	rwflag := "rw"
-	if s.Kind == snapshots.KindView && (writeType == rwflag || writeType == rwDev) {
+	if s.Kind == snapshots.KindView && (writeType == rwflag || writeType == RwDev) {
 		log.G(ctx).Infof("snapshot.Kind == View, reset overlaybd as READ-ONLY.")
 		rwflag = "ro"
 	}
-	if writeType == rwDir {
+	if writeType == RwDir {
 		return []mount.Mount{
 			{
 				Source: o.overlaybdMountpoint(s.ID),
@@ -905,7 +905,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 			},
 		}, nil
 	}
-	if writeType == rwDev {
+	if writeType == RwDev {
 		devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(s.ID))
 		if err != nil {
 			return nil, err
