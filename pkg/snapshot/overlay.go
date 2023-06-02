@@ -772,6 +772,16 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	}
 
 	rollback := true
+	defer func() {
+		if rollback {
+			if rerr := t.Rollback(); rerr != nil {
+				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
+			}
+		} else {
+			t.Commit()
+		}
+	}()
+
 	id, info, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
 		return err
@@ -810,14 +820,6 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		}
 	}
 
-	defer func() {
-		if err != nil && rollback {
-			if rerr := t.Rollback(); rerr != nil {
-				log.G(ctx).WithError(rerr).Warn("failed to rollback transaction")
-			}
-		}
-	}()
-
 	_, _, err = storage.Remove(ctx, key)
 	if err != nil {
 		return errors.Wrap(err, "failed to remove")
@@ -828,7 +830,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	}
 
 	rollback = false
-	return t.Commit()
+	return nil
 }
 
 // Walk the snapshots.
