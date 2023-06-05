@@ -428,19 +428,17 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 			if writable != RwDev {
 				if fstype != "ntfs" {
+					if err := os.WriteFile(path.Join("/sys/block", dev.Name(), "device", "timeout"),
+						([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
+						lastErr = errors.Wrapf(err, "failed to set timeout for %s", device)
+						time.Sleep(10 * time.Millisecond)
+						break // retry
+					}
 					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, data, writable)
-					//if err := unix.Mount(device, mountPoint, "ext4", mflag, "discard"); err != nil {
 					if err := unix.Mount(device, mountPoint, fstype, mflag, data); err != nil {
 						lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
 						time.Sleep(10 * time.Millisecond)
 						break // retry
-					}
-					// fixed by fuweid
-					err = os.WriteFile(
-						path.Join("/sys/block", dev.Name(), "device", "timeout"),
-						([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666)
-					if err != nil {
-						return errors.Wrapf(err, "failed to update timeout")
 					}
 				} else {
 					args := []string{"-t", fstype}
@@ -456,7 +454,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					if err != nil {
 						lastErr = errors.Wrapf(err, "failed to mount for dev %s: %s", device, out)
 						time.Sleep(10 * time.Millisecond)
-						break
+						break // retry
 					}
 				}
 			}
