@@ -115,7 +115,11 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 				// in the event of failure fallback to regular process
 				return nil
 			}
-			alreadyConverted[idx] <- &desc
+			select {
+			case <-rctx.Done():
+			case alreadyConverted[idx] <- &desc:
+			}
+
 			return nil
 		})
 
@@ -133,7 +137,8 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 				err := b.engine.DownloadConvertedLayer(rctx, idx, *cachedLayer)
 				if err == nil {
 					logrus.Infof("downloaded cached layer %d", idx)
-					return err
+					sendToChannel(rctx, downloaded[idx], nil)
+					return nil
 				}
 				logrus.Infof("failed to download cached layer %d falling back to conversion : %s", idx, err)
 			}
