@@ -376,27 +376,21 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 		for _, dev := range devDirs {
 			device := fmt.Sprintf("/dev/%s", dev.Name())
-			var mountPoint = o.overlaybdMountpoint(snID)
+
+			if err := os.WriteFile(path.Join("/sys/block", dev.Name(), "device", "timeout"),
+				([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
+				lastErr = errors.Wrapf(err, "failed to set timeout for %s", device)
+				time.Sleep(10 * time.Millisecond)
+				break // retry
+			}
+			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
+			if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
+				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snID)
+			}
+			log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
 
 			options := strings.Split(fsType, ";")
 			fstype := options[0]
-			data := ""
-			if len(options) > 1 {
-				data = options[1]
-			} else {
-				switch fstype {
-				case "ext4":
-					data = "discard"
-				case "xfs":
-					data = "nouuid,discard"
-				default:
-				}
-			}
-
-			var mflag uintptr = unix.MS_RDONLY
-			if writable != RoDir {
-				mflag = 0
-			}
 
 			if mkfs {
 				args := []string{"-t", fstype}
@@ -426,16 +420,28 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 				}
 			}
 
+			// mount device
 			if writable != RwDev {
-				if fstype != "ntfs" {
-					if err := os.WriteFile(path.Join("/sys/block", dev.Name(), "device", "timeout"),
-						([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
-						lastErr = errors.Wrapf(err, "failed to set timeout for %s", device)
-						time.Sleep(10 * time.Millisecond)
-						break // retry
+				var mountPoint = o.overlaybdMountpoint(snID)
+				mountOpts := ""
+				if len(options) > 1 {
+					mountOpts = options[1]
+				} else {
+					switch fstype {
+					case "ext4":
+						mountOpts = "discard"
+					case "xfs":
+						mountOpts = "nouuid,discard"
+					default:
 					}
-					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, data, writable)
-					if err := unix.Mount(device, mountPoint, fstype, mflag, data); err != nil {
+				}
+				if fstype != "ntfs" {
+					var mountFlag uintptr = unix.MS_RDONLY
+					if writable != RoDir {
+						mountFlag = 0
+					}
+					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, mountOpts, writable)
+					if err := unix.Mount(device, mountPoint, fstype, mountFlag, mountOpts); err != nil {
 						lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
 						time.Sleep(10 * time.Millisecond)
 						break // retry
@@ -445,8 +451,8 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					if writable == RoDir {
 						args = append(args, "-r")
 					}
-					if data != "" {
-						args = append(args, "-o", data)
+					if mountOpts != "" {
+						args = append(args, "-o", mountOpts)
 					}
 					args = append(args, device, mountPoint)
 					log.G(ctx).Infof("fs type: %s, mount options: %v", fstype, args)
@@ -458,12 +464,6 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					}
 				}
 			}
-
-			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
-			if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
-				return errors.Wrapf(err, "failed to create backstore mark file of snapshot %s", snID)
-			}
-			log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
 			return nil
 		}
 	}
