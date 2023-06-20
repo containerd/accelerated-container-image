@@ -244,5 +244,8 @@ func (e *fastOCIBuilderEngine) apply(ctx context.Context, dir string) error {
 }
 
 func (e *fastOCIBuilderEngine) commit(ctx context.Context, dir string) error {
-	return utils.Commit(ctx, dir, dir, false, "-z", "--fastoci")
+	if err := utils.Commit(ctx, dir, dir, false, "-z", "--fastoci"); err != nil {
+		return err
+	}
+	return os.Rename(path.Join(dir, commitFile), path.Join(dir, fsMetaFile))
 }
