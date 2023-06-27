@@ -33,6 +33,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
+	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd"
@@ -163,6 +164,7 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 			Digest:    digester.Digest(),
 			Size:      countWriter.c,
 			Annotations: map[string]string{
+				label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 				label.OverlayBDBlobDigest: digester.Digest().String(),
 				label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
 			},
