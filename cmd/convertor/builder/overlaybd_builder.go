@@ -312,8 +312,11 @@ func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string, idx int
 		parentUUID = ""
 	}
 	curUUID := chainIDtoUUID(e.overlaybdLayers[idx].chainID)
-
-	if err := utils.Commit(ctx, dir, dir, false, "-z", "-t", "--uuid", curUUID); err != nil {
+	opts := []string{"-z", "-t", "--uuid", curUUID}
+	if parentUUID != "" {
+		opts = append(opts, "--parent-uuid", parentUUID)
+	}
+	if err := utils.Commit(ctx, dir, dir, false, opts...); err != nil {
 		return err
 	}
 	logrus.Infof("layer %d committed, uuid: %s, parent uuid: %s", idx, curUUID, parentUUID)
