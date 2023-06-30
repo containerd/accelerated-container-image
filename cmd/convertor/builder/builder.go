@@ -54,11 +54,10 @@ type overlaybdBuilder struct {
 func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, error) {
 	resolver := docker.NewResolver(docker.ResolverOptions{
 		Credentials: func(s string) (string, string, error) {
-			if opt.Auth == "" {
-				return "", "", nil
+			if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
+				return opt.Auth[0:i], opt.Auth[i+1:], nil
 			}
-			authSplit := strings.Split(opt.Auth, ":")
-			return authSplit[0], authSplit[1], nil
+			return "", "", nil
 		},
 		PlainHTTP: opt.PlainHTTP,
 	})
