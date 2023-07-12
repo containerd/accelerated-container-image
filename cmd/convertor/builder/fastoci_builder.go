@@ -27,6 +27,7 @@ import (
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
+	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/containerd/containerd/archive/compression"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
@@ -136,6 +137,7 @@ func (e *fastOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
 	}
 	desc.MediaType = e.mediaTypeImageLayerGzip()
 	desc.Annotations = map[string]string{
+		label.OverlayBDVersion:    version.FastOCIVersionNumber,
 		label.OverlayBDBlobDigest: desc.Digest.String(),
 		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
 		label.FastOCIDigest:       e.manifest.Layers[idx].Digest.String(),
@@ -177,6 +179,7 @@ func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
 		Digest:    "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
 		Size:      4737695,
 		Annotations: map[string]string{
+			label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 			label.OverlayBDBlobDigest: "sha256:c3a417552a6cf9ffa959b541850bab7d7f08f4255425bf8b48c85f7b36b378d9",
 			label.OverlayBDBlobSize:   "4737695",
 		},

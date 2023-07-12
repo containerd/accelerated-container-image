@@ -30,6 +30,7 @@ import (
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
+	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
@@ -131,6 +132,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	}
 	desc.MediaType = e.mediaTypeImageLayer()
 	desc.Annotations = map[string]string{
+		label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 		label.OverlayBDBlobDigest: desc.Digest.String(),
 		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
 	}
@@ -271,6 +273,7 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 		Digest:    digester.Digest(),
 		Size:      countWriter.c,
 		Annotations: map[string]string{
+			label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 			label.OverlayBDBlobDigest: digester.Digest().String(),
 			label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
 		},

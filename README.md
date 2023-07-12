@@ -82,6 +82,15 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
+## Release Version Support
+
+There will be an annotation `containerd.io/snapshot/overlaybd/version` in the manifest of the converted image to specify the format version, following is the
+overlaybd release version required by them.
+
+* `0.1.0`: for now, all release versions of overlaybd support this.
+
+* `0.1.0-fastoci`: overlaybd >= v0.6.10
+
 ## Overview
 
 With OCI image spec, an image layer blob is saved as a tarball on the registry, describing the [changeset](https://github.com/opencontainers/image-spec/blob/v1.0.1/layer.md#change-types) based on it's previous layer. However, tarball is not designed to be seekable and random access is not supported. Complete downloading of all blobs is always necessary before bringing up a container.

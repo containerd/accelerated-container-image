@@ -84,6 +84,9 @@ const (
 
 	RemoteLabel    = "containerd.io/snapshot/remote"
 	RemoteLabelVal = "remote snapshot"
+
+	// OverlayBDVersion is the version number of overlaybd blob
+	OverlayBDVersion = "containerd.io/snapshot/overlaybd/version"
 )
 
 // used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)
