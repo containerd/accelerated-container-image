@@ -73,11 +73,13 @@ const (
 	// CRIImageRef is the image-ref from cri
 	CRIImageRef = "containerd.io/snapshot/cri.image-ref"
 
-	// FastOCIDigest is the index annotation key for image layer digest
-	FastOCIDigest = "containerd.io/snapshot/overlaybd/fastoci/target-digest"
+	// TurboOCIDigest is the index annotation key for image layer digest
+	FastOCIDigest  = "containerd.io/snapshot/overlaybd/fastoci/target-digest" // legacy
+	TurboOCIDigest = "containerd.io/snapshot/overlaybd/turbo-oci/target-digest"
 
-	// FastOCIMediaType is the index annotation key for image layer media type
-	FastOCIMediaType = "containerd.io/snapshot/overlaybd/fastoci/target-media-type"
+	// TurboOCIMediaType is the index annotation key for image layer media type
+	FastOCIMediaType  = "containerd.io/snapshot/overlaybd/fastoci/target-media-type" // legacy
+	TurboOCIMediaType = "containerd.io/snapshot/overlaybd/turbo-oci/target-media-type"
 
 	// DownloadRemoteBlob is a label for download remote blob
 	DownloadRemoteBlob = "containerd.io/snapshot/overlaybd/download-remote-blob"

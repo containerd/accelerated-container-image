@@ -44,20 +44,20 @@ const (
 	fsMetaFile = "ext4.fs.meta"
 
 	// foci index layer (gzip)
-	fociLayerTar = "foci.tar.gz"
+	tociLayerTar = "turboOCIv1.tar.gz"
 
-	// fociIdentifier is an empty file just used as a identifier
-	fociIdentifier = ".fastoci.overlaybd"
+	// tociIdentifier is an empty file just used as a identifier
+	tociIdentifier = ".turbo.ociv1"
 )
 
-type fastOCIBuilderEngine struct {
+type turboOCIBuilderEngine struct {
 	*builderEngineBase
 	overlaybdConfig *snapshot.OverlayBDBSConfig
-	fociLayers      []specs.Descriptor
+	tociLayers      []specs.Descriptor
 	isGzip          []bool
 }
 
-func NewFastOCIBuilderEngine(base *builderEngineBase) builderEngine {
+func NewTurboOCIBuilderEngine(base *builderEngineBase) builderEngine {
 	config := &snapshot.OverlayBDBSConfig{
 		Lowers:     []snapshot.OverlayBDBSConfigLower{},
 		ResultFile: "",
@@ -65,15 +65,15 @@ func NewFastOCIBuilderEngine(base *builderEngineBase) builderEngine {
 	config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
 		File: overlaybdBaseLayer,
 	})
-	return &fastOCIBuilderEngine{
+	return &turboOCIBuilderEngine{
 		builderEngineBase: base,
 		overlaybdConfig:   config,
-		fociLayers:        make([]specs.Descriptor, len(base.manifest.Layers)),
+		tociLayers:        make([]specs.Descriptor, len(base.manifest.Layers)),
 		isGzip:            make([]bool, len(base.manifest.Layers)),
 	}
 }
 
-func (e *fastOCIBuilderEngine) DownloadLayer(ctx context.Context, idx int) error {
+func (e *turboOCIBuilderEngine) DownloadLayer(ctx context.Context, idx int) error {
 	var err error
 	if e.isGzip[idx], err = e.isGzipLayer(ctx, idx); err != nil {
 		return err
@@ -84,7 +84,7 @@ func (e *fastOCIBuilderEngine) DownloadLayer(ctx context.Context, idx int) error
 	return downloadLayer(ctx, e.fetcher, targetFile, desc, false)
 }
 
-func (e *fastOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
+func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	layerDir := e.getLayerDir(idx)
 	if err := e.create(ctx, layerDir); err != nil {
 		return err
@@ -104,19 +104,19 @@ func (e *fastOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 		return err
 	}
 	if err := e.createIdentifier(idx); err != nil {
-		return errors.Wrapf(err, "failed to create identifier %q", fociIdentifier)
+		return errors.Wrapf(err, "failed to create identifier %q", tociIdentifier)
 	}
 	files := []string{
 		path.Join(layerDir, fsMetaFile),
-		path.Join(layerDir, fociIdentifier),
+		path.Join(layerDir, tociIdentifier),
 	}
 	gzipIndexPath := ""
 	if e.isGzip[idx] {
 		gzipIndexPath = path.Join(layerDir, gzipMetaFile)
 		files = append(files, gzipIndexPath)
 	}
-	if err := buildArchiveFromFiles(ctx, path.Join(layerDir, fociLayerTar), compression.Gzip, files...); err != nil {
-		return errors.Wrapf(err, "failed to create foci archive for layer %d", idx)
+	if err := buildArchiveFromFiles(ctx, path.Join(layerDir, tociLayerTar), compression.Gzip, files...); err != nil {
+		return errors.Wrapf(err, "failed to create turboOCIv1 archive for layer %d", idx)
 	}
 	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, snapshot.OverlayBDBSConfigLower{
 		TargetFile:   path.Join(layerDir, "layer.tar"),
@@ -129,18 +129,18 @@ func (e *fastOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	return nil
 }
 
-func (e *fastOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
+func (e *turboOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
 	layerDir := e.getLayerDir(idx)
-	desc, err := getFileDesc(path.Join(layerDir, fociLayerTar), false)
+	desc, err := getFileDesc(path.Join(layerDir, tociLayerTar), false)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get descriptor for layer %d", idx)
 	}
 	desc.MediaType = e.mediaTypeImageLayerGzip()
 	desc.Annotations = map[string]string{
-		label.OverlayBDVersion:    version.FastOCIVersionNumber,
+		label.OverlayBDVersion:    version.TurboOCIVersionNumber,
 		label.OverlayBDBlobDigest: desc.Digest.String(),
 		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
-		label.FastOCIDigest:       e.manifest.Layers[idx].Digest.String(),
+		label.TurboOCIDigest:      e.manifest.Layers[idx].Digest.String(),
 	}
 	targetMediaType := ""
 	if images.IsDockerType(e.manifest.Layers[idx].MediaType) {
@@ -156,22 +156,22 @@ func (e *fastOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error {
 			targetMediaType = specs.MediaTypeImageLayer
 		}
 	}
-	desc.Annotations[label.FastOCIMediaType] = targetMediaType
-	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, fociLayerTar), desc); err != nil {
+	desc.Annotations[label.TurboOCIMediaType] = targetMediaType
+	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, tociLayerTar), desc); err != nil {
 		return errors.Wrapf(err, "failed to upload layer %d", idx)
 	}
-	e.fociLayers[idx] = desc
+	e.tociLayers[idx] = desc
 	return nil
 }
 
-func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
+func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) error {
 	for idx := range e.manifest.Layers {
 		layerDir := e.getLayerDir(idx)
-		uncompress, err := getFileDesc(path.Join(layerDir, fociLayerTar), true)
+		uncompress, err := getFileDesc(path.Join(layerDir, tociLayerTar), true)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get uncompressed descriptor for layer %d", idx)
 		}
-		e.manifest.Layers[idx] = e.fociLayers[idx]
+		e.manifest.Layers[idx] = e.tociLayers[idx]
 		e.config.RootFS.DiffIDs[idx] = uncompress.Digest
 	}
 	baseDesc := specs.Descriptor{
@@ -196,43 +196,43 @@ func (e *fastOCIBuilderEngine) UploadImage(ctx context.Context) error {
 // being reproducible at the moment which can lead to occasional bugs.
 
 // CheckForConvertedLayer TODO
-func (e *fastOCIBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {
+func (e *turboOCIBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {
 	return specs.Descriptor{}, errdefs.ErrNotFound
 }
 
 // StoreConvertedLayerDetails TODO
-func (e *fastOCIBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
+func (e *turboOCIBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
 	return nil
 }
 
 // DownloadConvertedLayer TODO
-func (e *fastOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
+func (e *turboOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
 	return errdefs.ErrNotImplemented
 }
 
-func (e *fastOCIBuilderEngine) Cleanup() {
+func (e *turboOCIBuilderEngine) Cleanup() {
 	os.RemoveAll(e.workDir)
 }
 
-func (e *fastOCIBuilderEngine) getLayerDir(idx int) string {
+func (e *turboOCIBuilderEngine) getLayerDir(idx int) string {
 	return path.Join(e.workDir, fmt.Sprintf("%04d_", idx)+e.manifest.Layers[idx].Digest.String())
 }
 
-func (e *fastOCIBuilderEngine) createIdentifier(idx int) error {
-	targetFile := path.Join(e.getLayerDir(idx), fociIdentifier)
+func (e *turboOCIBuilderEngine) createIdentifier(idx int) error {
+	targetFile := path.Join(e.getLayerDir(idx), tociIdentifier)
 	file, err := os.Create(targetFile)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create identifier file %q", fociIdentifier)
+		return errors.Wrapf(err, "failed to create identifier file %q", tociIdentifier)
 	}
 	defer file.Close()
 	return nil
 }
 
-func (e *fastOCIBuilderEngine) create(ctx context.Context, dir string) error {
-	return utils.Create(ctx, dir, "-s", "64", "--fastoci")
+func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string) error {
+	return utils.Create(ctx, dir, "-s", "64", "--turboOCI")
 }
 
-func (e *fastOCIBuilderEngine) apply(ctx context.Context, dir string) error {
+func (e *turboOCIBuilderEngine) apply(ctx context.Context, dir string) error {
 	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-apply")
 
 	out, err := exec.CommandContext(ctx, binpath,
@@ -246,7 +246,7 @@ func (e *fastOCIBuilderEngine) apply(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (e *fastOCIBuilderEngine) commit(ctx context.Context, dir string) error {
+func (e *turboOCIBuilderEngine) commit(ctx context.Context, dir string) error {
 	if err := utils.Commit(ctx, dir, dir, false, "-z", "--fastoci"); err != nil {
 		return err
 	}
