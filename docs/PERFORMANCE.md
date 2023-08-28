@@ -39,4 +39,4 @@ Conclusion: Overlaybd format outperforms OCI tar format at startup speed.
 
 Note: The [prefetch](https://github.com/containerd/accelerated-container-image/blob/main/docs/trace-prefetch.md) feature is enabled.
 
-Note: [Here](./FASTOCI.md) is the FastOCI images' performance compares with OverlayBD and OCI images.
+Note: [Here](./TURBO_OCI.md) is the TurboOCI images' performance compares with OverlayBD and OCI images.
