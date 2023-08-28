@@ -20,9 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
-	"path/filepath"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
@@ -233,17 +231,7 @@ func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string) error {
 }
 
 func (e *turboOCIBuilderEngine) apply(ctx context.Context, dir string) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-apply")
-
-	out, err := exec.CommandContext(ctx, binpath,
-		path.Join(dir, "layer.tar"),
-		path.Join(dir, "config.json"),
-		"--gz_index_path", path.Join(dir, gzipMetaFile),
-	).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-apply: %s", out)
-	}
-	return nil
+	return utils.ApplyTurboOCI(ctx, dir, gzipMetaFile)
 }
 
 func (e *turboOCIBuilderEngine) commit(ctx context.Context, dir string) error {

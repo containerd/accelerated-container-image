@@ -54,7 +54,7 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     It is a customized buildkit for overlaybd images. It fetches the data of base images on demand without pulling whole data and uses overlaybd writable layer to build new layers.
 
-* [overlaybd - turboOCIv1](docs/TurboOCIv1.md)
+* [overlaybd - turboOCIv1](docs/TURBO_OCI.md)
 
     It is an overlaybd-based remote image format which enables the original OCI image to be a remote one without conversion. It is similar to [SOCI](https://github.com/awslabs/soci-snapshotter), but provides block device interface, which has advantages than FUSE-based formats in performance and stability.
 
@@ -78,7 +78,7 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 * See how to use Prometheus to monitor metrics like latency/error count of snapshotter GRPC APIs at [PROMETHEUS](docs/PROMETHEUS.md).
 
-* See how to use TurboOCIv1 at [TurboOCIv1](docs/TurboOCIv1.md).
+* See how to use TurboOCIv1 at [TurboOCIv1](docs/TURBO_OCI.md).
 
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 

@@ -23,9 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
-	"path/filepath"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot"
@@ -295,16 +293,7 @@ func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string) error {
 }
 
 func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {
-	binpath := filepath.Join("/opt/overlaybd/bin", "overlaybd-apply")
-
-	out, err := exec.CommandContext(ctx, binpath,
-		path.Join(dir, "layer.tar"),
-		path.Join(dir, "config.json"),
-	).CombinedOutput()
-	if err != nil {
-		return errors.Wrapf(err, "failed to overlaybd-apply: %s", out)
-	}
-	return nil
+	return utils.ApplyOverlaybd(ctx, dir)
 }
 
 func (e *overlaybdBuilderEngine) commit(ctx context.Context, dir string, idx int) error {
