@@ -158,7 +158,7 @@ jobs:
           sudo mkdir /etc/overlaybd-snapshotter
           sudo echo '{"root": "/var/lib/overlaybd/","address": "/run/overlaybd-snapshotter/overlaybd.sock"}' | sudo tee -a /etc/overlaybd-snapshotter/config.json
           sudo bin/overlaybd-snapshotter &
-          sudo mkdir /etc/containerd/
+          sudo mkdir -p /etc/containerd/
           sudo echo -e '[proxy_plugins.overlaybd]\n\ttype = "snapshot"\n\taddress = "/run/overlaybd-snapshotter/overlaybd.sock"' | sudo tee -a /etc/containerd/config.toml
           cat /etc/containerd/config.toml
           sudo systemctl restart containerd

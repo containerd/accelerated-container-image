@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
+
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +38,9 @@ var (
 	tagOutput string
 	dir       string
 	oci       bool
+	verbose   bool
 	fastoci   string
+	turboOCI  string
 	overlaybd string
 	dbstr     string
 	dbType    string
@@ -47,12 +50,22 @@ var (
 		Short: "An image conversion tool from oci image to overlaybd image.",
 		Long:  "overlaybd convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images",
 		Run: func(cmd *cobra.Command, args []string) {
-			if overlaybd == "" && fastoci == "" {
+			if verbose {
+				logrus.SetLevel(logrus.DebugLevel)
+			}
+			tb := ""
+			if overlaybd == "" && fastoci == "" && turboOCI == "" {
 				if tagOutput == "" {
-					logrus.Error("output-tag is required, you can specify it by [-o|--overlaybd|--fastoci]")
+					logrus.Error("output-tag is required, you can specify it by [-o|--overlaybd|--turboOCI]")
 					os.Exit(1)
 				}
 				overlaybd = tagOutput
+			}
+			if fastoci != "" {
+				tb = fastoci
+			}
+			if turboOCI != "" {
+				tb = turboOCI
 			}
 
 			ctx := context.Background()
@@ -64,8 +77,8 @@ var (
 				OCI:       oci,
 			}
 			if overlaybd != "" {
-				logrus.Info("building overlaybd ...")
-				opt.Engine = builder.BuilderEngineTypeOverlayBD
+				logrus.Info("building [Overlaybd - Native]  image...")
+				opt.Engine = builder.Overlaybd
 				opt.TargetRef = repo + ":" + overlaybd
 
 				switch dbType {
@@ -96,20 +109,20 @@ var (
 				}
 				logrus.Info("overlaybd build finished")
 			}
-			if fastoci != "" {
-				logrus.Info("building fastoci ...")
-				opt.Engine = builder.BuilderEngineTypeFastOCI
-				opt.TargetRef = repo + ":" + fastoci
+			if tb != "" {
+				logrus.Info("building [Overlaybd - Turbo OCIv1] image...")
+				opt.Engine = builder.TurboOCI
+				opt.TargetRef = repo + ":" + tb
 				builder, err := builder.NewOverlayBDBuilder(ctx, opt)
 				if err != nil {
-					logrus.Errorf("failed to create fastoci builder: %v", err)
+					logrus.Errorf("failed to create TurboOCI builder: %v", err)
 					os.Exit(1)
 				}
 				if err := builder.Build(ctx); err != nil {
-					logrus.Errorf("failed to build fastoci: %v", err)
+					logrus.Errorf("failed to build TurboOCIv1 image: %v", err)
 					os.Exit(1)
 				}
-				logrus.Info("fastoci build finished")
+				logrus.Info("TurboOCIv1 build finished")
 			}
 		},
 	}
@@ -120,11 +133,14 @@ func init() {
 	rootCmd.Flags().StringVarP(&repo, "repository", "r", "", "repository for converting image (required)")
 	rootCmd.Flags().StringVarP(&user, "username", "u", "", "user[:password] Registry user and password")
 	rootCmd.Flags().BoolVarP(&plain, "plain", "", false, "connections using plain HTTP")
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "", false, "show debug log")
 	rootCmd.Flags().StringVarP(&tagInput, "input-tag", "i", "", "tag for image converting from (required)")
 	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to (required)")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
-	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build fastoci format")
+	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)")
+
+	rootCmd.Flags().StringVar(&turboOCI, "turboOCI", "", "build 'Overlaybd-Turbo OCIv1' format")
 	rootCmd.Flags().StringVar(&overlaybd, "overlaybd", "", "build overlaybd format")
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")
 	rootCmd.Flags().StringVar(&dbType, "db-type", "", "type of db to use for conversion deduplication. Available: mysql. Default none")

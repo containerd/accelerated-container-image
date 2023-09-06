@@ -529,14 +529,14 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		}
 
 		configJSON.RepoBlobURL = blobPrefixURL
-		if dataDgst, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
+		if isTurboOCI, dataDgst, compType := o.checkTurboOCI(info.Labels); isTurboOCI {
 			lower := OverlayBDBSConfigLower{
 				Dir:          o.upperPath(id),
-				File:         o.fastociFsMeta(id),
+				File:         o.turboOCIFsMeta(id),
 				TargetDigest: dataDgst,
 			}
-			if isGzipLayerType(info.Labels[label.FastOCIMediaType]) {
-				lower.GzipIndex = o.fastociGzipIndex(id)
+			if isGzipLayerType(compType) {
+				lower.GzipIndex = o.turboOCIGzipIdx(id)
 			}
 			configJSON.Lowers = append(configJSON.Lowers, lower)
 		} else {

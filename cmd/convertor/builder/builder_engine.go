@@ -34,8 +34,8 @@ import (
 type BuilderEngineType int
 
 const (
-	BuilderEngineTypeOverlayBD BuilderEngineType = iota
-	BuilderEngineTypeFastOCI
+	Overlaybd BuilderEngineType = iota
+	TurboOCI
 )
 
 type builderEngine interface {

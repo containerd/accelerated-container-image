@@ -17,6 +17,7 @@
 package version
 
 const (
-	OverlayBDVersionNumber = "0.1.0"
-	FastOCIVersionNumber   = "0.1.0-fastoci"
+	OverlayBDVersionNumber     = "0.1.0"
+	TurboOCIVersionNumber      = "0.1.0-turbo.ociv1"
+	DeprecatedOCIVersionNumber = "0.1.0-fastoci" // old version of turboOCI
 )

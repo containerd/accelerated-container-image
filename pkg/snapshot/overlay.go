@@ -322,6 +322,17 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	return rwMode(m)
 }
 
+func (o *snapshotter) checkTurboOCI(labels map[string]string) (bool, string, string) {
+	if st1, ok1 := labels[label.TurboOCIDigest]; ok1 {
+		return true, st1, labels[label.TurboOCIMediaType]
+	}
+
+	if st2, ok2 := labels[label.FastOCIDigest]; ok2 {
+		return true, st2, labels[label.FastOCIMediaType]
+	}
+	return false, "", ""
+}
+
 func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
@@ -423,8 +434,8 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		}
 
 		// Normal prepare
-		if _, isFastOCI := info.Labels[label.FastOCIDigest]; isFastOCI {
-			log.G(ctx).Debugf("%s is FastOCI layer", s.ID)
+		if isTurboOCI, digest, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
+			log.G(ctx).Infof("%s is turboOCI.v1 layer: %s", s.ID, digest)
 			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
 				return nil, err
 			}
@@ -1183,11 +1194,11 @@ func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
 }
 
-func (o *snapshotter) fastociFsMeta(id string) string {
+func (o *snapshotter) turboOCIFsMeta(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
 }
 
-func (o *snapshotter) fastociGzipIndex(id string) string {
+func (o *snapshotter) turboOCIGzipIdx(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "fs", "gzip.meta")
 }
 

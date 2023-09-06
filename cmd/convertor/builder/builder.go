@@ -78,10 +78,10 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 
 	var engine builderEngine
 	switch opt.Engine {
-	case BuilderEngineTypeOverlayBD:
+	case Overlaybd:
 		engine = NewOverlayBDBuilderEngine(engineBase)
-	case BuilderEngineTypeFastOCI:
-		engine = NewFastOCIBuilderEngine(engineBase)
+	case TurboOCI:
+		engine = NewTurboOCIBuilderEngine(engineBase)
 	}
 	return &overlaybdBuilder{
 		layers: len(engineBase.manifest.Layers),
