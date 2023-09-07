@@ -44,7 +44,7 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     The convertor supports layer deduplication, which prevents duplication of layer conversion for every image conversion.
 
-* standalone userspace image-convertor (Experimental)
+* standalone userspace image-convertor
 
     Standalone userspace image-convertor has similar functionality to embedded image-convertor but runs in the userspace. It does not require root privilege and dependence on tcmu, configfs, snapshotter, or even on containerd. which makes it much more convenient to run in a container.
 

@@ -96,7 +96,7 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 		alreadyConverted = true
 	}
 	if !alreadyConverted {
-		if err := e.create(ctx, layerDir); err != nil {
+		if err := e.create(ctx, layerDir, e.mkfs && (idx == 0)); err != nil {
 			return err
 		}
 		e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
@@ -146,12 +146,15 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 		e.manifest.Layers[idx] = e.overlaybdLayers[idx].desc
 		e.config.RootFS.DiffIDs[idx] = e.overlaybdLayers[idx].desc.Digest
 	}
-	baseDesc, err := e.uploadBaseLayer(ctx)
-	if err != nil {
-		return err
+	if !e.mkfs {
+		baseDesc, err := e.uploadBaseLayer(ctx)
+		if err != nil {
+			return err
+		}
+		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
+		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	}
-	e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
-	e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
+
 	return e.uploadManifestAndConfig(ctx)
 }
 
@@ -288,8 +291,12 @@ func (e *overlaybdBuilderEngine) getLayerDir(idx int) string {
 	return path.Join(e.workDir, fmt.Sprintf("%04d_", idx)+e.manifest.Layers[idx].Digest.String())
 }
 
-func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string) error {
-	return utils.Create(ctx, dir, "-s", "64")
+func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bool) error {
+	opts := []string{"-s", "64"}
+	if mkfs {
+		opts = append(opts, "--mkfs")
+	}
+	return utils.Create(ctx, dir, opts...)
 }
 
 func (e *overlaybdBuilderEngine) apply(ctx context.Context, dir string) error {

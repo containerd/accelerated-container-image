@@ -18,9 +18,9 @@ Only several tools are required:
 
 - baselayer
 
-  stored at `/opt/overlaybd/baselayers/ext4_64` after installing [overlaybd](https://github.com/containerd/overlaybd). This is only required just for now. Once the automatic mkfs is implemented, it's no longer needed.
+  stored at `/opt/overlaybd/baselayers/ext4_64` after installing [overlaybd](https://github.com/containerd/overlaybd). This is required if flag `--mkfs` is not provided.
 
-Overall, the requirements are `/opt/overlaybd/bin/{overlaybd-create,overlaybd-commit,overlaybd-apply}` and `/opt/overlaybd/baselayers/ext4_64`.
+Overall, the requirements are `/opt/overlaybd/bin/{overlaybd-create,overlaybd-commit,overlaybd-apply}` and `/opt/overlaybd/baselayers/ext4_64`(optional).
 
 ## Basic Usage
 
@@ -28,27 +28,31 @@ Overall, the requirements are `/opt/overlaybd/bin/{overlaybd-create,overlaybd-co
 # usage
 $ bin/convertor --help
 
-overlaybd-convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images
+overlaybd convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images
 
 Usage:
-  overlaybd-convertor [flags]
+  convertor [flags]
 
 Flags:
   -r, --repository string   repository for converting image (required)
   -u, --username string     user[:password] Registry user and password
       --plain               connections using plain HTTP
+      --verbose             show debug log
   -i, --input-tag string    tag for image converting from (required)
-  -o, --output-tag string   tag for image converting to (required)
+  -o, --output-tag string   tag for image converting to
   -d, --dir string          directory used for temporary data (default "tmp_conv")
-  -h, --help                help for overlaybd-convertor
       --oci                 export image with oci spec
-      --fastoci             build fastoci format
-      --overlaybd           build overlaybd format
-      --db-str              db str for overlaybd conversion
-      --db-type             type of db to use for conversion deduplication. Available: mysql. Default none
+      --mkfs                make ext4 fs in bottom layer
+      --fastoci string      build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
+      --turboOCI string     build 'Overlaybd-Turbo OCIv1' format
+      --overlaybd string    build overlaybd format
+      --db-str string       db str for overlaybd conversion
+      --db-type string      type of db to use for conversion deduplication. Available: mysql. Default none
+  -h, --help                help for convertor
 
 # examples
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
+$ bin/convertor --mkfs -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
 
 ```
