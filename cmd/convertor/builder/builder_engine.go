@@ -70,6 +70,7 @@ type builderEngineBase struct {
 	config     specs.Image
 	workDir    string
 	oci        bool
+	mkfs       bool
 	db         database.ConversionDatabase
 	host       string
 	repository string

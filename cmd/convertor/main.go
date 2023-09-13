@@ -38,6 +38,7 @@ var (
 	tagOutput string
 	dir       string
 	oci       bool
+	mkfs      bool
 	verbose   bool
 	fastoci   string
 	turboOCI  string
@@ -75,6 +76,7 @@ var (
 				PlainHTTP: plain,
 				WorkDir:   dir,
 				OCI:       oci,
+				Mkfs:      mkfs,
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -135,9 +137,10 @@ func init() {
 	rootCmd.Flags().BoolVarP(&plain, "plain", "", false, "connections using plain HTTP")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "", false, "show debug log")
 	rootCmd.Flags().StringVarP(&tagInput, "input-tag", "i", "", "tag for image converting from (required)")
-	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to (required)")
+	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
+	rootCmd.Flags().BoolVarP(&mkfs, "mkfs", "", false, "make ext4 fs in bottom layer")
 	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)")
 
 	rootCmd.Flags().StringVar(&turboOCI, "turboOCI", "", "build 'Overlaybd-Turbo OCIv1' format")

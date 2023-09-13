@@ -84,7 +84,7 @@ func (e *turboOCIBuilderEngine) DownloadLayer(ctx context.Context, idx int) erro
 
 func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	layerDir := e.getLayerDir(idx)
-	if err := e.create(ctx, layerDir); err != nil {
+	if err := e.create(ctx, layerDir, e.mkfs && (idx == 0)); err != nil {
 		return err
 	}
 	e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
@@ -226,8 +226,12 @@ func (e *turboOCIBuilderEngine) createIdentifier(idx int) error {
 	return nil
 }
 
-func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string) error {
-	return utils.Create(ctx, dir, "-s", "64", "--turboOCI")
+func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string, mkfs bool) error {
+	opts := []string{"-s", "64", "--turboOCI"}
+	if mkfs {
+		opts = append(opts, "--mkfs")
+	}
+	return utils.Create(ctx, dir, opts...)
 }
 
 func (e *turboOCIBuilderEngine) apply(ctx context.Context, dir string) error {
