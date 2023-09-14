@@ -32,6 +32,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -60,9 +61,12 @@ func NewTurboOCIBuilderEngine(base *builderEngineBase) builderEngine {
 		Lowers:     []snapshot.OverlayBDBSConfigLower{},
 		ResultFile: "",
 	}
-	config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
-		File: overlaybdBaseLayer,
-	})
+	if !base.mkfs {
+		config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
+			File: overlaybdBaseLayer,
+		})
+		logrus.Infof("using default baselayer")
+	}
 	return &turboOCIBuilderEngine{
 		builderEngineBase: base,
 		overlaybdConfig:   config,
