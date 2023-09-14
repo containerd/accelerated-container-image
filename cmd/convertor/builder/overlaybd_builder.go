@@ -59,9 +59,12 @@ func NewOverlayBDBuilderEngine(base *builderEngineBase) builderEngine {
 		Lowers:     []snapshot.OverlayBDBSConfigLower{},
 		ResultFile: "",
 	}
-	config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
-		File: overlaybdBaseLayer,
-	})
+	if !base.mkfs {
+		config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
+			File: overlaybdBaseLayer,
+		})
+		logrus.Infof("using default baselayer")
+	}
 
 	overlaybdLayers := make([]overlaybdConvertResult, len(base.manifest.Layers))
 
@@ -295,6 +298,7 @@ func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bo
 	opts := []string{"-s", "64"}
 	if mkfs {
 		opts = append(opts, "--mkfs")
+		logrus.Infof("mkfs for baselayer")
 	}
 	return utils.Create(ctx, dir, opts...)
 }
