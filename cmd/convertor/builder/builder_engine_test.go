@@ -27,7 +27,6 @@ import (
 	"github.com/containerd/containerd/remotes"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func Test_builderEngineBase_isGzipLayer(t *testing.T) {
@@ -58,7 +57,7 @@ func Test_builderEngineBase_isGzipLayer(t *testing.T) {
 			t.Error(err)
 		}
 
-		parsedManifest := v1.Manifest{}
+		parsedManifest := specs.Manifest{}
 		decoder := json.NewDecoder(manifestStream)
 		if err = decoder.Decode(&parsedManifest); err != nil {
 			t.Error(err)
