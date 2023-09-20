@@ -186,11 +186,13 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) error {
 			label.OverlayBDBlobSize:   "4737695",
 		},
 	}
-	if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {
-		return errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
+	if !e.mkfs {
+		if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {
+			return errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
+		}
+		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
+		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	}
-	e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
-	e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	return e.uploadManifestAndConfig(ctx)
 }
 
