@@ -263,7 +263,13 @@ func addFileToArchive(ctx context.Context, ftar *tar.Writer, filepath string) er
 	if err != nil {
 		return err
 	}
-	if err = ftar.WriteHeader(header); err != nil {
+	// remove timestamp for consistency
+	if err = ftar.WriteHeader(&tar.Header{
+		Name:     header.Name,
+		Mode:     header.Mode,
+		Size:     header.Size,
+		Typeflag: header.Typeflag,
+	}); err != nil {
 		return err
 	}
 	_, err = io.Copy(ftar, file)
