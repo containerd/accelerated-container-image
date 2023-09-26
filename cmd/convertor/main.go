@@ -31,20 +31,22 @@ import (
 )
 
 var (
-	repo      string
-	user      string
-	plain     bool
-	tagInput  string
-	tagOutput string
-	dir       string
-	oci       bool
-	mkfs      bool
-	verbose   bool
-	fastoci   string
-	turboOCI  string
-	overlaybd string
-	dbstr     string
-	dbType    string
+	repo                string
+	user                string
+	plain               bool
+	tagInput            string
+	tagOutput           string
+	dir                 string
+	oci                 bool
+	mkfs                bool
+	verbose             bool
+	fastoci             string
+	turboOCI            string
+	overlaybd           string
+	dbstr               string
+	dbType              string
+	turboOCIMetaBuilder bool
+	auditPath           string
 
 	rootCmd = &cobra.Command{
 		Use:   "convertor",
@@ -77,6 +79,7 @@ var (
 				WorkDir:   dir,
 				OCI:       oci,
 				Mkfs:      mkfs,
+				AuditPath: auditPath,
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -113,7 +116,12 @@ var (
 			}
 			if tb != "" {
 				logrus.Info("building [Overlaybd - Turbo OCIv1] image...")
-				opt.Engine = builder.TurboOCI
+				if turboOCIMetaBuilder {
+					opt.Engine = builder.TurboOCIMeta
+				} else {
+					opt.Engine = builder.TurboOCI
+				}
+
 				opt.TargetRef = repo + ":" + tb
 				builder, err := builder.NewOverlayBDBuilder(ctx, opt)
 				if err != nil {
@@ -147,6 +155,9 @@ func init() {
 	rootCmd.Flags().StringVar(&overlaybd, "overlaybd", "", "build overlaybd format")
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")
 	rootCmd.Flags().StringVar(&dbType, "db-type", "", "type of db to use for conversion deduplication. Available: mysql. Default none")
+
+	rootCmd.Flags().BoolVar(&turboOCIMetaBuilder, "turboOCI-meta-builder", false, "use turboOCI-apply (experimental)")
+	rootCmd.Flags().StringVar(&auditPath, "audit-path", "", "audit in csv format, support only turboOCIMetaBuilder for now (experimental)")
 
 	rootCmd.MarkFlagRequired("repository")
 	rootCmd.MarkFlagRequired("input-tag")

@@ -42,6 +42,7 @@ type BuilderOptions struct {
 	WorkDir   string
 	OCI       bool
 	Mkfs      bool
+	AuditPath string
 	DB        database.ConversionDatabase
 	Engine    BuilderEngineType
 }
@@ -70,6 +71,7 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 	engineBase.oci = opt.OCI
 	engineBase.mkfs = opt.Mkfs
 	engineBase.db = opt.DB
+	engineBase.auditPath = opt.AuditPath
 
 	refspec, err := reference.Parse(opt.Ref)
 	if err != nil {
@@ -84,6 +86,8 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 		engine = NewOverlayBDBuilderEngine(engineBase)
 	case TurboOCI:
 		engine = NewTurboOCIBuilderEngine(engineBase)
+	case TurboOCIMeta:
+		engine = NewTurboOCIMetaBuilderEngine(engineBase)
 	}
 	return &overlaybdBuilder{
 		layers: len(engineBase.manifest.Layers),

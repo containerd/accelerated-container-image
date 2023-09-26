@@ -36,6 +36,7 @@ type BuilderEngineType int
 const (
 	Overlaybd BuilderEngineType = iota
 	TurboOCI
+	TurboOCIMeta
 )
 
 type builderEngine interface {
@@ -74,6 +75,7 @@ type builderEngineBase struct {
 	db         database.ConversionDatabase
 	host       string
 	repository string
+	auditPath  string
 }
 
 func (e *builderEngineBase) isGzipLayer(ctx context.Context, idx int) (bool, error) {
