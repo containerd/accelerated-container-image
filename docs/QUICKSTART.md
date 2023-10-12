@@ -199,7 +199,7 @@ There are several methods.
 
     ```bash
     # use rpull to pull image without layer downloading
-    sudo /opt/overlaybd/snapshotter/ctr -u {user}:{pass} rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obd
+    sudo /opt/overlaybd/snapshotter/ctr rpull -u {user}:{pass} registry.hub.docker.com/overlaybd/redis:6.2.1_obd
 
     # run by ctr run
     sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo

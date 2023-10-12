@@ -140,7 +140,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
-	rootCmd.Flags().BoolVarP(&mkfs, "mkfs", "", false, "make ext4 fs in bottom layer")
+	rootCmd.Flags().BoolVarP(&mkfs, "mkfs", "", true, "make ext4 fs in bottom layer")
 	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)")
 
 	rootCmd.Flags().StringVar(&turboOCI, "turboOCI", "", "build 'Overlaybd-Turbo OCIv1' format")
