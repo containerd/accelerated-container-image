@@ -18,7 +18,7 @@ Only several tools are required:
 
 - baselayer
 
-  stored at `/opt/overlaybd/baselayers/ext4_64` after installing [overlaybd](https://github.com/containerd/overlaybd). This is required if flag `--mkfs` is not provided.
+  stored at `/opt/overlaybd/baselayers/ext4_64` after installing [overlaybd](https://github.com/containerd/overlaybd). This is required if flag `--mkfs` is false.
 
 Overall, the requirements are `/opt/overlaybd/bin/{overlaybd-create,overlaybd-commit,overlaybd-apply}` and `/opt/overlaybd/baselayers/ext4_64`(optional).
 
@@ -42,7 +42,7 @@ Flags:
   -o, --output-tag string   tag for image converting to
   -d, --dir string          directory used for temporary data (default "tmp_conv")
       --oci                 export image with oci spec
-      --mkfs                make ext4 fs in bottom layer
+      --mkfs                make ext4 fs in bottom layer (default true)
       --fastoci string      build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
       --turboOCI string     build 'Overlaybd-Turbo OCIv1' format
       --overlaybd string    build overlaybd format
@@ -52,7 +52,6 @@ Flags:
 
 # examples
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
-$ bin/convertor --mkfs -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
 
 ```
