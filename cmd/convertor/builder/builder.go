@@ -18,8 +18,16 @@ package builder
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
 	"github.com/containerd/containerd/reference"
@@ -44,6 +52,7 @@ type BuilderOptions struct {
 	Mkfs      bool
 	DB        database.ConversionDatabase
 	Engine    BuilderEngineType
+	CertOption
 }
 
 type overlaybdBuilder struct {
@@ -53,6 +62,23 @@ type overlaybdBuilder struct {
 }
 
 func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, error) {
+	tlsConfig, err := loadTLSConfig(opt.CertOption)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load certifications: %w", err)
+	}
+	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:       30 * time.Second,
+			KeepAlive:     30 * time.Second,
+			FallbackDelay: 300 * time.Millisecond,
+		}).DialContext,
+		MaxConnsPerHost:       32, // max http concurrency
+		MaxIdleConns:          32,
+		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		TLSClientConfig:       tlsConfig,
+		ExpectContinueTimeout: 5 * time.Second,
+	}
 	resolver := docker.NewResolver(docker.ResolverOptions{
 		Credentials: func(s string) (string, string, error) {
 			if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
@@ -61,6 +87,9 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 			return "", "", nil
 		},
 		PlainHTTP: opt.PlainHTTP,
+		Client: &http.Client{
+			Transport: transport,
+		},
 	})
 	engineBase, err := getBuilderEngineBase(ctx, resolver, opt.Ref, opt.TargetRef)
 	if err != nil {
@@ -212,4 +241,78 @@ func waitForChannel(ctx context.Context, ch <-chan error) {
 	case <-ctx.Done():
 	case <-ch:
 	}
+}
+
+// -------------------- certification --------------------
+type CertOption struct {
+	CertDirs    []string
+	RootCAs     []string
+	ClientCerts []string
+	Insecure    bool
+}
+
+func loadTLSConfig(opt CertOption) (*tls.Config, error) {
+	type clientCertPair struct {
+		certFile string
+		keyFile  string
+	}
+	var clientCerts []clientCertPair
+	// client certs from option `--client-cert`
+	for _, cert := range opt.ClientCerts {
+		s := strings.Split(cert, ":")
+		if len(s) != 2 {
+			return nil, fmt.Errorf("client cert %s: invalid format", cert)
+		}
+		clientCerts = append(clientCerts, clientCertPair{
+			certFile: s[0],
+			keyFile:  s[1],
+		})
+	}
+	// root CAs / client certs from option `--cert-dir`
+	for _, d := range opt.CertDirs {
+		fs, err := os.ReadDir(d)
+		if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrPermission) {
+			return nil, fmt.Errorf("failed to read cert directory %q: %w", d, err)
+		}
+		for _, f := range fs {
+			if strings.HasSuffix(f.Name(), ".crt") {
+				opt.RootCAs = append(opt.RootCAs, filepath.Join(d, f.Name()))
+			}
+			if strings.HasSuffix(f.Name(), ".cert") {
+				clientCerts = append(clientCerts, clientCertPair{
+					certFile: filepath.Join(d, f.Name()),
+					keyFile:  filepath.Join(d, strings.TrimSuffix(f.Name(), ".cert")+".key"),
+				})
+			}
+		}
+	}
+	tlsConfig := &tls.Config{}
+	// root CAs from ENV ${SSL_CERT_FILE} and ${SSL_CERT_DIR}
+	systemPool, err := x509.SystemCertPool()
+	if err != nil {
+		if runtime.GOOS == "windows" {
+			systemPool = x509.NewCertPool()
+		} else {
+			return nil, fmt.Errorf("failed to get system cert pool: %w", err)
+		}
+	}
+	tlsConfig.RootCAs = systemPool
+	// root CAs from option `--root-ca`
+	for _, file := range opt.RootCAs {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read root CA file %q: %w", file, err)
+		}
+		tlsConfig.RootCAs.AppendCertsFromPEM(b)
+	}
+	// load client certs
+	for _, c := range clientCerts {
+		cert, err := tls.LoadX509KeyPair(c.certFile, c.keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client cert pair {%q, %q}: %w", c.certFile, c.keyFile, err)
+		}
+		tlsConfig.Certificates = append(tlsConfig.Certificates, cert)
+	}
+	tlsConfig.InsecureSkipVerify = opt.Insecure
+	return tlsConfig, nil
 }

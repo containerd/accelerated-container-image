@@ -34,21 +34,25 @@ Usage:
   convertor [flags]
 
 Flags:
-  -r, --repository string   repository for converting image (required)
-  -u, --username string     user[:password] Registry user and password
-      --plain               connections using plain HTTP
-      --verbose             show debug log
-  -i, --input-tag string    tag for image converting from (required)
-  -o, --output-tag string   tag for image converting to
-  -d, --dir string          directory used for temporary data (default "tmp_conv")
-      --oci                 export image with oci spec
-      --mkfs                make ext4 fs in bottom layer (default true)
-      --fastoci string      build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
-      --turboOCI string     build 'Overlaybd-Turbo OCIv1' format
-      --overlaybd string    build overlaybd format
-      --db-str string       db str for overlaybd conversion
-      --db-type string      type of db to use for conversion deduplication. Available: mysql. Default none
-  -h, --help                help for convertor
+  -r, --repository string         repository for converting image (required)
+  -u, --username string           user[:password] Registry user and password
+      --plain                     connections using plain HTTP
+      --verbose                   show debug log
+  -i, --input-tag string          tag for image converting from (required)
+  -o, --output-tag string         tag for image converting to
+  -d, --dir string                directory used for temporary data (default "tmp_conv")
+      --oci                       export image with oci spec
+      --mkfs                      make ext4 fs in bottom layer (default true)
+      --fastoci string            build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
+      --turboOCI string           build 'Overlaybd-Turbo OCIv1' format
+      --overlaybd string          build overlaybd format
+      --db-str string             db str for overlaybd conversion
+      --db-type string            type of db to use for conversion deduplication. Available: mysql. Default none
+      --cert-dir stringArray      In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key
+      --root-ca stringArray       root CA certificates
+      --client-cert stringArray   client cert certificates, should form in ${cert-file}:${key-file}
+      --insecure                  don't verify the server's certificate chain and host name
+  -h, --help                      help for convertor
 
 # examples
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd

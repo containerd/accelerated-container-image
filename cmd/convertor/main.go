@@ -46,6 +46,12 @@ var (
 	dbstr     string
 	dbType    string
 
+	// certification
+	certDirs    []string
+	rootCAs     []string
+	clientCerts []string
+	insecure    bool
+
 	rootCmd = &cobra.Command{
 		Use:   "convertor",
 		Short: "An image conversion tool from oci image to overlaybd image.",
@@ -77,6 +83,12 @@ var (
 				WorkDir:   dir,
 				OCI:       oci,
 				Mkfs:      mkfs,
+				CertOption: builder.CertOption{
+					CertDirs:    certDirs,
+					RootCAs:     rootCAs,
+					ClientCerts: clientCerts,
+					Insecure:    insecure,
+				},
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -147,6 +159,12 @@ func init() {
 	rootCmd.Flags().StringVar(&overlaybd, "overlaybd", "", "build overlaybd format")
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")
 	rootCmd.Flags().StringVar(&dbType, "db-type", "", "type of db to use for conversion deduplication. Available: mysql. Default none")
+
+	// certification
+	rootCmd.Flags().StringArrayVar(&certDirs, "cert-dir", nil, "In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key")
+	rootCmd.Flags().StringArrayVar(&rootCAs, "root-ca", nil, "root CA certificates")
+	rootCmd.Flags().StringArrayVar(&clientCerts, "client-cert", nil, "client cert certificates, should form in ${cert-file}:${key-file}")
+	rootCmd.Flags().BoolVarP(&insecure, "insecure", "", false, "don't verify the server's certificate chain and host name")
 
 	rootCmd.MarkFlagRequired("repository")
 	rootCmd.MarkFlagRequired("input-tag")
