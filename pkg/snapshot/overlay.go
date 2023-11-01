@@ -280,13 +280,18 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage,
 		return snapshots.Usage{}, err
 	}
 
-	if info.Kind == snapshots.KindActive {
-		upperPath := o.upperPath(id)
-		du, err := fs.DiskUsage(ctx, upperPath)
-		if err != nil {
-			return snapshots.Usage{}, err
+	stype, err := o.identifySnapshotStorageType(ctx, id, info)
+	if err != nil {
+		return snapshots.Usage{}, err
+	}
+
+	switch info.Kind {
+	case snapshots.KindActive:
+		return o.diskUsageWithBlock(ctx, id, stype)
+	case snapshots.KindCommitted:
+		if stype == storageTypeRemoteBlock || stype == storageTypeLocalBlock {
+			return o.diskUsageWithBlock(ctx, id, stype)
 		}
-		usage = snapshots.Usage(du)
 	}
 	return usage, nil
 }
