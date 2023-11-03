@@ -64,7 +64,11 @@ func Seal(ctx context.Context, dir, toDir string, opts ...string) error {
 	if err != nil {
 		return errors.Wrapf(err, "failed to seal writable overlaybd: %s", out)
 	}
-	return os.Rename(path.Join(dir, dataFile), path.Join(toDir, sealedFile))
+	if err := os.Rename(path.Join(dir, dataFile), path.Join(toDir, sealedFile)); err != nil {
+		return errors.Wrapf(err, "failed to rename sealed overlaybd file")
+	}
+	os.RemoveAll(path.Join(dir, idxFile))
+	return nil
 }
 
 func Commit(ctx context.Context, dir, toDir string, sealed bool, opts ...string) error {
