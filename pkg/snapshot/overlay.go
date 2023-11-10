@@ -717,6 +717,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		// TODO(fuweid): how to rollback?
 		if oinfo.Labels[label.AccelerationLayer] == "yes" {
 			log.G(ctx).Info("Commit accel-layer requires no writable_data")
+		} else if _, err := o.loadBackingStoreConfig(id); err != nil {
+			log.G(ctx).Info("not an overlaybd writable layer")
 		} else {
 			if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
 				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
@@ -752,7 +754,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		}
 
 		info.Labels[label.LocalOverlayBDPath] = o.overlaybdSealedFilePath(id)
-		info, err = storage.UpdateInfo(ctx, info, fmt.Sprintf("labels.%s", label.LocalOverlayBDPath))
+		delete(info.Labels, label.SupportReadWriteMode)
+		info, err = storage.UpdateInfo(ctx, info)
 		if err != nil {
 			return err
 		}
