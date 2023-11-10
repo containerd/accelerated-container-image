@@ -180,34 +180,24 @@ func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, dir
 
 // unmountAndDetachBlockDevice
 func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) (err error) {
-
-	var info snapshots.Info
-	if snKey != "" {
-		_, info, _, err = storage.GetInfo(ctx, snKey)
-		if err != nil {
-			return errors.Wrapf(err, "can't get snapshot info.")
-		}
-	}
-	writeType := o.getWritableType(ctx, snID, info)
-	overlaybd, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
+	devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
 	if err != nil {
 		log.G(ctx).Errorf("read device name failed: %s, err: %v", o.overlaybdBackstoreMarkFile(snID), err)
 	}
-	if writeType != RwDev {
-		mountPoint := o.overlaybdMountpoint(snID)
-		log.G(ctx).Debugf("check overlaybd mountpoint is in use: %s", mountPoint)
-		busy, err := o.checkOverlaybdInUse(ctx, mountPoint)
-		if err != nil {
-			return err
-		}
-		if busy {
-			log.G(ctx).Infof("device still in use.")
-			return nil
-		}
-		log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
-		if err := mount.UnmountAll(mountPoint, 0); err != nil {
-			return errors.Wrapf(err, "failed to umount %s", mountPoint)
-		}
+
+	mountPoint := o.overlaybdMountpoint(snID)
+	log.G(ctx).Debugf("check overlaybd mountpoint is in use: %s", mountPoint)
+	busy, err := o.checkOverlaybdInUse(ctx, mountPoint)
+	if err != nil {
+		return err
+	}
+	if busy {
+		log.G(ctx).Infof("device still in use.")
+		return nil
+	}
+	log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
+	if err := mount.UnmountAll(mountPoint, 0); err != nil {
+		return errors.Wrapf(err, "failed to umount %s", mountPoint)
 	}
 
 	loopDevID := o.overlaybdLoopbackDeviceID(snID)
@@ -243,7 +233,7 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	if err != nil {
 		return errors.Wrapf(err, "failed to remove target dir %s", targetPath)
 	}
-	log.G(ctx).Infof("destroy overlaybd device success(sn: %s): %s", snID, overlaybd)
+	log.G(ctx).Infof("destroy overlaybd device success(sn: %s): %s", snID, devName)
 	return nil
 }
 
