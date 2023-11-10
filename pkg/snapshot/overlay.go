@@ -205,7 +205,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 
 // Stat returns the info for an active or committed snapshot by the key.
 func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, retErr error) {
-	log.G(ctx).Debugf("Stat (key: %s)", key)
+	log.G(ctx).Infof("Stat (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -232,7 +232,7 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, r
 //
 // TODO(fuweid): should not touch the interface-like or internal label!
 func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (_ snapshots.Info, retErr error) {
-	log.G(ctx).Debugf("Update (fieldpaths: %s)", fieldpaths)
+	log.G(ctx).Infof("Update (fieldpaths: %s)", fieldpaths)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -260,7 +260,7 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 
 // Usage returns the resources taken by the snapshot identified by key.
 func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage, retErr error) {
-	log.G(ctx).Debugf("Usage (key: %s)", key)
+	log.G(ctx).Infof("Usage (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -573,7 +573,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 // Prepare creates an active snapshot identified by key descending from the provided parent.
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
-	log.G(ctx).Debugf("Prepare (key: %s, parent: %s)", key, parent)
+	log.G(ctx).Infof("Prepare (key: %s, parent: %s)", key, parent)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -586,7 +586,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 
 // View returns a readonly view on parent snapshotter.
 func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
-	log.G(ctx).Debugf("View (key: %s, parent: %s)", key, parent)
+	log.G(ctx).Infof("View (key: %s, parent: %s)", key, parent)
 	defer log.G(ctx).Debugf("return View (key: %s, parent: %s)", key, parent)
 	start := time.Now()
 	defer func() {
@@ -603,6 +603,8 @@ func (o *snapshotter) View(ctx context.Context, key, parent string, opts ...snap
 //
 // This can be used to recover mounts after calling View or Prepare.
 func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, retErr error) {
+	log.G(ctx).Infof("Mounts (key: %s)", key)
+
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -667,7 +669,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 // Commit
 func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snapshots.Opt) (retErr error) {
-	log.G(ctx).Debugf("Commit (key: %s, name: %s)", key, name)
+	log.G(ctx).Infof("Commit (key: %s, name: %s)", key, name)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -773,7 +775,7 @@ func (o *snapshotter) commit(ctx context.Context, name, key string, opts ...snap
 // Remove abandons the snapshot identified by key. The snapshot will
 // immediately become unavailable and unrecoverable.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
-	log.G(ctx).Debugf("Remove (key: %s)", key)
+	log.G(ctx).Infof("Remove (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if err != nil {
@@ -851,7 +853,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 // Walk the snapshots.
 func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...string) (err error) {
-	log.G(ctx).Debugf("Walk (fs: %s)", fs)
+	log.G(ctx).Infof("Walk (fs: %s)", fs)
 	start := time.Now()
 	defer func() {
 		if err != nil {
