@@ -67,7 +67,17 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
         "enable": false,
         "uriPrefix": "/metrics",
         "port": 9863
-    }
+    },
+    "mirrorRegistry": [
+        {
+            "host": "localhost:5000",
+            "insecure": true
+        },
+        {
+            "host": "registry-1.docker.io",
+            "insecure": false
+        }
+    ]
 }
 ```
 | Field | Description |
@@ -81,6 +91,9 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 | `exporterConfig.enable` | whether or not create a server to show Prometheus metrics |
 | `exporterConfig.uriPrefix` | URI prefix for export metrics, default `/metrics` |
 | `exporterConfig.port` | port for http server to show metrics, default `9863` |
+| `mirrorRegistry` | an arrary of mirror registries |
+| `mirrorRegistry.host` | host address, eg. `registry-1.docker.io`` |
+| `mirrorRegistry.insecure` | `true` or `false` |
 
 
 #### Start service

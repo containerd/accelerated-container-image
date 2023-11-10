@@ -4,5 +4,6 @@
     "verbose": "info",
     "rwMode": "overlayfs",
     "logReportCaller": false,
-    "autoRemoveDev": false
+    "autoRemoveDev": false,
+    "mirrorRegistry": []
 }

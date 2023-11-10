@@ -28,6 +28,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
+	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/log"
@@ -66,6 +67,11 @@ const (
 	RwDev = "dev"       // use overlaybd directly
 )
 
+type Registry struct {
+	Host     string `json:"host"`
+	Insecure bool   `json:"insecure"`
+}
+
 type BootConfig struct {
 	Address           string                 `json:"address"`
 	Root              string                 `json:"root"`
@@ -75,6 +81,7 @@ type BootConfig struct {
 	AutoRemoveDev     bool                   `json:"autoRemoveDev"`
 	ExporterConfig    metrics.ExporterConfig `json:"exporterConfig"`
 	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
+	MirrorRegistry    []Registry             `json:"mirrorRegistry"`
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -88,6 +95,7 @@ func DefaultBootConfig() *BootConfig {
 			UriPrefix: "/metrics",
 			Port:      9863,
 		},
+		MirrorRegistry:    nil,
 		WritableLayerType: "append",
 	}
 }
@@ -153,6 +161,7 @@ type snapshotter struct {
 	indexOff          bool
 	autoRemoveDev     bool
 	writableLayerType string
+	mirrorRegistry    []Registry
 
 	locker *locker.Locker
 }
@@ -190,6 +199,10 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		indexOff = true
 	}
 
+	if bootConfig.MirrorRegistry != nil {
+		logrus.Infof("mirror Registry: %+v", bootConfig.MirrorRegistry)
+	}
+
 	return &snapshotter{
 		root:              bootConfig.Root,
 		rwMode:            bootConfig.RwMode,
@@ -199,6 +212,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		metacopyOption:    metacopyOption,
 		autoRemoveDev:     bootConfig.AutoRemoveDev,
 		writableLayerType: bootConfig.WritableLayerType,
+		mirrorRegistry:    bootConfig.MirrorRegistry,
 		locker:            locker.New(),
 	}, nil
 }
