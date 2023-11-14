@@ -99,7 +99,12 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 		alreadyConverted = true
 	}
 	if !alreadyConverted {
-		if err := e.create(ctx, layerDir, e.mkfs && (idx == 0)); err != nil {
+		mkfs := e.mkfs && (idx == 0)
+		vsizeGB := 0
+		if idx == 0 {
+			vsizeGB = 64
+		}
+		if err := e.create(ctx, layerDir, mkfs, vsizeGB); err != nil {
 			return err
 		}
 		e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
@@ -294,8 +299,8 @@ func (e *overlaybdBuilderEngine) getLayerDir(idx int) string {
 	return path.Join(e.workDir, fmt.Sprintf("%04d_", idx)+e.manifest.Layers[idx].Digest.String())
 }
 
-func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bool) error {
-	opts := []string{"-s", "64"}
+func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bool, vsizeGB int) error {
+	opts := []string{"-s", fmt.Sprintf("%d", vsizeGB)}
 	if mkfs {
 		opts = append(opts, "--mkfs")
 		logrus.Infof("mkfs for baselayer")
