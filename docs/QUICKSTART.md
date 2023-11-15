@@ -110,6 +110,8 @@ sudo systemctl start overlaybd-snapshotter
 
 Users can compile the latest code to install or download the [release](https://github.com/containerd/overlaybd/releases).
 
+There is no strong dependency between the overlaybd-snapshotter and overlaybd-tcmu versions. However, overlaybd-snapshotter v1.0.1+ requires overlaybd-tcmu v1.0.4+ because there have been adjustments made to the parameters for image conversion.
+
 #### Compile from source
 
 Install dependencies:

@@ -552,7 +552,11 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
 		log.G(ctx).Infof("prepare writable layer. (sn: %s)", id)
-		if err := o.prepareWritableOverlaybd(ctx, id); err != nil {
+		vsizeGB := 0
+		if info.Parent == "" {
+			vsizeGB = 64
+		}
+		if err := o.prepareWritableOverlaybd(ctx, id, vsizeGB); err != nil {
 			return err
 		}
 
@@ -648,9 +652,8 @@ func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *
 }
 
 // prepareWritableOverlaybd
-func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string) error {
-	// TODO(fuweid): 256GB can be configurable?
-	args := []string{"64"}
+func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string, vsizeGB int) error {
+	args := []string{fmt.Sprintf("%d", vsizeGB)}
 	if o.writableLayerType == "sparse" {
 		args = append(args, "-s")
 	}

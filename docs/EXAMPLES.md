@@ -17,6 +17,8 @@ This doc includes:
 
 Check whether the `overlaybd-tcmu` is running.
 
+Overlaybd-snapshotter v1.0.1+ requires overlaybd-tcmu v1.0.4+.
+
 For any problems, please checkout [overlaybd](https://github.com/containerd/overlaybd).
 
 ### Proxy overlaybd snapshotter
