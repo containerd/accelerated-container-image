@@ -85,7 +85,7 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 | `root` | the root directory to store snapshots |
 | `address` | the socket address used to connect withcontainerd. |
 | `verbose` | log level, `info` or `debug` |
-| `rwMode` | rootfs mode about wether to use native writable layer. See [Native Support for Writable](docs/WRITABLE.md) for detail. |
+| `rwMode` | rootfs mode about wether to use native writable layer. See [Native Support for Writable](./WRITABLE.md) for detail. |
 | `logReportCaller` | enable/disable the calling method |
 | `autoRemoveDev` | enable/disable auto clean-up overlaybd device after container removed |
 | `exporterConfig.enable` | whether or not create a server to show Prometheus metrics |
