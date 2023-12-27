@@ -3,103 +3,29 @@ on:
   push:
     branches:
       - main
-  pull_request:
+  pull_request_target:
+    branches:
+      - 'main'
+    types:
+      # Adding 'labeled' to the list of activity types that trigger this event
+      # (default: opened, synchronize, reopened) so that we can run this
+      # workflow when the 'ok-to-test' label is added.
+      # Reference: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
+      - opened
+      - synchronize
+      - reopened
+      - labeled
 
 jobs:
-  #
-  # Linter checker
-  #
-  linters:
-    name: Linters
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-
-    strategy:
-      matrix:
-        go-version: [1.19]
-
-    steps:
-      - uses: actions/setup-go@v3
-        with:
-          go-version: ${{ matrix.go-version }}
-
-      - uses: actions/checkout@v3
-      - uses: golangci/golangci-lint-action@v3
-        with:
-          version: v1.50.1
-          skip-cache: true
-          args: --timeout=5m
-
-  #
-  # Project checker
-  #
-  # based on https://github.com/containerd/project-checks/blob/main/action.yml
-  project:
-    name: Project Checks
-    runs-on: ubuntu-22.04
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          path: src/github.com/containerd/accelerated-container-image
-          fetch-depth: 100
-
-      - name: set env
-        shell: bash
-        run: |
-          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-
-      # TODO(fuweid): remove the env GO111MODULE=off in new version of go
-      - name: install dependencies
-        shell: bash
-        env:
-          GO111MODULE: off
-        run: |
-          echo "::group:: install dependencies"
-          go get -u -v github.com/vbatts/git-validation
-          go get -u -v github.com/kunalkushwaha/ltag
-          echo "::endgroup::"
-
-      - name: DCO checker
-        shell: bash
-        working-directory: src/github.com/containerd/accelerated-container-image
-        env:
-          GITHUB_COMMIT_URL: ${{ github.event.pull_request.commits_url }}
-          DCO_VERBOSITY: "-v"
-          DCO_RANGE: ""
-        run: |
-          echo "::group:: DCO checks"
-          set -eu -o pipefail
-          if [ -z "${GITHUB_COMMIT_URL}" ]; then
-          DCO_RANGE=$(jq -r '.after + "..HEAD"' ${GITHUB_EVENT_PATH})
-          else
-          DCO_RANGE=$(curl ${GITHUB_COMMIT_URL} | jq -r '.[0].parents[0].sha + "..HEAD"')
-          fi
-
-          range=
-          [ ! -z "${DCO_RANGE}" ] && range="-range ${DCO_RANGE}"
-          git-validation ${DCO_VERBOSITY} ${range} -run DCO,short-subject,dangling-whitespace
-          echo "::endgroup::"
-
-      - name: validate file headers
-        shell: bash
-        working-directory: src/github.com/containerd/accelerated-container-image
-        run: |
-          set -eu -o pipefail
-          echo "::group:: file headers"
-          ltag -t "script/validate/template" --excludes "vendor contrib" --check -v
-          echo "::endgroup::"
-
-  ut:
-    name: ut
+  unit-test:
+    name: Unit Test
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
 
@@ -119,70 +45,11 @@ jobs:
         run: |
           sudo GO_TESTFLAGS=-v make test
 
-
-  e2e:
-    name: e2e
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          path: src/github.com/containerd/accelerated-container-image
-          fetch-depth: 100
-
-      - name: install Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '1.19'
-
-      - name: set env
-        shell: bash
-        run: |
-          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-
-      - name: e2e
-        working-directory: src/github.com/containerd/accelerated-container-image
-        run: |
-          echo "[ init env ]"
-          sudo apt update && sudo apt install -y containerd.io libnl-3-200 libnl-genl-3-200
-          sudo modprobe -a target_core_user tcm_loop
-          wget https://github.com/containerd/overlaybd/releases/download/v1.0.4/overlaybd-1.0.4-0ubuntu1.22.04.x86_64.deb &&
-          sudo dpkg -i overlaybd-1.0.4-0ubuntu1.22.04.x86_64.deb
-          sudo systemctl enable /opt/overlaybd/overlaybd-tcmu.service
-          sudo systemctl start overlaybd-tcmu
-          sudo systemctl status overlaybd-tcmu
-          go mod tidy
-          make
-          sudo mkdir /etc/overlaybd-snapshotter
-          sudo echo '{"root": "/var/lib/overlaybd/","address": "/run/overlaybd-snapshotter/overlaybd.sock"}' | sudo tee -a /etc/overlaybd-snapshotter/config.json
-          sudo bin/overlaybd-snapshotter &
-          sudo mkdir -p /etc/containerd/
-          sudo echo -e '[proxy_plugins.overlaybd]\n\ttype = "snapshot"\n\taddress = "/run/overlaybd-snapshotter/overlaybd.sock"' | sudo tee -a /etc/containerd/config.toml
-          cat /etc/containerd/config.toml
-          sudo systemctl restart containerd
-          sudo containerd -v
-          sudo ctr plugin ls
-          echo "[ run container ]"
-          sudo bin/ctr rpull docker.io/overlaybd/redis:6.2.1_obd
-          sudo ctr run -d --net-host --snapshotter=overlaybd docker.io/overlaybd/redis:6.2.1_obd test
-          sudo ctr t ls
-          echo "[ obdconv ]"
-          sudo ctr i pull registry.hub.docker.com/library/redis:6.2.1
-          sudo bin/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
-          echo "[ record trace ]"
-          sudo bin/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
-          # sudo bin/ctr record-trace --disable-network-isolation --time 15 registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv_trace
-          sudo ctr i ls
-          touch /tmp/trace_file
-          sudo ctr run -d --snapshotter=overlaybd --snapshotter-label containerd.io/snapshot/overlaybd/record-trace=yes --snapshotter-label containerd.io/snapshot/overlaybd/record-trace-path=/tmp/trace_file registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv demo
-          ls -l /tmp/
-          sleep 15s
-          sudo ctr t ls
-          sudo ctr t kill -s 9 demo && sleep 5s && sudo ctr t ls
-          sudo ctr c rm demo && sudo ctr c ls
-          sudo ctr i rm registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
-          sleep 5s
-          ls -l /tmp/
-          sudo cat /var/log/overlaybd.log
+  e2e-test:
+    name: E2E Test
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') || github.event_name == 'push' }}
+    uses: ./.github/workflows/ci-e2e.yml
+    with:
+      commit-hash: ${{ github.event.pull_request.head.sha || github.sha }}
+      image-tag: ${{ github.event.pull_request.number || 'default' }}
+    secrets: inherit

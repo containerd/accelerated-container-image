@@ -17,6 +17,7 @@
 package convertor
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -119,6 +120,7 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	srcPathList := make([]string, 0)
 	digester := digest.Canonical.Digester()
 	countWriter := &writeCountWrapper{w: io.MultiWriter(contentWriter, digester.Hash())}
+	tarWriter := tar.NewWriter(countWriter)
 
 	openedSrcFile := make([]*os.File, 0)
 	defer func() {
@@ -128,26 +130,59 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	}()
 
 	for _, loader := range loader.files {
-		commitPath := filepath.Dir(loader.SrcFilePath)
-		commitFile := filepath.Join(commitPath, "overlaybd.commit")
-		srcPathList = append(srcPathList, commitFile)
+		if loader.DstFileName == "overlaybd.commit" {
+			commitPath := filepath.Dir(loader.SrcFilePath)
+			commitFile := filepath.Join(commitPath, "overlaybd.commit")
+			srcPathList = append(srcPathList, commitFile)
 
-		err := utils.Commit(ctx, commitPath, commitPath, true, "-z", "-t")
-		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to overlaybd-commit for sealed file")
-		}
+			err := utils.Commit(ctx, commitPath, commitPath, true, "-z", "-t")
+			if err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to overlaybd-commit for sealed file")
+			}
 
-		srcFile, err := os.Open(commitFile)
-		if err != nil {
-			return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
-		}
-		openedSrcFile = append(openedSrcFile, srcFile)
-		_, err = io.Copy(countWriter, bufio.NewReader(srcFile))
-		if err != nil {
-			logrus.Errorf("failed to do io.Copy(), error: %v", err)
-			return emptyLayer, err
+			srcFile, err := os.Open(commitFile)
+			if err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
+			}
+			openedSrcFile = append(openedSrcFile, srcFile)
+			_, err = io.Copy(countWriter, bufio.NewReader(srcFile))
+			if err != nil {
+				logrus.Errorf("failed to do io.Copy(), error: %v", err)
+				return emptyLayer, err
+			}
+		} else {
+			// normal file
+			srcPathList = append(srcPathList, loader.SrcFilePath)
+			srcFile, err := os.Open(loader.SrcFilePath)
+			if err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
+			}
+			openedSrcFile = append(openedSrcFile, srcFile)
+
+			fi, err := srcFile.Stat()
+			if err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.SrcFilePath)
+			}
+
+			if err := tarWriter.WriteHeader(&tar.Header{
+				Name:     loader.DstFileName,
+				Mode:     0444,
+				Size:     fi.Size(),
+				Typeflag: tar.TypeReg,
+			}); err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to write tar header")
+			}
+
+			if _, err := io.Copy(tarWriter, bufio.NewReader(srcFile)); err != nil {
+				return emptyLayer, errors.Wrapf(err, "failed to copy IO")
+			}
 		}
 	}
+
+	if err = tarWriter.Close(); err != nil {
+		return emptyLayer, errors.Wrapf(err, "failed to close tar file")
+	}
+
 	labels := map[string]string{
 		labelBuildLayerFrom: strings.Join(srcPathList, ","),
 	}
