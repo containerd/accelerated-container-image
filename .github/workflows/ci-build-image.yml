@@ -51,7 +51,7 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v4
         with:
-          tags: ghcr.io/${{ github.repository }}/ci-images:${{ inputs.image-tag }}
+          tags: ghcr.io/${{ github.repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
           push: true
           context: .
           platforms: linux/amd64
