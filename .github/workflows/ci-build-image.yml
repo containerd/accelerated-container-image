@@ -1,0 +1,62 @@
+name: CI | Build Image
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+env:
+  GO_VERSION: "1.19"
+  OBD_VERSION: "1.0.8"
+
+jobs:
+  build-image:
+    name: Build Image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login ghcr.io
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Env
+        shell: bash
+        run: |
+          git fetch --tags
+          releasever=$(git tag --sort=v:refname -l v* | tail -1)
+          releasever=${releasever#v}
+          echo "RELEASE_VERSION=${releasever}" >> $GITHUB_ENV
+
+      - name: Build and Push
+        uses: docker/build-push-action@v4
+        with:
+          tags: ghcr.io/${{ github.repository }}/ci-images:${{ inputs.image-tag }}
+          push: true
+          context: .
+          platforms: linux/amd64
+          file: ci/build_image/Dockerfile
+          build-args: |
+            RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+            GO_VERSION=${{ env.GO_VERSION }}
+            OBD_VERSION=${{ env.OBD_VERSION }}

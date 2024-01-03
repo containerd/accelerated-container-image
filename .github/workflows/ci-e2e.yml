@@ -1,0 +1,37 @@
+name: CI | E2E
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-image-amd64:
+    uses: ./.github/workflows/ci-build-image.yml
+    with:
+      commit-hash: ${{ inputs.commit-hash }}
+      image-tag: ${{ inputs.image-tag }}
+    secrets: inherit
+
+  run-ci-basic:
+    needs: build-test-image-amd64
+    uses: ./.github/workflows/ci-basic.yml
+    with:
+      image-tag: ${{ inputs.image-tag }}
+    secrets: inherit
+
+  run-ci-userspace-convertor:
+    needs: build-test-image-amd64
+    uses: ./.github/workflows/ci-userspace-convertor.yml
+    with:
+      commit-hash: ${{ inputs.commit-hash }}
+      image-tag: ${{ inputs.image-tag }}
+    secrets: inherit

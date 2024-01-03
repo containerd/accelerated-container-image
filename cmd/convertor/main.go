@@ -51,6 +51,10 @@ var (
 	rootCAs     []string
 	clientCerts []string
 	insecure    bool
+	// debug
+	reserve      bool
+	noUpload     bool
+	dumpManifest bool
 
 	rootCmd = &cobra.Command{
 		Use:   "convertor",
@@ -89,6 +93,9 @@ var (
 					ClientCerts: clientCerts,
 					Insecure:    insecure,
 				},
+				Reserve:      reserve,
+				NoUpload:     noUpload,
+				DumpManifest: dumpManifest,
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -165,6 +172,11 @@ func init() {
 	rootCmd.Flags().StringArrayVar(&rootCAs, "root-ca", nil, "root CA certificates")
 	rootCmd.Flags().StringArrayVar(&clientCerts, "client-cert", nil, "client cert certificates, should form in ${cert-file}:${key-file}")
 	rootCmd.Flags().BoolVarP(&insecure, "insecure", "", false, "don't verify the server's certificate chain and host name")
+
+	// debug
+	rootCmd.Flags().BoolVar(&reserve, "reserve", false, "reserve tmp data")
+	rootCmd.Flags().BoolVar(&noUpload, "no-upload", false, "don't upload layer and manifest")
+	rootCmd.Flags().BoolVar(&dumpManifest, "dump-manifest", false, "dump manifest")
 
 	rootCmd.MarkFlagRequired("repository")
 	rootCmd.MarkFlagRequired("input-tag")

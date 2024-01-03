@@ -1,0 +1,47 @@
+name: CI | Userspace Convertor
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+jobs:
+  run-ci-userspace-convertor:
+    name: Run CI | Userspace Convertor
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-images:${{ inputs.image-tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      volumes:
+        - /dev:/dev
+        - /lib/modules:/lib/modules
+        - /sys/kernel/config:/sys/kernel/config
+        - /mnt:/var/lib/containerd
+      options: --privileged
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0
+
+      - name: Start OverlayBD
+        working-directory: /app
+        shell: bash
+        run: |
+          bash start_services.sh
+          sleep 5s
+
+      - name: CI - uconv reproduce
+        working-directory: ci/uconv_reproduce
+        shell: bash
+        run: |
+          bash ci-uconv-reproduce.sh

@@ -516,6 +516,9 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 					}
 				} else if needRecordTrace && recordTracePath != "" {
 					err = o.updateSpec(parentID, false, recordTracePath)
+					if writeType != RoDir {
+						o.updateSpec(id, false, recordTracePath)
+					}
 				} else {
 					// For the compatibility of images which have no accel layer
 					err = o.updateSpec(parentID, false, "")

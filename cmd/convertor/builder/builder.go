@@ -53,6 +53,9 @@ type BuilderOptions struct {
 	DB        database.ConversionDatabase
 	Engine    BuilderEngineType
 	CertOption
+	Reserve      bool
+	NoUpload     bool
+	DumpManifest bool
 }
 
 type overlaybdBuilder struct {
@@ -106,6 +109,9 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 	}
 	engineBase.host = refspec.Hostname()
 	engineBase.repository = strings.TrimPrefix(refspec.Locator, engineBase.host+"/")
+	engineBase.reserve = opt.Reserve
+	engineBase.noUpload = opt.NoUpload
+	engineBase.dumpManifest = opt.DumpManifest
 
 	var engine builderEngine
 	switch opt.Engine {

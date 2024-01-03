@@ -1,0 +1,79 @@
+name: CI | Basic
+on:
+  workflow_call:
+    inputs:
+      image-tag:
+        required: true
+        type: string
+
+jobs:
+  run-ci-basic:
+    name: Run CI | Basic
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/${{ github.repository }}/ci-images:${{ inputs.image-tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      volumes:
+        - /dev:/dev
+        - /lib/modules:/lib/modules
+        - /sys/kernel/config:/sys/kernel/config
+        - /mnt:/var/lib/containerd
+      options: --privileged
+
+    steps:
+      - name: Start OverlayBD
+        working-directory: /app
+        shell: bash
+        run: |
+          set -x
+          bash start_services.sh
+          sleep 5s
+          ps axf | grep overlaybd
+          ps axf | grep containerd
+          lsmod | grep target
+          lsmod | grep overlay
+          mount | grep cgroup
+          cat /sys/fs/cgroup/cgroup.subtree_control
+          uname -a
+          containerd -v
+          runc -v
+
+      - name: CI - run overlaybd container
+        shell: bash
+        run: |
+          /opt/overlaybd/snapshotter/ctr rpull docker.io/overlaybd/redis:6.2.1_obd
+          ctr run -d --net-host --snapshotter=overlaybd docker.io/overlaybd/redis:6.2.1_obd test
+          ctr t ls | grep test
+          ctr t kill -s 9 test && sleep 5s && ctr t ls
+          ctr c rm test && ctr c ls
+          ctr i rm docker.io/overlaybd/redis:6.2.1_obd && ctr i ls
+
+      - name: CI - obdconv
+        shell: bash
+        run: |
+          ctr i pull registry.hub.docker.com/library/redis:6.2.1
+          /opt/overlaybd/snapshotter/ctr obdconv registry.hub.docker.com/library/redis:6.2.1 registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
+          ctr i ls | grep 6.2.1_obd_new
+
+      - name: CI - record trace
+        shell: bash
+        run: |
+          /opt/overlaybd/snapshotter/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
+          echo "[ by record-trace ]"
+          /opt/overlaybd/snapshotter/ctr record-trace --runtime "io.containerd.runc.v2" --disable-network-isolation --time 15 registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv_trace
+          ctr i ls | grep 6.2.1_obdconv_trace
+          echo "[ by label ]"
+          touch /tmp/trace_file
+          ctr run -d --snapshotter=overlaybd --snapshotter-label containerd.io/snapshot/overlaybd/record-trace=yes --snapshotter-label containerd.io/snapshot/overlaybd/record-trace-path=/tmp/trace_file registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv demo
+          sleep 1s
+          ls -l /tmp/ | grep trace_file.lock
+          sleep 15s
+          ctr t ls | grep demo
+          ctr t kill -s 9 demo && sleep 5s && ctr t ls
+          ctr c rm demo && ctr c ls
+          sleep 1s
+          ls -l /tmp/ | grep trace_file.ok
+          ctr i ls
