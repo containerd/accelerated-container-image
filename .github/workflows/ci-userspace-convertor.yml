@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     container:
-      image: ghcr.io/${{ github.repository }}/ci-images:${{ inputs.image-tag }}
+      image: ghcr.io/${{ github.repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
