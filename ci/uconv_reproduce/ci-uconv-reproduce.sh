@@ -1,5 +1,7 @@
 #!/bin/bash
 
+apt install -y python3
+
 convertor="/opt/overlaybd/snapshotter/convertor"
 images=("centos:centos7.9.2009" "ubuntu:22.04" "redis:7.2.3" "wordpress:6.4.2" "nginx:1.25.3")
 repo="registry.hub.docker.com/overlaybd"
@@ -29,7 +31,8 @@ do
     for file in ${files[@]}
     do
         fn="${file}.json"
-        diff ${tmp_dir}/${fn} ${ci_base}/${img}/${fn}
+        # diff ${tmp_dir}/${fn} ${ci_base}/${img}/${fn}
+        python3 compare_layers.py ${file} ${tmp_dir}/${fn} ${ci_base}/${img}/${fn}
         ret=$?
         if [[ ${ret} -eq 0 ]]; then
             echo "${prefix} ${img} ${file} consistent"

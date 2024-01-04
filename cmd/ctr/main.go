@@ -18,15 +18,16 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
+	"time"
 
 	"github.com/containerd/containerd/cmd/ctr/app"
-	"github.com/containerd/containerd/pkg/seed"
 	"github.com/urfave/cli"
 )
 
 func init() {
-	seed.WithTimeAndRand()
+	rand.Seed(time.Now().UnixNano())
 }
 
 var pluginCmds = []cli.Command{
