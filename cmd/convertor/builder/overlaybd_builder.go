@@ -102,7 +102,11 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 		mkfs := e.mkfs && (idx == 0)
 		vsizeGB := 0
 		if idx == 0 {
-			vsizeGB = 64
+			if mkfs {
+				vsizeGB = e.vsize
+			} else {
+				vsizeGB = 64 // in case that using default baselayer
+			}
 		}
 		if err := e.create(ctx, layerDir, mkfs, vsizeGB); err != nil {
 			return err
@@ -310,7 +314,7 @@ func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bo
 	opts := []string{"-s", fmt.Sprintf("%d", vsizeGB)}
 	if mkfs {
 		opts = append(opts, "--mkfs")
-		logrus.Infof("mkfs for baselayer")
+		logrus.Infof("mkfs for baselayer, vsize: %d GB", vsizeGB)
 	}
 	return utils.Create(ctx, dir, opts...)
 }

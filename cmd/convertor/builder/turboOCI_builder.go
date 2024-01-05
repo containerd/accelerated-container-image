@@ -233,9 +233,14 @@ func (e *turboOCIBuilderEngine) createIdentifier(idx int) error {
 }
 
 func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string, mkfs bool) error {
-	opts := []string{"-s", "64", "--turboOCI"}
+	vsizeGB := 64
+	if mkfs {
+		vsizeGB = e.vsize
+	}
+	opts := []string{"-s", fmt.Sprintf("%d", vsizeGB), "--turboOCI"}
 	if mkfs {
 		opts = append(opts, "--mkfs")
+		logrus.Infof("mkfs for baselayer, vsize: %d GB", vsizeGB)
 	}
 	return utils.Create(ctx, dir, opts...)
 }

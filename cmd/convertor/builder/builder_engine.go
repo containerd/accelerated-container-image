@@ -73,6 +73,7 @@ type builderEngineBase struct {
 	workDir      string
 	oci          bool
 	mkfs         bool
+	vsize        int
 	db           database.ConversionDatabase
 	host         string
 	repository   string

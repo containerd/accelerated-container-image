@@ -3,7 +3,36 @@
 We provide a ctr command tool to convert OCIv1 images into overlaybd format, which is stored in `bin` after `make` or downloading the release package.
 
 # Basic Usage
+```bash
+# usage
+$ bin/ctr obdconv --help
 
+NAME:
+   ctr obdconv - convert image layer into overlaybd format type
+
+USAGE:
+   ctr obdconv [command options] <src-image> <dst-image>
+
+DESCRIPTION:
+   Export images to an OCI tar[.gz] into zfile format
+
+OPTIONS:
+   --skip-verify, -k       skip SSL certificate validation
+   --plain-http            allow connections using plain HTTP
+   --user value, -u value  user[:password] Registry user and password
+   --refresh value         refresh token for authorization server
+   --hosts-dir value       Custom hosts configuration directory
+   --tlscacert value       path to TLS root CA
+   --tlscert value         path to TLS client certificate
+   --tlskey value          path to TLS client key
+   --http-dump             dump all HTTP request/responses when interacting with container registry
+   --http-trace            enable HTTP tracing for registry interactions
+   --fstype value          filesystem type(required), used to mount block device, support specifying mount options and mkfs options, separate fs type and options by ';', separate mount options by ',', separate mkfs options by ' ' (default: "ext4")
+   --dbstr value           data base config string used for layer deduplication
+   --algorithm value       compress algorithm uses in zfile, [lz4|zstd]
+   --bs value              The size of a compressed data block in KB. Must be a power of two between 4K~64K [4/8/16/32/64] (default: 0)
+   --vsize value           virtual block device size (GB) (default: 64)
+```
 ```bash
 # pull the source image
 sudo ctr i pull registry.hub.docker.com/library/redis:6.2.1

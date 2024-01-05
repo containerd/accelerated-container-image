@@ -50,6 +50,7 @@ type BuilderOptions struct {
 	WorkDir   string
 	OCI       bool
 	Mkfs      bool
+	Vsize     int
 	DB        database.ConversionDatabase
 	Engine    BuilderEngineType
 	CertOption
@@ -101,6 +102,7 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 	engineBase.workDir = opt.WorkDir
 	engineBase.oci = opt.OCI
 	engineBase.mkfs = opt.Mkfs
+	engineBase.vsize = opt.Vsize
 	engineBase.db = opt.DB
 
 	refspec, err := reference.Parse(opt.Ref)

@@ -40,6 +40,7 @@ var (
 	oci       bool
 	mkfs      bool
 	verbose   bool
+	vsize     int
 	fastoci   string
 	turboOCI  string
 	overlaybd string
@@ -87,6 +88,7 @@ var (
 				WorkDir:   dir,
 				OCI:       oci,
 				Mkfs:      mkfs,
+				Vsize:     vsize,
 				CertOption: builder.CertOption{
 					CertDirs:    certDirs,
 					RootCAs:     rootCAs,
@@ -160,8 +162,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
 	rootCmd.Flags().BoolVarP(&mkfs, "mkfs", "", true, "make ext4 fs in bottom layer")
+	rootCmd.Flags().IntVarP(&vsize, "vsize", "", 64, "virtual block device size (GB)")
 	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)")
-
 	rootCmd.Flags().StringVar(&turboOCI, "turboOCI", "", "build 'Overlaybd-Turbo OCIv1' format")
 	rootCmd.Flags().StringVar(&overlaybd, "overlaybd", "", "build overlaybd format")
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")

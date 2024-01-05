@@ -226,14 +226,16 @@ type overlaybdConvertor struct {
 	host     string
 	repo     string
 	zfileCfg ZFileConfig
+	vsize    int
 }
 
-func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.Snapshotter, resolver remotes.Resolver, ref string, dbstr string, zfileCfg ZFileConfig) (ImageConvertor, error) {
+func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.Snapshotter, resolver remotes.Resolver, ref string, dbstr string, zfileCfg ZFileConfig, vsize int) (ImageConvertor, error) {
 	c := &overlaybdConvertor{
 		cs:       cs,
 		sn:       sn,
 		remote:   false,
 		zfileCfg: zfileCfg,
+		vsize:    vsize,
 	}
 	var err error
 	if dbstr != "" {
@@ -535,6 +537,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			snapshots.WithLabels(map[string]string{
 				label.SupportReadWriteMode: "dir",
 				label.OverlayBDBlobFsType:  fsType,
+				label.OverlayBDVsize:       fmt.Sprintf("%d", c.vsize),
 			}),
 		}
 		cfgStr, err := json.Marshal(c.zfileCfg)
@@ -682,6 +685,7 @@ type options struct {
 	imgRef    string
 	algorithm string
 	blockSize int
+	vsize     int
 	resolver  remotes.Resolver
 	client    *containerd.Client
 }
@@ -719,6 +723,13 @@ func WithAlgorithm(algorithm string) Option {
 func WithBlockSize(blockSize int) Option {
 	return func(o *options) error {
 		o.blockSize = blockSize
+		return nil
+	}
+}
+
+func WithVsize(vsize int) Option {
+	return func(o *options) error {
+		o.vsize = vsize
 		return nil
 	}
 }
@@ -762,7 +773,7 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 			Algorithm: copts.algorithm,
 			BlockSize: copts.blockSize,
 		}
-		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr, zfileCfg)
+		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr, zfileCfg, copts.vsize)
 		if err != nil {
 			return nil, err
 		}
