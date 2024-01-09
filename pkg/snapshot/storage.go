@@ -551,11 +551,18 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		if !writable {
 			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
-		log.G(ctx).Infof("prepare writable layer. (sn: %s)", id)
 		vsizeGB := 0
 		if info.Parent == "" {
-			vsizeGB = 64
+			if vsize, ok := info.Labels[label.OverlayBDVsize]; ok {
+				vsizeGB, err = strconv.Atoi(vsize)
+				if err != nil {
+					vsizeGB = 64
+				}
+			} else {
+				vsizeGB = 64
+			}
 		}
+		log.G(ctx).Infof("prepare writable layer. (sn: %s, vsize: %d GB)", id, vsizeGB)
 		if err := o.prepareWritableOverlaybd(ctx, id, vsizeGB); err != nil {
 			return err
 		}

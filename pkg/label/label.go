@@ -70,6 +70,9 @@ const (
 	// ZFileConfig is the config of ZFile
 	ZFileConfig = "containerd.io/snapshot/overlaybd/zfile-config"
 
+	// OverlayBD virtual block device size
+	OverlayBDVsize = "containerd.io/snapshot/overlaybd/vsize"
+
 	// CRIImageRef is the image-ref from cri
 	CRIImageRef = "containerd.io/snapshot/cri.image-ref"
 

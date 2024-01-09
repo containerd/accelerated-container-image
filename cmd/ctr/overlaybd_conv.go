@@ -52,8 +52,13 @@ var convertCommand = cli.Command{
 		},
 		cli.IntFlag{
 			Name:  "bs",
-			Usage: "The size of a compressed data block in KB. Must be a power of two between 4K~64K [4/8/16/32/64])",
+			Usage: "The size of a compressed data block in KB. Must be a power of two between 4K~64K [4/8/16/32/64]",
 			Value: 0,
+		},
+		cli.IntFlag{
+			Name:  "vsize",
+			Usage: "virtual block device size (GB)",
+			Value: 64,
 		},
 	),
 	Action: func(context *cli.Context) error {
@@ -98,6 +103,9 @@ var convertCommand = cli.Command{
 		obdOpts = append(obdOpts, obdconv.WithAlgorithm(algorithm))
 		blockSize := context.Int("bs")
 		obdOpts = append(obdOpts, obdconv.WithBlockSize(blockSize))
+		vsize := context.Int("vsize")
+		fmt.Printf("vsize: %d GB\n", vsize)
+		obdOpts = append(obdOpts, obdconv.WithVsize(vsize))
 
 		resolver, err := commands.GetResolver(ctx, context)
 		if err != nil {

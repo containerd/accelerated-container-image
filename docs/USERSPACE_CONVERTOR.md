@@ -43,6 +43,7 @@ Flags:
   -d, --dir string                directory used for temporary data (default "tmp_conv")
       --oci                       export image with oci spec
       --mkfs                      make ext4 fs in bottom layer (default true)
+      --vsize int                 virtual block device size (GB) (default 64)
       --fastoci string            build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
       --turboOCI string           build 'Overlaybd-Turbo OCIv1' format
       --overlaybd string          build overlaybd format
@@ -52,11 +53,15 @@ Flags:
       --root-ca stringArray       root CA certificates
       --client-cert stringArray   client cert certificates, should form in ${cert-file}:${key-file}
       --insecure                  don't verify the server's certificate chain and host name
+      --reserve                   reserve tmp data
+      --no-upload                 don't upload layer and manifest
+      --dump-manifest             dump manifest
   -h, --help                      help for convertor
 
 # examples
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
+$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd --vsize 256
 
 ```
 
