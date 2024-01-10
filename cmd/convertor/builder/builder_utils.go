@@ -217,12 +217,7 @@ func uploadBytes(ctx context.Context, pusher remotes.Pusher, desc specs.Descript
 		return err
 	}
 	defer cw.Close()
-
-	err = content.Copy(ctx, cw, bytes.NewReader(data), desc.Size, desc.Digest)
-	if err != nil {
-		return err
-	}
-	return nil
+	return content.Copy(ctx, cw, bytes.NewReader(data), desc.Size, desc.Digest)
 }
 
 func buildArchiveFromFiles(ctx context.Context, target string, compress compression.Compression, files ...string) error {

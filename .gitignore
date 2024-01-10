@@ -1,2 +1,5 @@
 bin/
 .vscode
+vendor/
+tmp_conv/
+tmp/

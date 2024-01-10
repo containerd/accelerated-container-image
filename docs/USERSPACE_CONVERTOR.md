@@ -65,7 +65,7 @@ $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd 
 
 ```
 
-### Layer Deduplication
+### Layer/Manifest Deduplication
 
 To avoid converting the same layer for every image conversion, a database is required to store the correspondence between OCIv1 image layer and overlaybd layer.
 
@@ -85,6 +85,21 @@ CREATE TABLE `overlaybd_layers` (
 ) DEFAULT CHARSET=utf8;
 ```
 
+If you also want caching for manifests to avoid reconverting the same manifest twice, you can create the `overlaybd_manifests` table, the table schema is as follows:
+
+```sql
+CREATE TABLE `overlaybd_manifests` (
+  `host` varchar(255) NOT NULL,
+  `repo` varchar(255) NOT NULL,
+  `src_digest` varchar(255) NOT NULL COMMENT 'digest of the normal image manifest',
+  `out_digest` varchar(255) NOT NULL COMMENT 'digest of overlaybd manifest',
+  `data_size` bigint(20) NOT NULL COMMENT 'size of overlaybd manifest',
+  `mediatype` varchar(255) NOT NULL COMMENT 'mediatype of the converted image manifest',
+  PRIMARY KEY (`host`,`repo`,`src_digest`, `mediatype`),
+  KEY `index_registry_src_digest` (`host`,`src_digest`) USING BTREE
+) DEFAULT CHARSET=utf8;
+```
+
 with this database you can then provide the following flags:
 
 ```bash
@@ -95,6 +110,8 @@ Flags:
 # example
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd --db-str "dbuser:dbpass@tcp(127.0.0.1:3306)/dedup" --db-type mysql
 ```
+
+* Note that we have also provided some tools to create such a database and examples of usage as well as a dockerfile that could be used to setup a simple converter with caching capabilities, see [samples](../cmd/convertor/resources/samples).
 
 ## libext2fs
 

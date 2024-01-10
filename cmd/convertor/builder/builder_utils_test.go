@@ -291,7 +291,7 @@ func Test_uploadBlob(t *testing.T) {
 	ctx := context.Background()
 	// Create a new inmemory registry to push to
 	reg := testingresources.GetTestRegistry(t, ctx, testingresources.RegistryOptions{
-		InmemoryOnly:              true,
+		InmemoryRegistryOnly:      true,
 		ManifestPushIgnoresLayers: false,
 	})
 

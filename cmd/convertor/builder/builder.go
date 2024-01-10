@@ -134,6 +134,14 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 	alreadyConverted := make([]chan *v1.Descriptor, b.layers)
 	downloaded := make([]chan error, b.layers)
 	converted := make([]chan error, b.layers)
+
+	// check if manifest conversion result is already present in registry, if so, we can avoid conversion.
+	// when errors are encountered fallback to regular conversion
+	if convertedDesc, err := b.engine.CheckForConvertedManifest(ctx); err == nil && convertedDesc.Digest != "" {
+		logrus.Infof("Image found already converted in registry with digest %s", convertedDesc.Digest)
+		return nil
+	}
+
 	// Errgroups will close the context after wait returns so the operations need their own
 	// derived context.
 	g, rctx := errgroup.WithContext(ctx)
@@ -231,6 +239,7 @@ func (b *overlaybdBuilder) Build(ctx context.Context) error {
 	if err := b.engine.UploadImage(ctx); err != nil {
 		return errors.Wrap(err, "failed to upload manifest or config")
 	}
+	b.engine.StoreConvertedManifestDetails(ctx)
 	logrus.Info("convert finished")
 	return nil
 }
