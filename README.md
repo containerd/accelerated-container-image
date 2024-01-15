@@ -1,5 +1,7 @@
 # Accelerated Container Image
 
+![logo](https://github.com/containerd/accelerated-container-image/blob/main/docs/images/overlaybd_icon_1x.png)
+
 Accelerated Container Image is an open-source implementation of paper **["DADI: Block-Level Image Service for Agile and Elastic Application Deployment. USENIX ATC'20"](https://www.usenix.org/conference/atc20/presentation/li-huiba)**.
 
 DADI (Data Accelerator for Disaggregated Infrastructure) is a solution for container acceleration including remote image and other features which has been widely used in Alibaba and Alibaba Cloud. By now, it has been already integrated by **Alibaba Cloud Registry (ACR)**, and **Alibaba serverless services (FC [FaaSNet. USENIX ATC'21](https://www.usenix.org/system/files/atc21-wang-ao.pdf) / SAE / ECI, etc)** which enter **the Forrester leader quadrant**.
