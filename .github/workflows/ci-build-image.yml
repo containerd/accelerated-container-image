@@ -11,7 +11,7 @@ on:
 
 env:
   GO_VERSION: "1.19"
-  OBD_VERSION: "1.0.8"
+  OBD_VERSION: "1.0.9"
 
 jobs:
   build-image:
