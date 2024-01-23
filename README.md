@@ -1,6 +1,6 @@
 # Accelerated Container Image
 
-![logo](https://github.com/containerd/accelerated-container-image/blob/main/docs/images/overlaybd_icon_1x.png)
+![logo](https://github.com/containerd/accelerated-container-image/blob/main/docs/images/overlaybd_logo.svg)
 
 Accelerated Container Image is an open-source implementation of paper **["DADI: Block-Level Image Service for Agile and Elastic Application Deployment. USENIX ATC'20"](https://www.usenix.org/conference/atc20/presentation/li-huiba)**.
 
