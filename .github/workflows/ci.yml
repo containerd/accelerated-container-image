@@ -45,11 +45,23 @@ jobs:
         run: |
           sudo GO_TESTFLAGS=-v make test
 
+  lowercase-repo:
+    name: Lowercase Repo
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      repository: ${{ steps.lowercase_repository.outputs.repository }}
+    steps:
+    - id: lowercase_repository
+      run: echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
   e2e-test:
+    needs: lowercase-repo
     name: E2E Test
     if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') || github.event_name == 'push' }}
     uses: ./.github/workflows/ci-e2e.yml
     with:
       commit-hash: ${{ github.event.pull_request.head.sha || github.sha }}
       image-tag: ${{ github.event.pull_request.number || 'default' }}
+      github-repository: ${{ needs.lowercase-repo.outputs.repository }}
     secrets: inherit

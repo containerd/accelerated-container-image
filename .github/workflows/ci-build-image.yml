@@ -8,6 +8,9 @@ on:
       image-tag:
         required: true
         type: string
+      github-repository:
+        required: true
+        type: string
 
 env:
   GO_VERSION: "1.19"
@@ -51,7 +54,7 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v4
         with:
-          tags: ghcr.io/${{ github.repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
+          tags: ghcr.io/${{ inputs.github-repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
           push: true
           context: .
           platforms: linux/amd64

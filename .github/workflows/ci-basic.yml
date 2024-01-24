@@ -5,6 +5,9 @@ on:
       image-tag:
         required: true
         type: string
+      github-repository:
+        required: true
+        type: string
 
 jobs:
   run-ci-basic:
@@ -12,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     container:
-      image: ghcr.io/${{ github.repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
+      image: ghcr.io/${{ inputs.github-repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
