@@ -1,52 +1,75 @@
 #!/bin/bash
 
-apt install -y python3
+apt install -y python3 jq
 
 convertor="/opt/overlaybd/snapshotter/convertor"
 images=("centos:centos7.9.2009" "ubuntu:22.04" "redis:7.2.3" "wordpress:6.4.2" "nginx:1.25.3")
-repo="registry.hub.docker.com/overlaybd"
+registry="localhost:5000"
 ci_base=$(pwd)
 
 result=0
 
-for image in ${images[@]}
+for image in "${images[@]}"
 do
+    from_img="registry.hub.docker.com/overlaybd/${image}"
+    ctr i pull "${from_img}" &> /dev/null
+    ctr i tag "${from_img}" "${registry}/${image}" &> /dev/null
+    ctr i push "${registry}/${image}" &> /dev/null
+
     img=${image%%":"*}
     tag=${image##*":"}
-    echo ${img} ${tag}
+    echo "${img} ${tag}"
 
-    o_tag="${tag}_obd"
-    tmp_dir="${ci_base}/tmp_conv_${image/:/_}"
+    workspace="${ci_base}/workspace_${image/:/_}"
 
-    rm -rf ${tmp_dir}
-    mkdir -p ${tmp_dir}
+    rm -rf "${workspace}"
+    mkdir -p "${workspace}"
 
-    ${convertor} -r ${repo}/${img}  \
-        --reserve --no-upload --dump-manifest \
-        -i ${tag} -o ${o_tag} -d ${tmp_dir} &>${tmp_dir}/convert.out
+    tag_obd="${tag}_overlaybd"
+    tag_turbo="${tag}_turbo"
+    manifest_obd="${workspace}/manifest.json"
+    manifest_turbo="${workspace}/manifest-turbo.json"
+    config_obd="${workspace}/config.json"
+    config_turbo="${workspace}/config-turbo.json"
+    output_obd="${workspace}/convert.overlaybd.out"
+    output_turbo="${workspace}/convert.turbo.out"
+
+    ${convertor} -r "${registry}/${img}" -i "${tag}" --overlaybd "${tag_obd}" -d "${workspace}/overlaybd_tmp_conv" &> "${output_obd}"
+    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_obd}" "${registry}/v2/${img}/manifests/${tag_obd}" &> /dev/null
+    configDigest=$(jq '.config.digest' "${manifest_obd}")
+    configDigest=${configDigest//\"/}
+    curl -o "${config_obd}" "${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
+
+    ${convertor} -r "${registry}/${img}" -i "${tag}" --turboOCI "${tag_turbo}" -d "${workspace}/turbo_tmp_conv" &> "${output_turbo}"
+    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_turbo}" "${registry}/v2/${img}/manifests/${tag_turbo}" &> /dev/null
+    configDigest=$(jq '.config.digest' "${manifest_turbo}")
+    configDigest=${configDigest//\"/}
+    curl -o "${config_turbo}" "${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
 
     prefix=$(date +%Y%m%d%H%M%S)
-    files=("manifest" "config")
+
+    mode=("manifest" "config" "manifest" "config")
+    actual=("${manifest_obd}" "${config_obd}" "${manifest_turbo}" "${config_turbo}")
+    expected=("${ci_base}/${img}/manifest.json" "${ci_base}/${img}/config.json" "${ci_base}/${img}/manifest-turbo.json" "${ci_base}/${img}/config-turbo.json")
+
     conv_res=0
-    for file in ${files[@]}
-    do
-        fn="${file}.json"
-        # diff ${tmp_dir}/${fn} ${ci_base}/${img}/${fn}
-        python3 compare_layers.py ${file} ${tmp_dir}/${fn} ${ci_base}/${img}/${fn}
+    n=${#mode[@]}
+    for ((i=0; i<n; i++)); do
+        python3 compare_layers.py ${mode[$i]} ${actual[$i]} ${expected[$i]}
         ret=$?
         if [[ ${ret} -eq 0 ]]; then
-            echo "${prefix} ${img} ${file} consistent"
+            echo "${prefix} ${img} ${expected[$i]} consistent"
         else
-            echo "${prefix} ${img} ${file} diff"
+            echo "${prefix} ${img} ${expected[$i]} diff"
             conv_res=1
         fi
     done
 
     if [[ ${conv_res} -eq 1 ]]; then
-        cat ${tmp_dir}/convert.out | sed 's/\\n/\n/g'
+        sed 's/\\n/\n/g' < "${output_obd}"
+        sed 's/\\n/\n/g' < "${output_turbo}"
         result=1
     fi
-    rm -rf ${tmp_dir}
 done
 
 exit ${result}

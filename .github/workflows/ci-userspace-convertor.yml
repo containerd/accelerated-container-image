@@ -41,7 +41,9 @@ jobs:
         shell: bash
         run: |
           bash start_services.sh
-          sleep 5s
+          sleep 3s
+          docker run -d -p 5000:5000 --restart always --name registry registry:2
+          sleep 3s
 
       - name: CI - uconv reproduce
         working-directory: ci/uconv_reproduce
