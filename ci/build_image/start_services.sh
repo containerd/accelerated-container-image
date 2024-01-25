@@ -20,5 +20,3 @@ fi
 /opt/overlaybd/snapshotter/overlaybd-snapshotter &>/var/log/overlaybd-snapshotter.log &
 
 /sbin/modprobe overlay && /usr/bin/containerd &>/var/log/containerd.log &
-
-dockerd &>/var/log/dockerd.log &

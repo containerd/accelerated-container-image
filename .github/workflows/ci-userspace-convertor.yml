@@ -28,6 +28,8 @@ jobs:
         - /sys/kernel/config:/sys/kernel/config
         - /mnt:/var/lib/containerd
       options: --privileged
+      env:
+        DOCKER_HOST: "unix:///app/dockerd/docker.sock"
 
     steps:
       - name: Checkout
@@ -41,12 +43,29 @@ jobs:
         shell: bash
         run: |
           bash start_services.sh
-          sleep 3s
-          docker run -d -p 5000:5000 --restart always --name registry registry:2
-          sleep 3s
+          sleep 5s
+
+      - name: Prepare Local Registry
+        working-directory: ci/scripts
+        shell: bash
+        run: |
+          bash new_registry.sh
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/centos:centos7.9.2009 localhost:5000/centos:centos7.9.2009 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/ubuntu:22.04          localhost:5000/ubuntu:22.04 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/redis:7.2.3           localhost:5000/redis:7.2.3 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/wordpress:6.4.2       localhost:5000/wordpress:6.4.2 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/nginx:1.25.3          localhost:5000/nginx:1.25.3
 
       - name: CI - uconv reproduce
         working-directory: ci/uconv_reproduce
         shell: bash
         run: |
           bash ci-uconv-reproduce.sh
+
+      - name: CI - uconv E2E
+        working-directory: ci/scripts
+        shell: bash
+        run: |
+          /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -i 7.2.3 --overlaybd 7.2.3_overlaybd --turboOCI 7.2.3_turbo
+          bash run_container.sh localhost:5000/redis:7.2.3_overlaybd
+          bash run_container.sh localhost:5000/redis:7.2.3_turbo

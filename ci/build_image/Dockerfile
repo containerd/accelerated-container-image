@@ -48,10 +48,8 @@ RUN apt-get update && apt-get install -y apt-transport-https ca-certificates cur
       "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
       $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
     apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-RUN \
-    apt update && apt install -y libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
+    apt-get install -y libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
     wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
     dpkg -i overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
     dpkg -i overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb && \

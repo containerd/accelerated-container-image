@@ -83,17 +83,28 @@ func NewOverlayBDBuilder(ctx context.Context, opt BuilderOptions) (Builder, erro
 		TLSClientConfig:       tlsConfig,
 		ExpectContinueTimeout: 5 * time.Second,
 	}
+	client := &http.Client{Transport: transport}
 	resolver := docker.NewResolver(docker.ResolverOptions{
-		Credentials: func(s string) (string, string, error) {
-			if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
-				return opt.Auth[0:i], opt.Auth[i+1:], nil
-			}
-			return "", "", nil
-		},
-		PlainHTTP: opt.PlainHTTP,
-		Client: &http.Client{
-			Transport: transport,
-		},
+		Hosts: docker.ConfigureDefaultRegistries(
+			docker.WithAuthorizer(docker.NewDockerAuthorizer(
+				docker.WithAuthClient(client),
+				docker.WithAuthHeader(make(http.Header)),
+				docker.WithAuthCreds(func(s string) (string, string, error) {
+					if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
+						return opt.Auth[0:i], opt.Auth[i+1:], nil
+					}
+					return "", "", nil
+				}),
+			)),
+			docker.WithClient(client),
+			docker.WithPlainHTTP(func(s string) (bool, error) {
+				if opt.PlainHTTP {
+					return docker.MatchAllHosts(s)
+				} else {
+					return false, nil
+				}
+			}),
+		),
 	})
 	engineBase, err := getBuilderEngineBase(ctx, resolver, opt.Ref, opt.TargetRef)
 	if err != nil {

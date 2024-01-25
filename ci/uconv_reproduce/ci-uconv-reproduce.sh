@@ -1,6 +1,6 @@
 #!/bin/bash
 
-apt install -y python3 jq
+apt update && apt install -y python3 jq
 
 convertor="/opt/overlaybd/snapshotter/convertor"
 images=("centos:centos7.9.2009" "ubuntu:22.04" "redis:7.2.3" "wordpress:6.4.2" "nginx:1.25.3")
@@ -11,11 +11,6 @@ result=0
 
 for image in "${images[@]}"
 do
-    from_img="registry.hub.docker.com/overlaybd/${image}"
-    ctr i pull "${from_img}" &> /dev/null
-    ctr i tag "${from_img}" "${registry}/${image}" &> /dev/null
-    ctr i push "${registry}/${image}" &> /dev/null
-
     img=${image%%":"*}
     tag=${image##*":"}
     echo "${img} ${tag}"
@@ -35,16 +30,16 @@ do
     output_turbo="${workspace}/convert.turbo.out"
 
     ${convertor} -r "${registry}/${img}" -i "${tag}" --overlaybd "${tag_obd}" -d "${workspace}/overlaybd_tmp_conv" &> "${output_obd}"
-    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_obd}" "${registry}/v2/${img}/manifests/${tag_obd}" &> /dev/null
+    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_obd}" "https://${registry}/v2/${img}/manifests/${tag_obd}" &> /dev/null
     configDigest=$(jq '.config.digest' "${manifest_obd}")
     configDigest=${configDigest//\"/}
-    curl -o "${config_obd}" "${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
+    curl -o "${config_obd}" "https://${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
 
     ${convertor} -r "${registry}/${img}" -i "${tag}" --turboOCI "${tag_turbo}" -d "${workspace}/turbo_tmp_conv" &> "${output_turbo}"
-    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_turbo}" "${registry}/v2/${img}/manifests/${tag_turbo}" &> /dev/null
+    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_turbo}" "https://${registry}/v2/${img}/manifests/${tag_turbo}" &> /dev/null
     configDigest=$(jq '.config.digest' "${manifest_turbo}")
     configDigest=${configDigest//\"/}
-    curl -o "${config_turbo}" "${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
+    curl -o "${config_turbo}" "https://${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
 
     prefix=$(date +%Y%m%d%H%M%S)
 
