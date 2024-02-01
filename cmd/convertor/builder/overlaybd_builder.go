@@ -26,7 +26,7 @@ import (
 	"path"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
-	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	sn "github.com/containerd/accelerated-container-image/pkg/types"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/containerd/containerd/errdefs"
@@ -50,17 +50,17 @@ type overlaybdConvertResult struct {
 
 type overlaybdBuilderEngine struct {
 	*builderEngineBase
-	overlaybdConfig *snapshot.OverlayBDBSConfig
+	overlaybdConfig *sn.OverlayBDBSConfig
 	overlaybdLayers []overlaybdConvertResult
 }
 
 func NewOverlayBDBuilderEngine(base *builderEngineBase) builderEngine {
-	config := &snapshot.OverlayBDBSConfig{
-		Lowers:     []snapshot.OverlayBDBSConfigLower{},
+	config := &sn.OverlayBDBSConfig{
+		Lowers:     []sn.OverlayBDBSConfigLower{},
 		ResultFile: "",
 	}
 	if !base.mkfs {
-		config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
+		config.Lowers = append(config.Lowers, sn.OverlayBDBSConfigLower{
 			File: overlaybdBaseLayer,
 		})
 		logrus.Infof("using default baselayer")
@@ -111,7 +111,7 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 		if err := e.create(ctx, layerDir, mkfs, vsizeGB); err != nil {
 			return err
 		}
-		e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
+		e.overlaybdConfig.Upper = sn.OverlayBDBSConfigUpper{
 			Data:  path.Join(layerDir, "writable_data"),
 			Index: path.Join(layerDir, "writable_index"),
 		}
@@ -130,7 +130,7 @@ func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error 
 			os.Remove(path.Join(layerDir, "writable_index"))
 		}
 	}
-	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, snapshot.OverlayBDBSConfigLower{
+	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, sn.OverlayBDBSConfigLower{
 		File: path.Join(layerDir, commitFile),
 	})
 	return nil

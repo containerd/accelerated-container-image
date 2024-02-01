@@ -92,6 +92,9 @@ const (
 
 	// OverlayBDVersion is the version number of overlaybd blob
 	OverlayBDVersion = "containerd.io/snapshot/overlaybd/version"
+
+	// LayerToTurboOCI is used to convert local layer to turboOCI with tar index
+	LayerToTurboOCI = "containerd.io/snapshot/overlaybd/convert2turbo-oci"
 )
 
 // used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)

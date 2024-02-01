@@ -18,19 +18,24 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"strings"
 
+	sn "github.com/containerd/accelerated-container-image/pkg/types"
 	"github.com/containerd/containerd/log"
 	"github.com/pkg/errors"
 )
 
 const (
-	obdBinCreate = "/opt/overlaybd/bin/overlaybd-create"
-	obdBinCommit = "/opt/overlaybd/bin/overlaybd-commit"
-	obdBinApply  = "/opt/overlaybd/bin/overlaybd-apply"
+	obdBinCreate        = "/opt/overlaybd/bin/overlaybd-create"
+	obdBinCommit        = "/opt/overlaybd/bin/overlaybd-commit"
+	obdBinApply         = "/opt/overlaybd/bin/overlaybd-apply"
+	obdBinTurboOCIApply = "/opt/overlaybd/bin/turboOCI-apply"
 
 	dataFile       = "writable_data"
 	idxFile        = "writable_index"
@@ -38,6 +43,44 @@ const (
 	commitTempFile = "overlaybd.commit.temp"
 	commitFile     = "overlaybd.commit"
 )
+
+type ConvertOption struct {
+	// src options
+	// (TODO) LayerPath   string // path of layer.tgz or layer.tar
+	TarMetaPath string // path of layer.tar.meta
+
+	Config  sn.OverlayBDBSConfig
+	Workdir string
+
+	// output options
+	Ext4FSMetaPath string
+	// (TODO) GzipIndexPath string
+}
+
+var defaultServiceTemplate = `
+{
+	"registryFsVersion": "v2",
+	"logPath": "",
+	"logLevel": 1,
+	"cacheConfig": {
+		"cacheType": "file",
+		"cacheDir": "%s",
+		"cacheSizeGB": 4
+	},
+	"gzipCacheConfig": {
+		"enable": false
+	},
+	"credentialConfig": {
+		"mode": "file",
+		"path": ""
+	},
+	"ioEngine": 0,
+	"download": {
+		"enable": false
+	},
+	"enableAudit": false
+}
+`
 
 func Create(ctx context.Context, dir string, opts ...string) error {
 	dataPath := path.Join(dir, dataFile)
@@ -120,6 +163,92 @@ func ApplyTurboOCI(ctx context.Context, dir, gzipMetaFile string, opts ...string
 	out, err := exec.CommandContext(ctx, obdBinApply, args...).CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to overlaybd-apply[turboOCI]: %s", out)
+	}
+	return nil
+}
+
+func GenerateTarMeta(ctx context.Context, srcTarFile string, dstTarMeta string) error {
+
+	if _, err := os.Stat(srcTarFile); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("error stating tar file: %w", err)
+	}
+	log.G(ctx).Infof("generate layer meta for %s", srcTarFile)
+	if err := exec.Command(obdBinTurboOCIApply, srcTarFile, dstTarMeta, "--export").Run(); err != nil {
+		return fmt.Errorf("failed to convert tar file to overlaybd device: %w", err)
+	}
+	return nil
+}
+
+// ConvertLayer produce a turbooci layer, target is path of ext4.fs.meta
+func ConvertLayer(ctx context.Context, opt *ConvertOption) error {
+	if opt.Workdir == "" {
+		opt.Workdir = "tmp_conv"
+	}
+
+	if err := os.MkdirAll(opt.Workdir, 0755); err != nil {
+		return fmt.Errorf("failed to create work dir: %w", err)
+	}
+
+	pathWritableData := filepath.Join(opt.Workdir, "writable_data")
+	pathWritableIndex := filepath.Join(opt.Workdir, "writable_index")
+	pathFakeTarget := filepath.Join(opt.Workdir, "fake_target")
+	pathService := filepath.Join(opt.Workdir, "service.json")
+	pathConfig := filepath.Join(opt.Workdir, "config.v1.json")
+
+	// overlaybd-create
+	args := []string{pathWritableData, pathWritableIndex, "256", "-s", "--turboOCI"}
+	if len(opt.Config.Lowers) == 0 {
+		args = append(args, "--mkfs")
+	}
+	if out, err := exec.CommandContext(ctx, obdBinCreate, args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to overlaybd-create: %w, output: %s", err, out)
+	}
+	file, err := os.Create(pathFakeTarget)
+	if err != nil {
+		return fmt.Errorf("failed to create fake target: %w", err)
+	}
+	file.Close()
+	opt.Config.Upper = sn.OverlayBDBSConfigUpper{
+		Data:   pathWritableData,
+		Index:  pathWritableIndex,
+		Target: pathFakeTarget,
+	}
+
+	// turboOCI-apply
+	if err := os.WriteFile(pathService, []byte(fmt.Sprintf(defaultServiceTemplate,
+		filepath.Join(opt.Workdir, "cache"))), 0644,
+	); err != nil {
+		return fmt.Errorf("failed to write service.json: %w", err)
+	}
+	configBytes, err := json.Marshal(opt.Config)
+	if err != nil {
+		return fmt.Errorf("failed to marshal overlaybd config: %w", err)
+	}
+	if err := os.WriteFile(pathConfig, configBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write overlaybd config: %w", err)
+	}
+	args = []string{
+		opt.TarMetaPath, pathConfig,
+		"--import",
+		"--service_config_path", pathService,
+	}
+	log.G(ctx).Debugf("%s %s", obdBinTurboOCIApply, strings.Join(args, " "))
+	if out, err := exec.CommandContext(ctx, obdBinTurboOCIApply,
+		args...,
+	).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to turboOCI-apply: %w, output: %s", err, out)
+	}
+
+	// overlaybd-commit
+	if out, err := exec.CommandContext(ctx, obdBinCommit,
+		pathWritableData,
+		pathWritableIndex,
+		opt.Ext4FSMetaPath,
+		"-z", "--turboOCI",
+	).CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to overlaybd-commit: %w, output: %s", err, out)
 	}
 	return nil
 }

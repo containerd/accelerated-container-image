@@ -40,7 +40,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	t "github.com/containerd/accelerated-container-image/pkg/types"
 )
 
 func fetch(ctx context.Context, fetcher remotes.Fetcher, desc specs.Descriptor, target any) error {
@@ -144,7 +144,7 @@ func downloadLayer(ctx context.Context, fetcher remotes.Fetcher, targetFile stri
 }
 
 // TODO maybe refactor this
-func writeConfig(dir string, configJSON *snapshot.OverlayBDBSConfig) error {
+func writeConfig(dir string, configJSON *t.OverlayBDBSConfig) error {
 	data, err := json.Marshal(configJSON)
 	if err != nil {
 		return err

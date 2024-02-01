@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	sn "github.com/containerd/accelerated-container-image/pkg/types"
+
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/images"
@@ -64,34 +66,6 @@ const (
 	// it is worked by setting max_data_area_mb for devices in configfs.
 	obdMaxDataAreaMB = 4
 )
-
-// OverlayBDBSConfig is the config of overlaybd target.
-type OverlayBDBSConfig struct {
-	RepoBlobURL       string                   `json:"repoBlobUrl"`
-	Lowers            []OverlayBDBSConfigLower `json:"lowers"`
-	Upper             OverlayBDBSConfigUpper   `json:"upper"`
-	ResultFile        string                   `json:"resultFile"`
-	AccelerationLayer bool                     `json:"accelerationLayer,omitempty"`
-	RecordTracePath   string                   `json:"recordTracePath,omitempty"`
-}
-
-// OverlayBDBSConfigLower
-type OverlayBDBSConfigLower struct {
-	GzipIndex    string `json:"gzipIndex,omitempty"`
-	File         string `json:"file,omitempty"`
-	Digest       string `json:"digest,omitempty"`
-	TargetFile   string `json:"targetFile,omitempty"`
-	TargetDigest string `json:"targetDigest,omitempty"`
-	Size         int64  `json:"size,omitempty"`
-	Dir          string `json:"dir,omitempty"`
-}
-
-type OverlayBDBSConfigUpper struct {
-	Index     string `json:"index,omitempty"`
-	Data      string `json:"data,omitempty"`
-	Target    string `json:"target,omitempty"`
-	GzipIndex string `json:"gzipIndex,omitempty"`
-}
 
 func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
 	f, err := os.Open("/proc/self/mountinfo")
@@ -473,8 +447,8 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		return errors.Wrapf(err, "failed to identify storage of snapshot %s", key)
 	}
 
-	configJSON := OverlayBDBSConfig{
-		Lowers:     []OverlayBDBSConfigLower{},
+	configJSON := sn.OverlayBDBSConfig{
+		Lowers:     []sn.OverlayBDBSConfigLower{},
 		ResultFile: o.overlaybdInitDebuglogPath(id),
 	}
 
@@ -521,8 +495,9 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 		configJSON.RepoBlobURL = blobPrefixURL
 		if isTurboOCI, dataDgst, compType := o.checkTurboOCI(info.Labels); isTurboOCI {
-			lower := OverlayBDBSConfigLower{
-				Dir:          o.upperPath(id),
+			lower := sn.OverlayBDBSConfigLower{
+				Dir: o.upperPath(id),
+				// keep this to support ondemand turboOCI loading.
 				File:         o.turboOCIFsMeta(id),
 				TargetDigest: dataDgst,
 			}
@@ -531,7 +506,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			}
 			configJSON.Lowers = append(configJSON.Lowers, lower)
 		} else {
-			configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
+			configJSON.Lowers = append(configJSON.Lowers, sn.OverlayBDBSConfigLower{
 				Digest: blobDigest,
 				Size:   int64(blobSize),
 				Dir:    o.upperPath(id),
@@ -542,11 +517,48 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		if writable {
 			return errors.Errorf("local block device is readonly, not support writable")
 		}
+		ociBlob := o.overlaybdOCILayerPath(id)
+		if _, err := os.Stat(ociBlob); err == nil {
+			log.G(ctx).Debugf("OCI layer blob found, construct overlaybd config with turboOCI (sn: %s)", id)
+			configJSON.Lowers = append(configJSON.Lowers, sn.OverlayBDBSConfigLower{
+				TargetFile: o.overlaybdOCILayerPath(id),
+				File:       o.magicFilePath(id),
+			})
+		} else {
+			configJSON.Lowers = append(configJSON.Lowers, sn.OverlayBDBSConfigLower{
+				Dir: o.upperPath(id),
+				// automatically find overlaybd.commit
+			})
+		}
+	case storageTypeLocalLayer:
+		// 1. generate tar meta for oci layer blob
+		// 2. convert local layer.tarmeta to overlaybd
+		// 3. create layer's config
+		log.G(ctx).Infof("generate metadata of layer blob (sn: %s)", id)
+		if err := utils.GenerateTarMeta(ctx, o.overlaybdOCILayerPath(id), o.overlaybdOCILayerMeta(id)); err != nil {
+			log.G(ctx).Errorf("generate tar metadata failed. (sn: %s)", id)
+			return err
+		}
+		opt := &utils.ConvertOption{
+			TarMetaPath:    o.overlaybdOCILayerMeta(id),
+			Workdir:        o.convertTempdir(id),
+			Ext4FSMetaPath: o.magicFilePath(id), // overlaybd.commit
+			Config:         configJSON,
+		}
+		log.G(ctx).Infof("convert layer to turboOCI (sn: %s)", id)
 
-		configJSON.Lowers = append(configJSON.Lowers, OverlayBDBSConfigLower{
-			Dir: o.upperPath(id),
+		if err := utils.ConvertLayer(ctx, opt); err != nil {
+			log.G(ctx).Error(err.Error())
+			os.RemoveAll(opt.Workdir)
+			os.Remove(opt.Ext4FSMetaPath)
+			return err
+		}
+
+		configJSON.Lowers = append(configJSON.Lowers, sn.OverlayBDBSConfigLower{
+			TargetFile: o.overlaybdOCILayerPath(id),
+			File:       opt.Ext4FSMetaPath,
 		})
-
+		log.G(ctx).Debugf("generate config.json for %s:\n %+v", id, configJSON)
 	default:
 		if !writable {
 			return errors.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
@@ -567,7 +579,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 			return err
 		}
 
-		configJSON.Upper = OverlayBDBSConfigUpper{
+		configJSON.Upper = sn.OverlayBDBSConfigUpper{
 			Index: o.overlaybdWritableIndexPath(id),
 			Data:  o.overlaybdWritableDataPath(id),
 		}
@@ -582,7 +594,7 @@ func (o *snapshotter) constructSpecForAccelLayer(id, parentID string) error {
 	if err != nil {
 		return err
 	}
-	accelLayerLower := OverlayBDBSConfigLower{Dir: o.upperPath(id)}
+	accelLayerLower := sn.OverlayBDBSConfigLower{Dir: o.upperPath(id)}
 	config.Lowers = append(config.Lowers, accelLayerLower)
 	return o.atomicWriteOverlaybdTargetConfig(id, config)
 }
@@ -606,14 +618,14 @@ func (o *snapshotter) updateSpec(snID string, isAccelLayer bool, recordTracePath
 }
 
 // loadBackingStoreConfig loads overlaybd target config.
-func (o *snapshotter) loadBackingStoreConfig(snID string) (*OverlayBDBSConfig, error) {
+func (o *snapshotter) loadBackingStoreConfig(snID string) (*sn.OverlayBDBSConfig, error) {
 	confPath := o.overlaybdConfPath(snID)
 	data, err := os.ReadFile(confPath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read config(path=%s) of snapshot %s", confPath, snID)
 	}
 
-	var configJSON OverlayBDBSConfig
+	var configJSON sn.OverlayBDBSConfig
 	if err := json.Unmarshal(data, &configJSON); err != nil {
 		return nil, errors.Wrapf(err, "failed to unmarshal data(%s)", string(data))
 	}
@@ -645,7 +657,7 @@ func (o *snapshotter) constructImageBlobURL(ref string) (string, error) {
 }
 
 // atomicWriteOverlaybdTargetConfig
-func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *OverlayBDBSConfig) error {
+func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *sn.OverlayBDBSConfig) error {
 	data, err := json.Marshal(configJSON)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal %+v configJSON into JSON", configJSON)
