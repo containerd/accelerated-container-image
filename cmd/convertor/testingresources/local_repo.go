@@ -34,10 +34,11 @@ import (
 
 // REPOSITORY
 type RepoStore struct {
-	path         string
-	fileStore    *oci.Store
-	inmemoryRepo *inmemoryRepo
-	opts         *RegistryOptions
+	path             string
+	inmemoryRepoOnly bool
+	fileStore        *oci.Store
+	inmemoryRepo     *inmemoryRepo
+	opts             *RegistryOptions
 }
 
 type inmemoryRepo struct {
@@ -68,8 +69,8 @@ func (r *RepoStore) LoadStore(ctx context.Context) error {
 		return nil
 	}
 
-	if r.opts.InmemoryOnly {
-		return errors.New("LoadStore should not be invoked if registry is memory only")
+	if r.opts.InmemoryRegistryOnly && !r.inmemoryRepoOnly {
+		return errors.New("LoadStore should not be invoked if registry or repo is memory only")
 	}
 
 	if r.path == "" {
@@ -100,7 +101,7 @@ func (r *RepoStore) Resolve(ctx context.Context, tag string) (v1.Descriptor, err
 		}
 	}
 
-	if !r.opts.InmemoryOnly {
+	if !r.opts.InmemoryRegistryOnly && !r.inmemoryRepoOnly {
 		if err := r.LoadStore(ctx); err != nil {
 			return v1.Descriptor{}, err
 		}
@@ -116,7 +117,7 @@ func (r *RepoStore) Fetch(ctx context.Context, descriptor v1.Descriptor) (io.Rea
 		return io.NopCloser(bytes.NewReader(blob)), nil
 	}
 
-	if !r.opts.InmemoryOnly {
+	if !r.opts.InmemoryRegistryOnly && !r.inmemoryRepoOnly {
 		if err := r.LoadStore(ctx); err != nil {
 			return nil, err
 		}
@@ -140,7 +141,7 @@ func (r *RepoStore) Exists(ctx context.Context, descriptor v1.Descriptor) (bool,
 		return true, nil
 	}
 
-	if !r.opts.InmemoryOnly {
+	if !r.opts.InmemoryRegistryOnly && !r.inmemoryRepoOnly {
 		if err := r.LoadStore(ctx); err != nil {
 			return false, err
 		}

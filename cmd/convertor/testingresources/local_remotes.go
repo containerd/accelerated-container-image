@@ -31,6 +31,10 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
+const (
+	labelDistributionSource = "containerd.io/distribution.source"
+)
+
 // RESOLVER
 type MockLocalResolver struct {
 	testReg *TestRegistry
@@ -39,7 +43,7 @@ type MockLocalResolver struct {
 func NewMockLocalResolver(ctx context.Context, localRegistryPath string) (*MockLocalResolver, error) {
 	reg, err := NewTestRegistry(ctx, RegistryOptions{
 		LocalRegistryPath:         localRegistryPath,
-		InmemoryOnly:              false,
+		InmemoryRegistryOnly:      false,
 		ManifestPushIgnoresLayers: false,
 	})
 	if err != nil {
@@ -78,7 +82,7 @@ func (r *MockLocalResolver) Fetcher(ctx context.Context, ref string) (remotes.Fe
 }
 
 func (r *MockLocalResolver) Pusher(ctx context.Context, ref string) (remotes.Pusher, error) {
-	_, repository, tag, err := ParseRef(ctx, ref)
+	host, repository, tag, err := ParseRef(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +91,7 @@ func (r *MockLocalResolver) Pusher(ctx context.Context, ref string) (remotes.Pus
 		testReg:    r.testReg,
 		repository: repository,
 		tag:        tag,
+		host:       host,
 		tracker:    docker.NewInMemoryTracker(),
 	}, nil
 }
@@ -106,6 +111,7 @@ type MockLocalPusher struct {
 	testReg    *TestRegistry
 	repository string
 	tag        string
+	host       string
 	tracker    docker.StatusTracker
 }
 
@@ -147,6 +153,15 @@ func (p MockLocalPusher) push(ctx context.Context, desc v1.Descriptor, ref strin
 	}
 
 	if ok {
+		return nil, errdefs.ErrAlreadyExists
+	}
+
+	// Layer mounts
+	if mountRepo, ok := desc.Annotations[fmt.Sprintf("%s.%s", labelDistributionSource, p.host)]; ok {
+		err = p.testReg.Mount(ctx, mountRepo, p.repository, desc)
+		if err != nil {
+			return nil, err
+		}
 		return nil, errdefs.ErrAlreadyExists
 	}
 

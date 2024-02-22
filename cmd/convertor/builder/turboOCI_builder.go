@@ -214,6 +214,16 @@ func (e *turboOCIBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx 
 	return errdefs.ErrNotImplemented
 }
 
+// DownloadConvertedLayer TODO
+func (e *turboOCIBuilderEngine) CheckForConvertedManifest(ctx context.Context) (specs.Descriptor, error) {
+	return specs.Descriptor{}, errdefs.ErrNotImplemented
+}
+
+// DownloadConvertedLayer TODO
+func (e *turboOCIBuilderEngine) StoreConvertedManifestDetails(ctx context.Context) error {
+	return errdefs.ErrNotImplemented
+}
+
 func (e *turboOCIBuilderEngine) Cleanup() {
 	os.RemoveAll(e.workDir)
 }

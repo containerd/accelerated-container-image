@@ -42,7 +42,7 @@ type TestRegistry struct {
 }
 
 type RegistryOptions struct {
-	InmemoryOnly              bool   // Specifies if the registry should not load any resources from storage
+	InmemoryRegistryOnly      bool   // Specifies if the registry should not load any resources from storage
 	LocalRegistryPath         string // Specifies the path to the local registry
 	ManifestPushIgnoresLayers bool   // Specifies if the registry should require layers to be pushed before manifest
 }
@@ -54,7 +54,7 @@ func NewTestRegistry(ctx context.Context, opts RegistryOptions) (*TestRegistry, 
 		internalRegistry: make(internalRegistry),
 		opts:             opts,
 	}
-	if !opts.InmemoryOnly {
+	if !opts.InmemoryRegistryOnly {
 		files, err := os.ReadDir(opts.LocalRegistryPath)
 		if err != nil {
 			return nil, err
@@ -103,8 +103,9 @@ func (r *TestRegistry) Push(ctx context.Context, repository string, tag string, 
 		return repo.Push(ctx, descriptor, tag, content)
 	}
 
-	// If the repository does not exist we create a new one
+	// If the repository does not exist we create a new one inmemory
 	repo = NewRepoStore(ctx, repository, &r.opts)
+	repo.inmemoryRepoOnly = true
 	r.internalRegistry[repository] = repo
 	repo.Push(ctx, descriptor, tag, content)
 
@@ -137,9 +138,20 @@ func (r *TestRegistry) Exists(ctx context.Context, repository string, tag string
 		// we don't need to check if the digest exists in the repo stores.
 		return true, nil
 	default:
-		if tag != "" {
-			return false, errors.New("Tag specified for non manifest")
-		}
 		return repo.Exists(ctx, desc)
 	}
+}
+
+// Mount simulates a cross repo mount by copying blobs from srcRepository to targetRepository
+func (r *TestRegistry) Mount(ctx context.Context, srcRepository string, targetRepository string, desc v1.Descriptor) error {
+	rd, err := r.Fetch(ctx, srcRepository, desc)
+	if err != nil {
+		return err
+	}
+	defer rd.Close()
+	var body []byte
+	if body, err = io.ReadAll(rd); err != nil {
+		return err
+	}
+	return r.Push(ctx, targetRepository, "", desc, body)
 }

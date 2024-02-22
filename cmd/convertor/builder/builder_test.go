@@ -118,6 +118,20 @@ func (e *mockFuzzBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, 
 	return nil
 }
 
+func (e *mockFuzzBuilderEngine) CheckForConvertedManifest(ctx context.Context) (specs.Descriptor, error) {
+	if e.fixedRand.Float64() < failRate {
+		return specs.Descriptor{}, fmt.Errorf("random error on CheckForConvertedManifest")
+	}
+	return specs.Descriptor{}, nil
+}
+
+func (e *mockFuzzBuilderEngine) StoreConvertedManifestDetails(ctx context.Context) error {
+	if e.fixedRand.Float64() < failRate {
+		return fmt.Errorf("random error on StoreConvertedManifestDetails")
+	}
+	return nil
+}
+
 func (e *mockFuzzBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
 	if e.fixedRand.Float64() < failRate {
 		return fmt.Errorf("random error on DownloadConvertedLayer")

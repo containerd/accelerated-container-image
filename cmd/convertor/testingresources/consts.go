@@ -47,6 +47,11 @@ const (
 	DockerV2_Manifest_Simple_Layer_0_Digest = "sha256:719385e32844401d57ecfd3eacab360bf551a1491c05b85806ed8f1b08d792f6"
 	DockerV2_Manifest_Simple_Layer_0_Size   = 2457
 
+	// DOCKER V2 (amd64-converted) - overlaybd
+	DockerV2_Manifest_Simple_Converted_Ref    = "sample.localstore.io/hello-world:amd64-converted"
+	DockerV2_Manifest_Simple_Converted_Digest = "sha256:42caa56a19e082b872d43f645bb392e25c9e78bce429755bd709fac598265f88"
+	DockerV2_Manifest_Simple_Converted_Size   = 641
+
 	// DOCKER MANIFEST LIST
 	Docker_Manifest_List_Ref    = "sample.localstore.io/hello-world:docker-list"
 	Docker_Manifest_List_Digest = "sha256:726023f73a8fc5103fa6776d48090539042cb822531c6b751b1f6dd18cb5705d"

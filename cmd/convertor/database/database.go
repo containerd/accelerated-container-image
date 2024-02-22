@@ -23,16 +23,32 @@ import (
 )
 
 type ConversionDatabase interface {
-	GetEntryForRepo(ctx context.Context, host string, repository string, chainID string) *Entry
-	GetCrossRepoEntries(ctx context.Context, host string, chainID string) []*Entry
-	CreateEntry(ctx context.Context, host string, repository string, convertedDigest digest.Digest, chainID string, size int64) error
-	DeleteEntry(ctx context.Context, host string, repository string, chainID string) error
+	// Layer Entries
+	CreateLayerEntry(ctx context.Context, host, repository string, convertedDigest digest.Digest, chainID string, size int64) error
+	GetLayerEntryForRepo(ctx context.Context, host, repository, chainID string) *LayerEntry
+	GetCrossRepoLayerEntries(ctx context.Context, host, chainID string) []*LayerEntry
+	DeleteLayerEntry(ctx context.Context, host, repository, chainID string) error
+
+	// Manifest Entries
+	CreateManifestEntry(ctx context.Context, host, repository, mediatype string, original, convertedDigest digest.Digest, size int64) error
+	GetManifestEntryForRepo(ctx context.Context, host, repository, mediatype string, original digest.Digest) *ManifestEntry
+	GetCrossRepoManifestEntries(ctx context.Context, host, mediatype string, original digest.Digest) []*ManifestEntry
+	DeleteManifestEntry(ctx context.Context, host, repository, mediatype string, original digest.Digest) error
 }
 
-type Entry struct {
+type LayerEntry struct {
 	ConvertedDigest digest.Digest
 	DataSize        int64
 	Repository      string
 	ChainID         string
 	Host            string
+}
+
+type ManifestEntry struct {
+	ConvertedDigest digest.Digest
+	OriginalDigest  digest.Digest
+	DataSize        int64
+	Repository      string
+	Host            string
+	MediaType       string
 }

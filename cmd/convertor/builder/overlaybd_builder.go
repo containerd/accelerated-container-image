@@ -20,6 +20,7 @@ import (
 	"archive/tar"
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -180,8 +181,8 @@ func (e *overlaybdBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx
 	}
 	chainID := e.overlaybdLayers[idx].chainID
 
-	// try to find in the same repo then check existence on registry
-	entry := e.db.GetEntryForRepo(ctx, e.host, e.repository, chainID)
+	// try to find the layer in the target repo
+	entry := e.db.GetLayerEntryForRepo(ctx, e.host, e.repository, chainID)
 	if entry != nil && entry.ChainID != "" {
 		desc := specs.Descriptor{
 			MediaType: e.mediaTypeImageLayer(),
@@ -197,15 +198,16 @@ func (e *overlaybdBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx
 		}
 		if errdefs.IsNotFound(err) {
 			// invalid record in db, which is not found in registry, remove it
-			err := e.db.DeleteEntry(ctx, e.host, e.repository, chainID)
+			err := e.db.DeleteLayerEntry(ctx, e.host, e.repository, chainID)
 			if err != nil {
 				return specs.Descriptor{}, err
 			}
 		}
 	}
 
+	// fallback to a registry wide search
 	// found record in other repos, try mounting it to the target repo
-	entries := e.db.GetCrossRepoEntries(ctx, e.host, chainID)
+	entries := e.db.GetCrossRepoLayerEntries(ctx, e.host, chainID)
 	for _, entry := range entries {
 		desc := specs.Descriptor{
 			MediaType: e.mediaTypeImageLayer(),
@@ -220,7 +222,7 @@ func (e *overlaybdBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx
 		if errdefs.IsAlreadyExists(err) {
 			desc.Annotations = nil
 
-			if err := e.db.CreateEntry(ctx, e.host, e.repository, entry.ConvertedDigest, chainID, entry.DataSize); err != nil {
+			if err := e.db.CreateLayerEntry(ctx, e.host, e.repository, entry.ConvertedDigest, chainID, entry.DataSize); err != nil {
 				continue // try a different repo if available
 			}
 
@@ -234,11 +236,125 @@ func (e *overlaybdBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx
 	return specs.Descriptor{}, errdefs.ErrNotFound
 }
 
+// If manifest is already converted, avoid conversion. (e.g During tag reuse or cross repo mounts)
+// Note: This is output mediatype sensitive, if the manifest is converted to a different mediatype,
+// we will still convert it normally.
+func (e *overlaybdBuilderEngine) CheckForConvertedManifest(ctx context.Context) (specs.Descriptor, error) {
+	if e.db == nil {
+		return specs.Descriptor{}, errdefs.ErrNotFound
+	}
+
+	// try to find the manifest in the target repo
+	entry := e.db.GetManifestEntryForRepo(ctx, e.host, e.repository, e.mediaTypeManifest(), e.inputDesc.Digest)
+	if entry != nil && entry.ConvertedDigest != "" {
+		convertedDesc := specs.Descriptor{
+			MediaType: e.mediaTypeImageLayer(),
+			Digest:    entry.ConvertedDigest,
+			Size:      entry.DataSize,
+		}
+		rc, err := e.fetcher.Fetch(ctx, convertedDesc)
+		if err == nil {
+			rc.Close()
+			logrus.Infof("manifest %s found in remote with resulting digest %s", e.inputDesc.Digest, convertedDesc.Digest)
+			return convertedDesc, nil
+		}
+		if errdefs.IsNotFound(err) {
+			// invalid record in db, which is not found in registry, remove it
+			err := e.db.DeleteManifestEntry(ctx, e.host, e.repository, e.mediaTypeManifest(), e.inputDesc.Digest)
+			if err != nil {
+				return specs.Descriptor{}, err
+			}
+		}
+	}
+	// fallback to a registry wide search
+	entries := e.db.GetCrossRepoManifestEntries(ctx, e.host, e.mediaTypeManifest(), e.inputDesc.Digest)
+	for _, entry := range entries {
+		convertedDesc := specs.Descriptor{
+			MediaType: e.mediaTypeManifest(),
+			Digest:    entry.ConvertedDigest,
+			Size:      entry.DataSize,
+		}
+		fetcher, err := e.resolver.Fetcher(ctx, fmt.Sprintf("%s/%s@%s", entry.Host, entry.Repository, convertedDesc.Digest.String()))
+		if err != nil {
+			return specs.Descriptor{}, err
+		}
+		manifest, err := fetchManifest(ctx, fetcher, convertedDesc)
+		if err != nil {
+			if errdefs.IsNotFound(err) {
+				// invalid record in db, which is not found in registry, remove it
+				err := e.db.DeleteManifestEntry(ctx, entry.Host, entry.Repository, e.mediaTypeManifest(), e.inputDesc.Digest)
+				if err != nil {
+					return specs.Descriptor{}, err
+				}
+			}
+			continue
+		}
+		if err := e.mountImage(ctx, *manifest, convertedDesc, entry.Repository); err != nil {
+			continue // try a different repo if available
+		}
+		if err := e.db.CreateManifestEntry(ctx, e.host, e.repository, e.mediaTypeManifest(), e.inputDesc.Digest, convertedDesc.Digest, entry.DataSize); err != nil {
+			continue // try a different repo if available
+		}
+		logrus.Infof("manifest %s mount from %s was successful", convertedDesc.Digest, entry.Repository)
+		return convertedDesc, nil
+	}
+
+	logrus.Infof("manifest %s not found already converted in remote", e.inputDesc.Digest)
+	return specs.Descriptor{}, errdefs.ErrNotFound
+}
+
+// mountImage is responsible for mounting a specific manifest from a source repository, this includes
+// mounting all layers + config and then pushing the manifest.
+func (e *overlaybdBuilderEngine) mountImage(ctx context.Context, manifest specs.Manifest, desc specs.Descriptor, mountRepository string) error {
+	// Mount Config Blobs
+	config := manifest.Config
+	config.Annotations = map[string]string{
+		fmt.Sprintf("%s.%s", labelDistributionSource, e.host): mountRepository,
+	}
+	_, err := e.pusher.Push(ctx, config)
+	if errdefs.IsAlreadyExists(err) {
+		logrus.Infof("config blob mount from %s was successful", mountRepository)
+	} else if err != nil {
+		return fmt.Errorf("Failed to mount config blob from %s repository : %w", mountRepository, err)
+	}
+
+	// Mount Layer Blobs
+	for idx, layer := range manifest.Layers {
+		desc := layer
+		desc.Annotations = map[string]string{
+			fmt.Sprintf("%s.%s", labelDistributionSource, e.host): mountRepository,
+		}
+		_, err := e.pusher.Push(ctx, desc)
+		if errdefs.IsAlreadyExists(err) {
+			logrus.Infof("layer %d mount from %s was successful", idx, mountRepository)
+		} else if err != nil {
+			return fmt.Errorf("failed to mount all layers from %s repository : %w", mountRepository, err)
+		}
+	}
+
+	// Push Manifest
+	cbuf, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	return uploadBytes(ctx, e.pusher, desc, cbuf)
+}
+
+func (e *overlaybdBuilderEngine) StoreConvertedManifestDetails(ctx context.Context) error {
+	if e.db == nil {
+		return nil
+	}
+	if e.outputDesc.Digest == "" {
+		return errors.New("manifest is not yet converted")
+	}
+	return e.db.CreateManifestEntry(ctx, e.host, e.repository, e.mediaTypeManifest(), e.inputDesc.Digest, e.outputDesc.Digest, e.outputDesc.Size)
+}
+
 func (e *overlaybdBuilderEngine) StoreConvertedLayerDetails(ctx context.Context, idx int) error {
 	if e.db == nil {
 		return nil
 	}
-	return e.db.CreateEntry(ctx, e.host, e.repository, e.overlaybdLayers[idx].desc.Digest, e.overlaybdLayers[idx].chainID, e.overlaybdLayers[idx].desc.Size)
+	return e.db.CreateLayerEntry(ctx, e.host, e.repository, e.overlaybdLayers[idx].desc.Digest, e.overlaybdLayers[idx].chainID, e.overlaybdLayers[idx].desc.Size)
 }
 
 func (e *overlaybdBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
