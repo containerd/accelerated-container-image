@@ -9,7 +9,7 @@ Conflicts=shutdown.target
 LimitNOFILE=1048576
 LimitCORE=infinity
 Type=simple
-
+ExecStartPre=/sbin/modprobe target_core_user overlay
 ExecStart=/opt/overlaybd/snapshotter/overlaybd-snapshotter
 
 GuessMainPID=no
