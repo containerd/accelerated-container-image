@@ -59,12 +59,19 @@ const (
 	// storageTypeRemoteBlock means that there is no unpacked layer data.
 	// But there are labels to mark data that will be pulling on demand.
 	storageTypeRemoteBlock
+
+	// storageTypeLocalLayer means that the unpacked layer data is in
+	// a tar file, which needs to generate overlaybd-turboOCI meta before
+	// create an overlaybd device
+	storageTypeLocalLayer
 )
 
 const (
 	RoDir = "overlayfs" // overlayfs as rootfs. upper + lower (overlaybd)
 	RwDir = "dir"       // mount overlaybd as rootfs
 	RwDev = "dev"       // use overlaybd directly
+
+	LayerBlob = "layer" // decompressed tgz layer (maybe compressed by ZFile)
 )
 
 type Registry struct {
@@ -574,8 +581,20 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	var m []mount.Mount
 	switch stype {
 	case storageTypeNormal:
-		m = o.normalOverlayMount(s)
-		log.G(ctx).Debugf("return mount point(R/W mode: %s): %v", writeType, m)
+		if _, ok := info.Labels[label.LayerToTurboOCI]; ok {
+			m = []mount.Mount{
+				{
+					Source: o.upperPath(s.ID),
+					Type:   "bind",
+					Options: []string{
+						"rw",
+						"rbind",
+					},
+				},
+			}
+		} else {
+			m = o.normalOverlayMount(s)
+		}
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
 		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
 		if err != nil {
@@ -584,6 +603,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	default:
 		panic("unreachable")
 	}
+	log.G(ctx).Debugf("return mount point(R/W mode: %s): %v", writeType, m)
 	return m, nil
 
 }
@@ -595,8 +615,15 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 	defer func() {
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Prepare").Inc()
+		} else {
+			log.G(ctx).WithFields(logrus.Fields{
+				"d":      time.Since(start),
+				"key":    key,
+				"parent": parent,
+			}).Infof("Prepare")
 		}
 		metrics.GRPCLatency.WithLabelValues("Prepare").Observe(time.Since(start).Seconds())
+
 	}()
 	return o.createMountPoint(ctx, snapshots.KindActive, key, parent, opts...)
 }
@@ -626,6 +653,11 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 	defer func() {
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Mounts").Inc()
+		} else {
+			log.G(ctx).WithFields(logrus.Fields{
+				"d":   time.Since(start),
+				"key": key,
+			}).Infof("Mounts")
 		}
 		metrics.GRPCLatency.WithLabelValues("Mounts").Observe(time.Since(start).Seconds())
 	}()
@@ -691,6 +723,12 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	defer func() {
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Commit").Inc()
+		} else {
+			log.G(ctx).WithFields(logrus.Fields{
+				"d":    time.Since(start),
+				"name": name,
+				"key":  key,
+			}).Infof("Commit")
 		}
 		metrics.GRPCLatency.WithLabelValues("Commit").Observe(time.Since(start).Seconds())
 	}()
@@ -746,6 +784,15 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	}
 
 	log.G(ctx).Debugf("Commit info (id: %s, info: %v, stype: %d)", id, info.Labels, stype)
+	// Firstly, try to convert an OCIv1 tarball to a turboOCI layer.
+	// then change stype to 'storageTypeLocalBlock' which can make it attach a overlaybd block
+	if stype == storageTypeLocalLayer {
+		log.G(ctx).Infof("convet a local blob to turboOCI layer (sn: %s)", id)
+		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
+			return errors.Wrapf(err, "failed to construct overlaybd config")
+		}
+		stype = storageTypeLocalBlock
+	}
 
 	if stype == storageTypeLocalBlock {
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
@@ -1158,6 +1205,13 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	if err == nil {
 		return st, nil
 	}
+
+	// check layer.tar if it should be converted to turboOCI
+	filePath = o.overlaybdOCILayerPath(id)
+	if _, err := os.Stat(filePath); err == nil {
+		log.G(ctx).Infof("uncompressed layer found in sn: %s", id)
+		return storageTypeLocalLayer, nil
+	}
 	if os.IsNotExist(err) {
 		// check config.v1.json
 		log.G(ctx).Debugf("failed to identify by writable_data(sn: %s), try to identify by config.v1.json", id)
@@ -1168,6 +1222,7 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 		}
 		return storageTypeNormal, nil
 	}
+
 	log.G(ctx).Debugf("storageType(sn: %s): %d", id, st)
 
 	return st, err
@@ -1185,8 +1240,16 @@ func (o *snapshotter) workPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "work")
 }
 
+func (o *snapshotter) convertTempdir(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "temp")
+}
+
 func (o *snapshotter) blockPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block")
+}
+
+func (o *snapshotter) turboOCIFsMeta(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
 }
 
 func (o *snapshotter) magicFilePath(id string) string {
@@ -1217,12 +1280,16 @@ func (o *snapshotter) overlaybdWritableDataPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "writable_data")
 }
 
-func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
-	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
+func (o *snapshotter) overlaybdOCILayerPath(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "layer.tar")
 }
 
-func (o *snapshotter) turboOCIFsMeta(id string) string {
-	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
+func (o *snapshotter) overlaybdOCILayerMeta(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "layer.metadata")
+}
+
+func (o *snapshotter) overlaybdBackstoreMarkFile(id string) string {
+	return filepath.Join(o.root, "snapshots", id, "block", "backstore_mark")
 }
 
 func (o *snapshotter) turboOCIGzipIdx(id string) string {

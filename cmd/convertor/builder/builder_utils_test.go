@@ -28,7 +28,7 @@ import (
 	"testing"
 
 	testingresources "github.com/containerd/accelerated-container-image/cmd/convertor/testingresources"
-	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	sn "github.com/containerd/accelerated-container-image/pkg/types"
 	"github.com/containerd/containerd/images"
 	_ "github.com/containerd/containerd/pkg/testutil" // Handle custom root flag
 	"github.com/containerd/containerd/remotes"
@@ -428,9 +428,9 @@ func Test_downloadLayer(t *testing.T) {
 func Test_writeConfig(t *testing.T) {
 	ctx := context.Background()
 	testingresources.RunTestWithTempDir(t, ctx, "writeConfigMinimal", func(t *testing.T, ctx context.Context, workdir string) {
-		configSample := snapshot.OverlayBDBSConfig{
+		configSample := sn.OverlayBDBSConfig{
 			ResultFile: "",
-			Lowers: []snapshot.OverlayBDBSConfigLower{
+			Lowers: []sn.OverlayBDBSConfigLower{
 				{
 					File: overlaybdBaseLayer,
 				},
@@ -438,7 +438,7 @@ func Test_writeConfig(t *testing.T) {
 					File: path.Join(workdir, commitFile),
 				},
 			},
-			Upper: snapshot.OverlayBDBSConfigUpper{
+			Upper: sn.OverlayBDBSConfigUpper{
 				Data:  path.Join(workdir, "writable_data"),
 				Index: path.Join(workdir, "writable_index"),
 			},
@@ -455,7 +455,7 @@ func Test_writeConfig(t *testing.T) {
 		}
 		defer file.Close()
 
-		configRes := snapshot.OverlayBDBSConfig{}
+		configRes := sn.OverlayBDBSConfig{}
 
 		err = json.NewDecoder(file).Decode(&configRes)
 		if err != nil {

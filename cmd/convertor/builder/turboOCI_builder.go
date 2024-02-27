@@ -23,7 +23,7 @@ import (
 	"path"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
-	"github.com/containerd/accelerated-container-image/pkg/snapshot"
+	sn "github.com/containerd/accelerated-container-image/pkg/types"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/containerd/containerd/archive/compression"
@@ -31,6 +31,7 @@ import (
 	"github.com/containerd/containerd/images"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
+
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -51,18 +52,18 @@ const (
 
 type turboOCIBuilderEngine struct {
 	*builderEngineBase
-	overlaybdConfig *snapshot.OverlayBDBSConfig
+	overlaybdConfig *sn.OverlayBDBSConfig
 	tociLayers      []specs.Descriptor
 	isGzip          []bool
 }
 
 func NewTurboOCIBuilderEngine(base *builderEngineBase) builderEngine {
-	config := &snapshot.OverlayBDBSConfig{
-		Lowers:     []snapshot.OverlayBDBSConfigLower{},
+	config := &sn.OverlayBDBSConfig{
+		Lowers:     []sn.OverlayBDBSConfigLower{},
 		ResultFile: "",
 	}
 	if !base.mkfs {
-		config.Lowers = append(config.Lowers, snapshot.OverlayBDBSConfigLower{
+		config.Lowers = append(config.Lowers, sn.OverlayBDBSConfigLower{
 			File: overlaybdBaseLayer,
 		})
 		logrus.Infof("using default baselayer")
@@ -91,7 +92,7 @@ func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	if err := e.create(ctx, layerDir, e.mkfs && (idx == 0)); err != nil {
 		return err
 	}
-	e.overlaybdConfig.Upper = snapshot.OverlayBDBSConfigUpper{
+	e.overlaybdConfig.Upper = sn.OverlayBDBSConfigUpper{
 		Data:   path.Join(layerDir, "writable_data"),
 		Index:  path.Join(layerDir, "writable_index"),
 		Target: path.Join(layerDir, "layer.tar"),
@@ -120,7 +121,7 @@ func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	if err := buildArchiveFromFiles(ctx, path.Join(layerDir, tociLayerTar), compression.Gzip, files...); err != nil {
 		return errors.Wrapf(err, "failed to create turboOCIv1 archive for layer %d", idx)
 	}
-	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, snapshot.OverlayBDBSConfigLower{
+	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, sn.OverlayBDBSConfigLower{
 		TargetFile:   path.Join(layerDir, "layer.tar"),
 		TargetDigest: string(e.manifest.Layers[idx].Digest), // TargetDigest should be set to work with gzip cache
 		File:         path.Join(layerDir, fsMetaFile),
