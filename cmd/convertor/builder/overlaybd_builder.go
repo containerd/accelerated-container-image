@@ -158,7 +158,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	return nil
 }
 
-func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
+func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) (specs.Descriptor, error) {
 	for idx := range e.manifest.Layers {
 		e.manifest.Layers[idx] = e.overlaybdLayers[idx].desc
 		e.config.RootFS.DiffIDs[idx] = e.overlaybdLayers[idx].desc.Digest
@@ -166,7 +166,7 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) error {
 	if !e.mkfs {
 		baseDesc, err := e.uploadBaseLayer(ctx)
 		if err != nil {
-			return err
+			return specs.Descriptor{}, err
 		}
 		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)

@@ -48,8 +48,8 @@ type builderEngine interface {
 
 	UploadLayer(ctx context.Context, idx int) error
 
-	// UploadImage upload new manifest and config
-	UploadImage(ctx context.Context) error
+	// UploadImage upload new manifest and config, return the descriptor of the manifest
+	UploadImage(ctx context.Context) (specs.Descriptor, error)
 
 	// Cleanup removes workdir
 	Cleanup()
@@ -149,10 +149,10 @@ func (e *builderEngineBase) mediaTypeImageLayer() string {
 	}
 }
 
-func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
+func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.Descriptor, error) {
 	cbuf, err := json.Marshal(e.config)
 	if err != nil {
-		return err
+		return specs.Descriptor{}, err
 	}
 	e.manifest.Config = specs.Descriptor{
 		MediaType: e.mediaTypeConfig(),
@@ -161,14 +161,14 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	}
 	if !e.noUpload {
 		if err = uploadBytes(ctx, e.pusher, e.manifest.Config, cbuf); err != nil {
-			return errors.Wrapf(err, "failed to upload config")
+			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload config")
 		}
 		logrus.Infof("config uploaded")
 	}
 	if e.dumpManifest {
 		confPath := path.Join(e.workDir, "config.json")
 		if err := continuity.AtomicWriteFile(confPath, cbuf, 0644); err != nil {
-			return err
+			return specs.Descriptor{}, err
 		}
 		logrus.Infof("config dumped")
 	}
@@ -176,7 +176,7 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	e.manifest.MediaType = e.mediaTypeManifest()
 	cbuf, err = json.Marshal(e.manifest)
 	if err != nil {
-		return err
+		return specs.Descriptor{}, err
 	}
 	manifestDesc := specs.Descriptor{
 		MediaType: e.mediaTypeManifest(),
@@ -185,7 +185,7 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	}
 	if !e.noUpload {
 		if err = uploadBytes(ctx, e.pusher, manifestDesc, cbuf); err != nil {
-			return errors.Wrapf(err, "failed to upload manifest")
+			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload manifest")
 		}
 		e.outputDesc = manifestDesc
 		logrus.Infof("manifest uploaded")
@@ -193,11 +193,11 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) error {
 	if e.dumpManifest {
 		descPath := path.Join(e.workDir, "manifest.json")
 		if err := continuity.AtomicWriteFile(descPath, cbuf, 0644); err != nil {
-			return err
+			return specs.Descriptor{}, err
 		}
 		logrus.Infof("manifest dumped")
 	}
-	return nil
+	return manifestDesc, nil
 }
 
 func getBuilderEngineBase(ctx context.Context, resolver remotes.Resolver, ref, targetRef string) (*builderEngineBase, error) {

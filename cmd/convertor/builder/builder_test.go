@@ -97,11 +97,11 @@ func (e *mockFuzzBuilderEngine) UploadLayer(ctx context.Context, idx int) error 
 	return nil
 }
 
-func (e *mockFuzzBuilderEngine) UploadImage(ctx context.Context) error {
+func (e *mockFuzzBuilderEngine) UploadImage(ctx context.Context) (specs.Descriptor, error) {
 	if e.fixedRand.Float64() < failRate {
-		return fmt.Errorf("random error on UploadImage")
+		return specs.Descriptor{}, fmt.Errorf("random error on UploadImage")
 	}
-	return nil
+	return specs.Descriptor{}, nil
 }
 
 func (e *mockFuzzBuilderEngine) CheckForConvertedLayer(ctx context.Context, idx int) (specs.Descriptor, error) {

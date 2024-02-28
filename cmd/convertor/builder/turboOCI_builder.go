@@ -167,12 +167,12 @@ func (e *turboOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error 
 	return nil
 }
 
-func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) error {
+func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) (specs.Descriptor, error) {
 	for idx := range e.manifest.Layers {
 		layerDir := e.getLayerDir(idx)
 		uncompress, err := getFileDesc(path.Join(layerDir, tociLayerTar), true)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get uncompressed descriptor for layer %d", idx)
+			return specs.Descriptor{}, errors.Wrapf(err, "failed to get uncompressed descriptor for layer %d", idx)
 		}
 		e.manifest.Layers[idx] = e.tociLayers[idx]
 		e.config.RootFS.DiffIDs[idx] = uncompress.Digest
@@ -189,7 +189,7 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) error {
 	}
 	if !e.mkfs {
 		if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {
-			return errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
+			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
 		}
 		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
