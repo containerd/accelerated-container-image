@@ -48,10 +48,10 @@ def main():
     fb = sys.argv[3]
     if not os.path.exists(fa):
         print("file %s not exist" % fa)
-        return -1
+        sys.exit(-1)
     if not os.path.exists(fb):
         print("file %s not exist" % fb)
-        return -1
+        sys.exit(-1)
     fa_conf = json.load(open(fa, 'r'))
     fb_conf = json.load(open(fb, 'r'))
     if ftype == "manifest":

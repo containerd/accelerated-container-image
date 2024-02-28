@@ -41,8 +41,15 @@ SHELL ["/bin/bash", "-c"]
 WORKDIR /app
 COPY --from=builder /tmp/overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb .
 COPY ./ci/build_image/start_services.sh .
-RUN \
-    apt update && apt install -y containerd libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
+
+RUN apt-get update && apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+      $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io && \
+    apt-get install -y libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
     wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
     dpkg -i overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
     dpkg -i overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb && \
