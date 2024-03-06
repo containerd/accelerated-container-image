@@ -1,6 +1,6 @@
 ## Prefetch - Overview
 
-Cache has been playing an important role in the whole architecture of ACI's [I/O flow](docs/images/image-flow.jpg "image data flow"). When there is no cache (container cold start), however, the backend storage engine will still need to visit Registry frequently, and temporarily.
+Cache has been playing an important role in the whole architecture of ACI's [I/O flow](images/image-flow.jpg "image data flow"). When there is no cache (container cold start), however, the backend storage engine will still need to visit Registry frequently, and temporarily.
 
 Prefetch is a common mechanism to avoid this situation. As it literally suggests, the key is to retrieve data in advance, and save them into cache.
 
