@@ -31,21 +31,22 @@ import (
 )
 
 var (
-	repo      string
-	user      string
-	plain     bool
-	tagInput  string
-	tagOutput string
-	dir       string
-	oci       bool
-	mkfs      bool
-	verbose   bool
-	vsize     int
-	fastoci   string
-	turboOCI  string
-	overlaybd string
-	dbstr     string
-	dbType    string
+	repo             string
+	user             string
+	plain            bool
+	tagInput         string
+	tagOutput        string
+	dir              string
+	oci              bool
+	mkfs             bool
+	verbose          bool
+	vsize            int
+	fastoci          string
+	turboOCI         string
+	overlaybd        string
+	dbstr            string
+	dbType           string
+	concurrencyLimit int
 
 	// certification
 	certDirs    []string
@@ -95,9 +96,10 @@ var (
 					ClientCerts: clientCerts,
 					Insecure:    insecure,
 				},
-				Reserve:      reserve,
-				NoUpload:     noUpload,
-				DumpManifest: dumpManifest,
+				Reserve:          reserve,
+				NoUpload:         noUpload,
+				DumpManifest:     dumpManifest,
+				ConcurrencyLimit: concurrencyLimit,
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -121,12 +123,7 @@ var (
 					logrus.Warnf("falling back to no deduplication")
 				}
 
-				builder, err := builder.NewOverlayBDBuilder(ctx, opt)
-				if err != nil {
-					logrus.Errorf("failed to create overlaybd builder: %v", err)
-					os.Exit(1)
-				}
-				if err := builder.Build(ctx); err != nil {
+				if err := builder.Build(ctx, opt); err != nil {
 					logrus.Errorf("failed to build overlaybd: %v", err)
 					os.Exit(1)
 				}
@@ -136,12 +133,7 @@ var (
 				logrus.Info("building [Overlaybd - Turbo OCIv1] image...")
 				opt.Engine = builder.TurboOCI
 				opt.TargetRef = repo + ":" + tb
-				builder, err := builder.NewOverlayBDBuilder(ctx, opt)
-				if err != nil {
-					logrus.Errorf("failed to create TurboOCI builder: %v", err)
-					os.Exit(1)
-				}
-				if err := builder.Build(ctx); err != nil {
+				if err := builder.Build(ctx, opt); err != nil {
 					logrus.Errorf("failed to build TurboOCIv1 image: %v", err)
 					os.Exit(1)
 				}
@@ -168,6 +160,7 @@ func init() {
 	rootCmd.Flags().StringVar(&overlaybd, "overlaybd", "", "build overlaybd format")
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")
 	rootCmd.Flags().StringVar(&dbType, "db-type", "", "type of db to use for conversion deduplication. Available: mysql. Default none")
+	rootCmd.Flags().IntVar(&concurrencyLimit, "concurrency-limit", 4, "the number of manifests that can be built at the same time, used for multi-arch images, 0 means no limit")
 
 	// certification
 	rootCmd.Flags().StringArrayVar(&certDirs, "cert-dir", nil, "In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key")

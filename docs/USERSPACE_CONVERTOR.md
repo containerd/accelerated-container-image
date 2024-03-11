@@ -49,6 +49,7 @@ Flags:
       --overlaybd string          build overlaybd format
       --db-str string             db str for overlaybd conversion
       --db-type string            type of db to use for conversion deduplication. Available: mysql. Default none
+      --concurrency-limit int     the number of manifests that can be built at the same time, used for multi-arch images, 0 means no limit (default 4)
       --cert-dir stringArray      In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key
       --root-ca stringArray       root CA certificates
       --client-cert stringArray   client cert certificates, should form in ${cert-file}:${key-file}

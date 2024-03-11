@@ -10,17 +10,17 @@ require (
 	github.com/moby/locker v1.0.1
 	github.com/moby/sys/mountinfo v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.1.0-rc2.0.20221005185240-3a7f492d3f1b
+	github.com/opencontainers/image-spec v1.1.0
 	github.com/opencontainers/runtime-spec v1.1.0-rc.1
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.1.3
 	github.com/urfave/cli v1.22.12
-	golang.org/x/sync v0.3.0
+	golang.org/x/sync v0.4.0
 	golang.org/x/sys v0.13.0
 	google.golang.org/grpc v1.58.3
-	oras.land/oras-go/v2 v2.1.0
+	oras.land/oras-go/v2 v2.3.1
 )
 
 require (
