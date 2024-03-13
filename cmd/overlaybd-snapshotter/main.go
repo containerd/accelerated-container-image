@@ -147,7 +147,7 @@ func handleSignals(ctx context.Context, signals chan os.Signal, server *grpc.Ser
 					return
 				}
 
-				server.Stop()
+				server.GracefulStop()
 				close(doneCh)
 				return
 			}
