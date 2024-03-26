@@ -89,6 +89,7 @@ type BootConfig struct {
 	ExporterConfig    metrics.ExporterConfig `json:"exporterConfig"`
 	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
 	MirrorRegistry    []Registry             `json:"mirrorRegistry"`
+	DefaultFsType     string                 `json:"defaultFsType"`
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -104,6 +105,7 @@ func DefaultBootConfig() *BootConfig {
 		},
 		MirrorRegistry:    nil,
 		WritableLayerType: "append",
+		DefaultFsType:     "ext4",
 	}
 }
 
@@ -169,6 +171,7 @@ type snapshotter struct {
 	autoRemoveDev     bool
 	writableLayerType string
 	mirrorRegistry    []Registry
+	defaultFsType     string
 
 	locker *locker.Locker
 }
@@ -220,6 +223,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		autoRemoveDev:     bootConfig.AutoRemoveDev,
 		writableLayerType: bootConfig.WritableLayerType,
 		mirrorRegistry:    bootConfig.MirrorRegistry,
+		defaultFsType:     bootConfig.DefaultFsType,
 		locker:            locker.New(),
 	}, nil
 }
@@ -546,8 +550,8 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			fsType, ok := obdInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
-				log.G(ctx).Warnf("cannot get fs type from label, %v, using ext4", obdInfo.Labels)
-				fsType = "ext4"
+				log.G(ctx).Warnf("cannot get fs type from label, %v, using %s", obdInfo.Labels, o.defaultFsType)
+				fsType = o.defaultFsType
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
@@ -705,7 +709,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
 			fsType, ok := parentInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
-				fsType = "ext4"
+				fsType = o.defaultFsType
 			}
 			if err := o.attachAndMountBlockDevice(ctx, parentID, RoDir, fsType, false); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
