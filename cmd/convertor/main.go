@@ -24,6 +24,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/builder"
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/accelerated-container-image/pkg/version"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
 
@@ -46,6 +47,8 @@ var (
 	overlaybd        string
 	dbstr            string
 	dbType           string
+	dbLayerVersion   string
+	dbMnfstVersion   string
 	concurrencyLimit int
 
 	// certification
@@ -116,7 +119,11 @@ var (
 						logrus.Errorf("failed to open the provided mysql db: %v", err)
 						os.Exit(1)
 					}
-					opt.DB = database.NewSqlDB(db)
+					userspaceVersion := version.UserspaceVersion{
+						LayerVersion:    dbLayerVersion,
+						ManifestVersion: dbMnfstVersion,
+					}
+					opt.DB = database.NewSqlDB(db, userspaceVersion)
 				case "":
 				default:
 					logrus.Warnf("db-type %s was provided but is not one of known db types. Available: mysql", dbType)
@@ -172,6 +179,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&reserve, "reserve", false, "reserve tmp data")
 	rootCmd.Flags().BoolVar(&noUpload, "no-upload", false, "don't upload layer and manifest")
 	rootCmd.Flags().BoolVar(&dumpManifest, "dump-manifest", false, "dump manifest")
+	rootCmd.Flags().StringVar(&dbLayerVersion, "db-layer-version", version.GetUserSpaceConsistencyVersion().LayerVersion, "version of db to use for conversion deduplication. Default 1")
+	rootCmd.Flags().StringVar(&dbMnfstVersion, "db-manifest-version", version.GetUserSpaceConsistencyVersion().ManifestVersion, "version of db to use for conversion deduplication. Default 1-1")
 
 	rootCmd.MarkFlagRequired("repository")
 	rootCmd.MarkFlagRequired("input-tag")

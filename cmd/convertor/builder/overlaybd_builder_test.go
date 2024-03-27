@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	testingresources "github.com/containerd/accelerated-container-image/cmd/convertor/testingresources"
+	"github.com/containerd/accelerated-container-image/pkg/version"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	_ "github.com/containerd/containerd/pkg/testutil" // Handle custom root flag
@@ -31,7 +32,10 @@ import (
 
 func Test_overlaybd_builder_CheckForConvertedLayer(t *testing.T) {
 	ctx := context.Background()
-	db := testingresources.NewLocalDB()
+	versionDB := testingresources.Localdb{
+		Version: version.GetUserSpaceConsistencyVersion(),
+	}
+	db := &versionDB // Reset DB
 	resolver := testingresources.GetTestResolver(t, ctx)
 	fetcher := testingresources.GetTestFetcherFromResolver(t, ctx, resolver, testingresources.DockerV2_Manifest_Simple_Ref)
 	base := &builderEngineBase{
@@ -83,6 +87,13 @@ func Test_overlaybd_builder_CheckForConvertedLayer(t *testing.T) {
 		testingresources.Assert(t, desc.Digest == targetDesc.Digest, "CheckForConvertedLayer() returned incorrect digest")
 	})
 
+	versionDB.Version.LayerVersion = "A" // Change version to something else
+	t.Run("Entry in DB but wrong version (should return not found)", func(t *testing.T) {
+		_, err := e.CheckForConvertedLayer(ctx, 0)
+		testingresources.Assert(t, errdefs.IsNotFound(err), fmt.Sprintf("CheckForConvertedLayer() returned an unexpected Error: %v", err))
+	})
+	versionDB.Version = version.GetUserSpaceConsistencyVersion() // Reset version
+
 	// cross repo mount (change target repo)
 	base.repository = "hello-world2"
 	newImageRef := "sample.localstore.io/hello-world2:amd64"
@@ -107,7 +118,13 @@ func Test_overlaybd_builder_CheckForConvertedLayer(t *testing.T) {
 		rc.Close()
 	})
 
-	base.db = testingresources.NewLocalDB() // Reset DB
+	versionDB.Version.LayerVersion = "A" // Change version to something else
+	t.Run("Cross Repo Entry in DB but wrong version (should return not found)", func(t *testing.T) {
+		_, err := e.CheckForConvertedLayer(ctx, 0)
+		testingresources.Assert(t, errdefs.IsNotFound(err), fmt.Sprintf("CheckForConvertedLayer() returned an unexpected Error: %v", err))
+	})
+
+	base.db = testingresources.NewLocalDB(version.GetUserSpaceConsistencyVersion()) // Reset DB
 	digestNotInRegistry := digest.FromString("Not in reg")
 	err = base.db.CreateLayerEntry(ctx, e.host, e.repository, digestNotInRegistry, fakeChainId, 10)
 	if err != nil {
@@ -124,7 +141,10 @@ func Test_overlaybd_builder_CheckForConvertedLayer(t *testing.T) {
 
 func Test_overlaybd_builder_CheckForConvertedManifest(t *testing.T) {
 	ctx := context.Background()
-	db := testingresources.NewLocalDB()
+	versionDB := testingresources.Localdb{
+		Version: version.GetUserSpaceConsistencyVersion(),
+	}
+	db := &versionDB
 	resolver := testingresources.GetTestResolver(t, ctx)
 	fetcher := testingresources.GetTestFetcherFromResolver(t, ctx, resolver, testingresources.DockerV2_Manifest_Simple_Ref)
 
@@ -178,6 +198,13 @@ func Test_overlaybd_builder_CheckForConvertedManifest(t *testing.T) {
 		testingresources.Assert(t, desc.Digest == outputDesc.Digest, "CheckForConvertedManifest() returned incorrect digest")
 	})
 
+	versionDB.Version.ManifestVersion = "A" // Change version to something else
+	t.Run("Entry in DB but wrong version (should return not found)", func(t *testing.T) {
+		_, err := e.CheckForConvertedManifest(ctx)
+		testingresources.Assert(t, errdefs.IsNotFound(err), fmt.Sprintf("CheckForConvertedManifest() returned an unexpected Error: %v", err))
+	})
+	versionDB.Version = version.GetUserSpaceConsistencyVersion() // Reset version
+
 	// cross repo mount (change target repo)
 	base.repository = "hello-world2"
 	newImageRef := "sample.localstore.io/hello-world2:amd64"
@@ -207,7 +234,13 @@ func Test_overlaybd_builder_CheckForConvertedManifest(t *testing.T) {
 		rc.Close()
 	})
 
-	base.db = testingresources.NewLocalDB() // Reset DB
+	versionDB.Version.ManifestVersion = "A" // Change version to something else
+	t.Run("Cross Repo Entry in DB but wrong version (should return not found)", func(t *testing.T) {
+		_, err := e.CheckForConvertedManifest(ctx)
+		testingresources.Assert(t, errdefs.IsNotFound(err), fmt.Sprintf("CheckForConvertedManifest() returned an unexpected Error: %v", err))
+	})
+
+	base.db = testingresources.NewLocalDB(version.GetUserSpaceConsistencyVersion())
 	digestNotInRegistry := digest.FromString("Not in reg")
 	err = base.db.CreateManifestEntry(ctx, e.host, e.repository, outputDesc.MediaType, inputDesc.Digest, digestNotInRegistry, outputDesc.Size)
 	if err != nil {
