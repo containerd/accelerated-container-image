@@ -182,7 +182,7 @@ func GenerateTarMeta(ctx context.Context, srcTarFile string, dstTarMeta string) 
 }
 
 // ConvertLayer produce a turbooci layer, target is path of ext4.fs.meta
-func ConvertLayer(ctx context.Context, opt *ConvertOption) error {
+func ConvertLayer(ctx context.Context, opt *ConvertOption, fs_type string) error {
 	if opt.Workdir == "" {
 		opt.Workdir = "tmp_conv"
 	}
@@ -199,7 +199,7 @@ func ConvertLayer(ctx context.Context, opt *ConvertOption) error {
 
 	// overlaybd-create
 	args := []string{pathWritableData, pathWritableIndex, "256", "-s", "--turboOCI"}
-	if len(opt.Config.Lowers) == 0 {
+	if fs_type != "erofs" && len(opt.Config.Lowers) == 0 {
 		args = append(args, "--mkfs")
 	}
 	if out, err := exec.CommandContext(ctx, obdBinCreate, args...).CombinedOutput(); err != nil {
@@ -231,9 +231,13 @@ func ConvertLayer(ctx context.Context, opt *ConvertOption) error {
 	}
 	args = []string{
 		opt.TarMetaPath, pathConfig,
-		"--import",
 		"--service_config_path", pathService,
+		"--fstype", fs_type,
 	}
+	if fs_type != "erofs" {
+		args = append(args, "--import")
+	}
+
 	log.G(ctx).Debugf("%s %s", obdBinTurboOCIApply, strings.Join(args, " "))
 	if out, err := exec.CommandContext(ctx, obdBinTurboOCIApply,
 		args...,

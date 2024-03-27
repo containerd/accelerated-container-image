@@ -534,20 +534,32 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		// 1. generate tar meta for oci layer blob
 		// 2. convert local layer.tarmeta to overlaybd
 		// 3. create layer's config
-		log.G(ctx).Infof("generate metadata of layer blob (sn: %s)", id)
-		if err := utils.GenerateTarMeta(ctx, o.overlaybdOCILayerPath(id), o.overlaybdOCILayerMeta(id)); err != nil {
-			log.G(ctx).Errorf("generate tar metadata failed. (sn: %s)", id)
-			return err
-		}
-		opt := &utils.ConvertOption{
-			TarMetaPath:    o.overlaybdOCILayerMeta(id),
-			Workdir:        o.convertTempdir(id),
-			Ext4FSMetaPath: o.magicFilePath(id), // overlaybd.commit
-			Config:         configJSON,
+		var opt *utils.ConvertOption
+		rootfs_type := o.defaultFsType
+		if rootfs_type == "erofs" {
+			opt = &utils.ConvertOption{
+				TarMetaPath:    o.overlaybdOCILayerPath(id),
+				Workdir:        o.convertTempdir(id),
+				Ext4FSMetaPath: o.magicFilePath(id), // overlaybd.commit
+				Config:         configJSON,
+			}
+		} else {
+			log.G(ctx).Infof("generate metadata of layer blob (sn: %s)", id)
+			if err := utils.GenerateTarMeta(ctx, o.overlaybdOCILayerPath(id), o.overlaybdOCILayerMeta(id)); err != nil {
+				log.G(ctx).Errorf("generate tar metadata failed. (sn: %s)", id)
+				return err
+			}
+
+			opt = &utils.ConvertOption{
+				TarMetaPath:    o.overlaybdOCILayerMeta(id),
+				Workdir:        o.convertTempdir(id),
+				Ext4FSMetaPath: o.magicFilePath(id), // overlaybd.commit
+				Config:         configJSON,
+			}
 		}
 		log.G(ctx).Infof("convert layer to turboOCI (sn: %s)", id)
 
-		if err := utils.ConvertLayer(ctx, opt); err != nil {
+		if err := utils.ConvertLayer(ctx, opt, rootfs_type); err != nil {
 			log.G(ctx).Error(err.Error())
 			os.RemoveAll(opt.Workdir)
 			os.Remove(opt.Ext4FSMetaPath)
