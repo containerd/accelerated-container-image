@@ -28,6 +28,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
+	"github.com/data-accelerator/zdfs"
 	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd/errdefs"
@@ -716,6 +717,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 			}
 			return o.basedOnBlockDeviceMount(ctx, s, RoDir)
 		}
+
 	}
 	return o.normalOverlayMount(s), nil
 }
@@ -775,6 +777,13 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 
 			opts = append(opts, snapshots.WithLabels(map[string]string{label.LocalOverlayBDPath: o.overlaybdSealedFilePath(id)}))
 		}
+	}
+
+	if isOverlaybd, err := zdfs.PrepareOverlayBDSpec(ctx, key, id, o.snPath(id), oinfo, o.snPath); isOverlaybd {
+		log.G(ctx).Infof("sn: %s is an overlaybd layer", id)
+	} else if err != nil {
+		log.G(ctx).Errorf("prepare overlaybd spec failed(sn: %s): %s", id, err.Error())
+		return err
 	}
 
 	id, info, err := o.commit(ctx, name, key, opts...)
@@ -1169,6 +1178,18 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 	id, info, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to get snapshot info")
+	}
+	img, ok := info.Labels[label.CRIImageRef]
+	if !ok {
+		img, ok = info.Labels[label.TargetImageRef]
+	}
+	if ok {
+		log.G(ctx).Infof("found imageRef: %s", img)
+		if err := os.WriteFile(filepath.Join(path, "image_ref"), []byte(img), 0644); err != nil {
+			log.G(ctx).Errorf("write imageRef '%s'. path: %s, err: %v", img, filepath.Join(path, "image_ref"), err)
+		}
+	} else {
+		log.G(ctx).Warnf("imageRef meta not found.")
 	}
 	return id, info, nil
 }
