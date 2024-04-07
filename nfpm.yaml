@@ -6,6 +6,7 @@ name: "overlaybd-snapshotter"
 arch: ${GOARCH}
 platform: ${GOOS}
 version: ${SEMVER}
+release: ${RELEASE}
 section: "default"
 priority: "extra"
 
