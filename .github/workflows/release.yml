@@ -40,7 +40,7 @@ jobs:
         fi
         echo "RELEASE_VERSION=${RELEASE_VERSION}"
         RELEASE_NUM="$(date +%Y%m%d%H%M%S).$(git rev-parse --short HEAD)"
-        docker buildx build --build-arg RELEASE_NUM=${RELEASE_NUM} RELEASE_VERSION=${RELEASE_VERSION} --build-arg GO_VERSION=${{ env.GO_VERSION }} -f .github/workflows/release/Dockerfile --platform=linux/amd64,linux/arm64 -o releases/ .
+        docker buildx build --build-arg RELEASE_NUM=${RELEASE_NUM} --build-arg RELEASE_VERSION=${RELEASE_VERSION} --build-arg GO_VERSION=${{ env.GO_VERSION }} -f .github/workflows/release/Dockerfile --platform=linux/amd64,linux/arm64 -o releases/ .
         ls -l releases/*/
     - name: Upload
       uses: actions/upload-artifact@v3
