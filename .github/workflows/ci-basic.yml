@@ -54,6 +54,20 @@ jobs:
           ctr c rm test && ctr c ls
           ctr i rm docker.io/overlaybd/redis:6.2.1_obd && ctr i ls
 
+      - name: CI - run overlaybd(zdfs) container
+        shell: bash
+        run: |
+          set -x
+          ctr i pull registry-1.docker.io/overlaybd/redis:7.2.3_obd_zdfsRef
+          if [[ ! -f /opt/overlaybd/baselayers/.commit ]]; then
+            ln /opt/overlaybd/baselayers/ext4_64 /opt/overlaybd/baselayers/.commit
+          fi
+          ctr run -d --net-host --snapshotter=overlaybd --snapshotter-label='containerd.io/snapshot/cri.image-ref:registry-1.docker.io/overlaybd/redis:7.2.3_obd_zdfsRef' registry-1.docker.io/overlaybd/redis:7.2.3_obd_zdfsRef test
+          ctr t ls | grep test
+          ctr t kill -s 9 test && sleep 5s && ctr t ls
+          ctr c rm test && ctr c ls
+          ctr i rm registry-1.docker.io/overlaybd/redis:7.2.3_obd_zdfsRef && ctr i ls
+
       - name: CI - obdconv
         shell: bash
         run: |
