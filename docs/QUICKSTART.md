@@ -54,6 +54,7 @@ After download, install the rpm/deb package.
 #### Config
 
 The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the file if not exists.
+**We suggest the root path of snapshotter is a subpath of containerd's root**
 
 ```json
 {
@@ -82,7 +83,7 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 ```
 | Field | Description |
 | ----- | ----------- |
-| `root` | the root directory to store snapshots |
+| `root` | the root directory to store snapshots. **Suggestion: This path should be a subpath of containerd's root** |
 | `address` | the socket address used to connect withcontainerd. |
 | `verbose` | log level, `info` or `debug` |
 | `rwMode` | rootfs mode about wether to use native writable layer. See [Native Support for Writable](./WRITABLE.md) for detail. |
