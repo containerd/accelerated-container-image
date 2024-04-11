@@ -107,8 +107,8 @@ github.com/cpuguy83/go-md2man/v2 v2.0.0/go.mod h1:maD7wRr/U5Z6m/iR4s+kqSMx2CaBsr
 github.com/cpuguy83/go-md2man/v2 v2.0.2 h1:p1EgwI/C7NhT0JmVkwCD2ZBK8j4aeHQX2pMHHBfMQ6w=
 github.com/cpuguy83/go-md2man/v2 v2.0.2/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=
 github.com/cyphar/filepath-securejoin v0.2.3/go.mod h1:aPGpWjXOXUn2NCNjFvBE6aRxGGx79pTxQpKOJNYHHl4=
-github.com/data-accelerator/zdfs v0.1.3 h1:fhe2PiV+JvauZ2rBFguEM8/DcFkxtJI+6973E24zTWM=
-github.com/data-accelerator/zdfs v0.1.3/go.mod h1:MnDNsg9RiB+Ey0DzOOQ5sdMSyS8fGKGbcOYI1VULSPI=
+github.com/data-accelerator/zdfs v0.1.4 h1:S7M1lpnVPDANXXXD1ZI6p3ZUempNYVLxUkXbgEUVUkM=
+github.com/data-accelerator/zdfs v0.1.4/go.mod h1:MnDNsg9RiB+Ey0DzOOQ5sdMSyS8fGKGbcOYI1VULSPI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

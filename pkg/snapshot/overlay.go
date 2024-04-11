@@ -364,6 +364,16 @@ func (o *snapshotter) checkTurboOCI(labels map[string]string) (bool, string, str
 	return false, "", ""
 }
 
+func (o *snapshotter) isPrepareRootfs(info snapshots.Info) bool {
+	if _, ok := info.Labels[label.TargetSnapshotRef]; ok {
+		return false
+	}
+	if info.Labels[label.SnapshotType] == "image" {
+		return false
+	}
+	return true
+}
+
 func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
@@ -384,6 +394,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	if err != nil {
 		return nil, err
 	}
+	log.G(ctx).Infof("sn: %s, labels:[%+v]", id, info.Labels)
 	defer func() {
 		// the transaction rollback makes created snapshot invalid, just clean it.
 		if retErr != nil && rollback {
@@ -495,8 +506,8 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	writeType := o.getWritableType(ctx, parentID, info)
 
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
-	if _, ok := info.Labels[label.TargetSnapshotRef]; !ok {
-		log.G(ctx).Infof("Preparing rootfs. writeType: %s", writeType)
+	if o.isPrepareRootfs(info) {
+		log.G(ctx).Infof("Preparing rootfs(%s). writeType: %s", s.ID, writeType)
 		if writeType != RoDir {
 			stype = storageTypeLocalBlock
 			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
@@ -515,8 +526,8 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				parentIsAccelLayer := parentInfo.Labels[label.AccelerationLayer] == "yes"
 				needRecordTrace := info.Labels[label.RecordTrace] == "yes"
 				recordTracePath := info.Labels[label.RecordTracePath]
-				log.G(ctx).Infof("Prepare rootfs (parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
-					parentIsAccelLayer, needRecordTrace, recordTracePath)
+				log.G(ctx).Infof("Prepare rootfs (sn: %s, parentIsAccelLayer: %t, needRecordTrace: %t, recordTracePath: %s)",
+					id, parentIsAccelLayer, needRecordTrace, recordTracePath)
 
 				if parentIsAccelLayer {
 					log.G(ctx).Infof("get accel-layer in parent (id: %s)", id)

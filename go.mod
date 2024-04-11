@@ -7,7 +7,7 @@ require (
 	github.com/containerd/continuity v0.4.3
 	github.com/containerd/go-cni v1.1.9
 	github.com/containerd/log v0.1.0
-	github.com/data-accelerator/zdfs v0.1.3
+	github.com/data-accelerator/zdfs v0.1.4
 	github.com/go-sql-driver/mysql v1.6.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/moby/locker v1.0.1

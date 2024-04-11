@@ -95,6 +95,8 @@ const (
 
 	// LayerToTurboOCI is used to convert local layer to turboOCI with tar index
 	LayerToTurboOCI = "containerd.io/snapshot/overlaybd/convert2turbo-oci"
+
+	SnapshotType = "containerd.io/snapshot/type"
 )
 
 // used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)
