@@ -535,7 +535,14 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		// 2. convert local layer.tarmeta to overlaybd
 		// 3. create layer's config
 		var opt *utils.ConvertOption
-		rootfs_type := o.defaultFsType
+		var rootfs_type string
+
+		if info.Labels[label.OverlayBDBlobFsType] != "" {
+			rootfs_type = info.Labels[label.OverlayBDBlobFsType]
+		} else {
+			rootfs_type = o.defaultFsType
+		}
+
 		if rootfs_type == "erofs" {
 			opt = &utils.ConvertOption{
 				TarMetaPath:    o.overlaybdOCILayerPath(id),
