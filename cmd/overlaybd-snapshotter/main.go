@@ -40,8 +40,10 @@ import (
 const defaultConfigPath = "/etc/overlaybd-snapshotter/config.json"
 
 var pconfig *overlaybd.BootConfig
+var commitID string = "unknown"
 
 func parseConfig(fpath string) error {
+	logrus.Info("parse config file: ", fpath)
 	data, err := os.ReadFile(fpath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to read plugin config from %s", fpath)
@@ -49,15 +51,19 @@ func parseConfig(fpath string) error {
 	if err := json.Unmarshal(data, pconfig); err != nil {
 		return errors.Wrapf(err, "failed to parse plugin config from %s", string(data))
 	}
-	logrus.Infof("snapshotter rwMode: %s, autoRemove: %v, writableLayerType: %s",
-		pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType)
+	logrus.Infof("snapshotter commitID: %s, rwMode: %s, autoRemove: %v, writableLayerType: %s",
+		commitID, pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType)
 	return nil
 }
 
 // TODO: use github.com/urfave/cli
 func main() {
 	pconfig = overlaybd.DefaultBootConfig()
-	if err := parseConfig(defaultConfigPath); err != nil {
+	fnConfig := defaultConfigPath
+	if len(os.Args) == 2 {
+		fnConfig = os.Args[1]
+	}
+	if err := parseConfig(fnConfig); err != nil {
 		logrus.Error(err)
 		os.Exit(1)
 	}
@@ -117,7 +123,6 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-
 	logrus.Infof("start to serve overlaybd snapshotter on %s", address)
 
 	signals := make(chan os.Signal, 32)

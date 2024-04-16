@@ -91,6 +91,7 @@ type BootConfig struct {
 	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
 	MirrorRegistry    []Registry             `json:"mirrorRegistry"`
 	DefaultFsType     string                 `json:"defaultFsType"`
+	Tenant            int                    `json:"tenant"` // do not set this if only a single snapshotter service in the host
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -107,6 +108,7 @@ func DefaultBootConfig() *BootConfig {
 		MirrorRegistry:    nil,
 		WritableLayerType: "append",
 		DefaultFsType:     "ext4",
+		Tenant:            -1,
 	}
 }
 
@@ -173,8 +175,8 @@ type snapshotter struct {
 	writableLayerType string
 	mirrorRegistry    []Registry
 	defaultFsType     string
-
-	locker *locker.Locker
+	tenant            int
+	locker            *locker.Locker
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
@@ -226,6 +228,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		mirrorRegistry:    bootConfig.MirrorRegistry,
 		defaultFsType:     bootConfig.DefaultFsType,
 		locker:            locker.New(),
+		tenant:            bootConfig.Tenant,
 	}, nil
 }
 
