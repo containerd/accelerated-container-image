@@ -19,7 +19,7 @@ force:
 # build a binary from cmd
 bin/%: cmd/% force
 	@echo "$@"
-	@GOOS=linux CGO_ENABLED=0 go build -o $@ ./$<
+	@GOOS=linux CGO_ENABLED=0 go build -ldflags "-X 'main.commitID=$$(git rev-parse --short HEAD)'" -o $@ ./$<
 
 install: ## install binaries from bin
 	@mkdir -p $(SN_DESTDIR)

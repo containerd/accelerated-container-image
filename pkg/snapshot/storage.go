@@ -702,13 +702,27 @@ func (o *snapshotter) sealWritableOverlaybd(ctx context.Context, snID string) (r
 	return utils.Seal(ctx, o.blockPath(snID), o.upperPath(snID))
 }
 
+func (o *snapshotter) obdHbaNum() int {
+	if o.tenant == -1 {
+		return obdHbaNum
+	}
+	return o.tenant
+}
+
+func (o *snapshotter) obdLoopNaaPrefix() int {
+	if o.tenant == -1 {
+		return obdLoopNaaPrefix
+	}
+	return o.tenant%100 + 100 // keep first num is '1'
+}
+
 func (o *snapshotter) overlaybdTargetPath(id string) string {
-	return fmt.Sprintf("/sys/kernel/config/target/core/user_%d/dev_%s", obdHbaNum, id)
+	return fmt.Sprintf("/sys/kernel/config/target/core/user_%d/dev_%s", o.obdHbaNum(), id)
 }
 
 func (o *snapshotter) overlaybdLoopbackDeviceID(id string) string {
 	paddings := strings.Repeat("0", 13-len(id))
-	return fmt.Sprintf("naa.%d%s%s", obdLoopNaaPrefix, paddings, id)
+	return fmt.Sprintf("naa.%03d%s%s", o.obdLoopNaaPrefix(), paddings, id)
 }
 
 func (o *snapshotter) overlaybdLoopbackDevicePath(id string) string {
@@ -716,7 +730,7 @@ func (o *snapshotter) overlaybdLoopbackDevicePath(id string) string {
 }
 
 func (o *snapshotter) overlaybdLoopbackDeviceLunPath(id string) string {
-	return fmt.Sprintf("/sys/kernel/config/target/loopback/%s/tpgt_1/lun/lun_0", id)
+	return fmt.Sprintf("%s/tpgt_1/lun/lun_0", o.overlaybdLoopbackDevicePath(id))
 }
 
 func (o *snapshotter) scsiBlockDevicePath(deviceNumber string) string {
