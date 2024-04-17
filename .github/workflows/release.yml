@@ -36,7 +36,19 @@ jobs:
         RELEASE_VERSION=${{ env.RELEASE_VERSION }}
         if [[ -z ${RELEASE_VERSION} ]]; then
           git fetch --tags
-          RELEASE_VERSION=$(git tag --sort=v:refname -l v* | tail -1)
+          RELEASE_VERSION=$(git tag --sort=v:refname -l v* | tail -1) #v1.1.3
+          version="${RELEASE_VERSION#v}"
+
+          IFS='.' read -ra version_parts <<< "$version"
+
+          major_version=${version_parts[0]}
+          minor_version=${version_parts[1]}
+          patch_version=${version_parts[2]}
+
+          ((patch_version++))
+
+          new_version="$major_version.$minor_version.$patch_version"
+          RELEASE_VERSION="${new_version}rc" #1.1.4rc
         fi
         echo "RELEASE_VERSION=${RELEASE_VERSION}"
         RELEASE_NUM="$(date +%Y%m%d%H%M%S).$(git rev-parse --short HEAD)"

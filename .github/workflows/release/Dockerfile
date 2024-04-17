@@ -30,6 +30,7 @@ ARG RELEASE_VERSION
 ENV SEMVER=${RELEASE_VERSION}
 ARG RELEASE_NUM
 ENV RELEASE=${RELEASE_NUM}
+ENV COMMIT_ID="${RELEASE_VERSION}_${RELEASE_NUM}"
 RUN make && \
     nfpm pkg --packager deb --target /tmp/ && \
     nfpm pkg --packager rpm --target /tmp/
