@@ -31,6 +31,7 @@ import (
 )
 
 var (
+	commitID         string = "unknown"
 	repo             string
 	user             string
 	plain            bool
@@ -61,7 +62,10 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "convertor",
 		Short: "An image conversion tool from oci image to overlaybd image.",
-		Long:  "overlaybd convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images",
+		Long: `
+Description: overlaybd convertor is a standalone userspace image conversion tool that helps converting oci images to overlaybd images.
+
+Version: ` + commitID,
 		Run: func(cmd *cobra.Command, args []string) {
 			if verbose {
 				logrus.SetLevel(logrus.DebugLevel)
