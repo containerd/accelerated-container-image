@@ -6,10 +6,8 @@ require (
 	github.com/containerd/containerd v1.6.26
 	github.com/containerd/continuity v0.4.3
 	github.com/containerd/go-cni v1.1.9
-	github.com/containerd/log v0.1.0
 	github.com/data-accelerator/zdfs v0.1.4
 	github.com/go-sql-driver/mysql v1.6.0
-	github.com/jessevdk/go-flags v1.5.0
 	github.com/moby/locker v1.0.1
 	github.com/moby/sys/mountinfo v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
@@ -21,7 +19,7 @@ require (
 	github.com/spf13/cobra v1.1.3
 	github.com/urfave/cli v1.22.12
 	golang.org/x/sync v0.4.0
-	golang.org/x/sys v0.13.0
+	golang.org/x/sys v0.18.0
 	google.golang.org/grpc v1.58.3
 	oras.land/oras-go/v2 v2.3.1
 )
@@ -36,6 +34,7 @@ require (
 	github.com/containerd/console v1.0.3 // indirect
 	github.com/containerd/fifo v1.1.0 // indirect
 	github.com/containerd/go-runc v1.0.0 // indirect
+	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/ttrpc v1.2.3 // indirect
 	github.com/containerd/typeurl v1.0.2 // indirect
 	github.com/containernetworking/cni v1.1.2 // indirect
@@ -71,8 +70,8 @@ require (
 	go.etcd.io/bbolt v1.3.7 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/mod v0.11.0 // indirect
-	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/net v0.23.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.10.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230731190214-cbb8c96f2d6d // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
