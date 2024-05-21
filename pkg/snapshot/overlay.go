@@ -27,6 +27,8 @@ import (
 	"unsafe"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
+	"github.com/containerd/accelerated-container-image/pkg/snapshot/diskquota"
+
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	"github.com/data-accelerator/zdfs"
 	"github.com/sirupsen/logrus"
@@ -91,7 +93,8 @@ type BootConfig struct {
 	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
 	MirrorRegistry    []Registry             `json:"mirrorRegistry"`
 	DefaultFsType     string                 `json:"defaultFsType"`
-	Tenant            int                    `json:"tenant"` // do not set this if only a single snapshotter service in the host
+	RootfsQuota       string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
+	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -108,6 +111,7 @@ func DefaultBootConfig() *BootConfig {
 		MirrorRegistry:    nil,
 		WritableLayerType: "append",
 		DefaultFsType:     "ext4",
+		RootfsQuota:       "",
 		Tenant:            -1,
 	}
 }
@@ -177,6 +181,9 @@ type snapshotter struct {
 	defaultFsType     string
 	tenant            int
 	locker            *locker.Locker
+
+	quotaDriver *diskquota.PrjQuotaDriver
+	quotaSize   string
 }
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
@@ -229,6 +236,10 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		defaultFsType:     bootConfig.DefaultFsType,
 		locker:            locker.New(),
 		tenant:            bootConfig.Tenant,
+		quotaSize:         bootConfig.RootfsQuota,
+		quotaDriver: &diskquota.PrjQuotaDriver{
+			QuotaIDs: make(map[uint32]struct{}),
+		},
 	}, nil
 }
 
@@ -510,6 +521,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if o.isPrepareRootfs(info) {
+
 		log.G(ctx).Infof("Preparing rootfs(%s). writeType: %s", s.ID, writeType)
 		if writeType != RoDir {
 			stype = storageTypeLocalBlock
@@ -1142,6 +1154,15 @@ func (o *snapshotter) normalOverlayMount(s storage.Snapshot) []mount.Mount {
 	}
 }
 
+func (o *snapshotter) getDiskQuotaSize(info *snapshots.Info) string {
+	if info.Labels != nil {
+		if size, ok := info.Labels[label.RootfsQuotaLabel]; ok {
+			return size
+		}
+	}
+	return o.quotaSize
+}
+
 func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ string, _ snapshots.Info, err error) {
 	var td, path string
 	defer func() {
@@ -1159,8 +1180,10 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			}
 		}
 	}()
+	_, tmpinfo, _, err := storage.GetInfo(ctx, key)
 
 	snapshotDir := filepath.Join(o.root, "snapshots")
+
 	td, err = o.prepareDirectory(ctx, snapshotDir, kind)
 	if err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to create prepare snapshot dir")
@@ -1182,14 +1205,29 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			return "", snapshots.Info{}, errors.Wrap(err, "failed to chown")
 		}
 	}
-
+	if o.isPrepareRootfs(tmpinfo) {
+		if diskQuotaSize := o.getDiskQuotaSize(&tmpinfo); diskQuotaSize != "" {
+			log.G(ctx).Infof("set usage quota %s for rootfs(sn: %s)", diskQuotaSize, s.ID)
+			upperPath := filepath.Join(td, "fs")
+			if err := o.setDiskQuota(ctx, upperPath, diskQuotaSize, diskquota.QuotaMinID); err != nil {
+				return "", snapshots.Info{}, errors.Wrapf(err, "failed to set diskquota on upperpath, snapshot id: %s", s.ID)
+			}
+			// if there's no parent, we just return a bind mount, so no need to set quota on workerpath
+			if len(s.ParentIDs) > 0 {
+				workpath := filepath.Join(td, "work")
+				if err := o.setDiskQuota(ctx, workpath, diskQuotaSize, diskquota.QuotaMinID); err != nil {
+					return "", snapshots.Info{}, errors.Wrapf(err, "failed to set diskquota on workpath, snapshot id: %s", s.ID)
+				}
+			}
+		}
+	}
 	path = filepath.Join(snapshotDir, s.ID)
 	if err = os.Rename(td, path); err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to rename")
 	}
 	td = ""
-
 	id, info, _, err := storage.GetInfo(ctx, key)
+
 	if err != nil {
 		return "", snapshots.Info{}, errors.Wrap(err, "failed to get snapshot info")
 	}
@@ -1265,6 +1303,27 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	log.G(ctx).Debugf("storageType(sn: %s): %d", id, st)
 
 	return st, err
+}
+
+// SetDiskQuota is used to set quota for directory.
+func (o *snapshotter) setDiskQuota(ctx context.Context, dir string, size string, quotaID uint32) error {
+	log.G(ctx).Infof("setDiskQuota: dir %s, size %s", dir, size)
+	if isRegular, err := diskquota.CheckRegularFile(dir); err != nil || !isRegular {
+		log.G(ctx).Errorf("set quota skip not regular file: %s", dir)
+		return err
+	}
+
+	id := o.quotaDriver.GetQuotaIDInFileAttr(dir)
+	if id > 0 && id != quotaID {
+		return fmt.Errorf("quota id is already set, quota id: %d", id)
+	}
+
+	log.G(ctx).Infof("try to set disk quota, dir(%s), size(%s), quotaID(%d)", dir, size, quotaID)
+
+	if err := o.quotaDriver.SetDiskQuota(dir, size, quotaID); err != nil {
+		return errors.Wrapf(err, "failed to set dir(%s) disk quota", dir)
+	}
+	return nil
 }
 
 func (o *snapshotter) snPath(id string) string {
