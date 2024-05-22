@@ -216,8 +216,11 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 // TODO(fuweid): need to track the middle state if the process has been killed.
 func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
 
+	log.G(ctx).Debugf("lookup device mountpoint(%s) if exists before attach.", snID)
 	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
 		return nil
+	} else {
+		log.G(ctx).Infof(err.Error())
 	}
 
 	targetPath := o.overlaybdTargetPath(snID)
@@ -228,6 +231,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 	defer func() {
 		if retErr != nil {
+			log.G(ctx).Error(retErr.Error())
 			rerr := os.RemoveAll(targetPath)
 			if rerr != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean target dir %s", targetPath)
@@ -236,12 +240,14 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	}()
 
 	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID))), 0666); err != nil {
-		return errors.Wrapf(err, "failed to write target dev_config for %s", targetPath)
+		return errors.Wrapf(err, "failed to write target dev_config for %s: %s",
+			targetPath, fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID)))
 	}
 
 	err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
 	if err != nil {
-		return errors.Wrapf(err, "failed to write target max_data_area_mb for %s", targetPath)
+		return errors.Wrapf(err, "failed to write target max_data_area_mb for %s: %s",
+			targetPath, fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB))
 	}
 
 	err = os.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
@@ -405,7 +411,8 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					if writable != RoDir {
 						mountFlag = 0
 					}
-					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s", fstype, mountOpts, writable)
+					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s, mountpoint: %s",
+						fstype, mountOpts, writable, mountPoint)
 					if err := unix.Mount(device, mountPoint, fstype, mountFlag, mountOpts); err != nil {
 						lastErr = errors.Wrapf(err, "failed to mount %s to %s", device, mountPoint)
 						time.Sleep(10 * time.Millisecond)
@@ -743,11 +750,11 @@ func lookup(dir string) error {
 
 	m, err := mountinfo.GetMounts(mountinfo.SingleEntryFilter(dir))
 	if err != nil {
-		return errors.Wrapf(err, "failed to find the mount info for %q", dir)
+		return errors.Wrapf(err, "failed to get mount info for %q", dir)
 	}
 
 	if len(m) == 0 {
-		return errors.Errorf("failed to find the mount info for %q", dir)
+		return errors.Errorf("failed to find the mount point for %q", dir)
 	}
 	return nil
 }

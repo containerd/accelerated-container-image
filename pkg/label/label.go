@@ -97,6 +97,9 @@ const (
 	LayerToTurboOCI = "containerd.io/snapshot/overlaybd/convert2turbo-oci"
 
 	SnapshotType = "containerd.io/snapshot/type"
+
+	// RootfsQuotaLabel sets container rootfs diskquota
+	RootfsQuotaLabel = "containerd.io/snapshot/disk_quota"
 )
 
 // used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)
