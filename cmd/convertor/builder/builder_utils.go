@@ -119,10 +119,18 @@ func fetchManifestAndConfig(ctx context.Context, fetcher remotes.Fetcher, desc s
 }
 
 func downloadLayer(ctx context.Context, fetcher remotes.Fetcher, targetFile string, desc specs.Descriptor, decompress bool) error {
-	rc, err := fetcher.Fetch(ctx, desc)
+	rcoriginal, err := fetcher.Fetch(ctx, desc)
 	if err != nil {
 		return err
 	}
+
+	verifier := desc.Digest.Verifier()
+	// tee the reader to verify the digest
+	// this is because the decompression result
+	// will be different from the original for which
+	// the digest is calculated.
+	rc := io.TeeReader(rcoriginal, verifier)
+
 	dir := path.Dir(targetFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -131,6 +139,7 @@ func downloadLayer(ctx context.Context, fetcher remotes.Fetcher, targetFile stri
 	if err != nil {
 		return err
 	}
+
 	if decompress {
 		rc, err = compression.DecompressStream(rc)
 		if err != nil {
@@ -140,6 +149,11 @@ func downloadLayer(ctx context.Context, fetcher remotes.Fetcher, targetFile stri
 	if _, err = io.Copy(ftar, rc); err != nil {
 		return err
 	}
+
+	if !verifier.Verified() {
+		return fmt.Errorf("failed to verify digest %v", desc.Digest)
+	}
+
 	return nil
 }
 
