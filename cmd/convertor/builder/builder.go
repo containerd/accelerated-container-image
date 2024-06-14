@@ -66,6 +66,9 @@ type BuilderOptions struct {
 	// ConcurrencyLimit limits the number of manifests that can be built at once
 	// 0 means no limit
 	ConcurrencyLimit int
+
+	// disable sparse file when converting overlaybd
+	DisableSparse bool
 }
 
 type graphBuilder struct {
@@ -248,6 +251,7 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 	switch b.Engine {
 	case Overlaybd:
 		engine = NewOverlayBDBuilderEngine(engineBase)
+		engine.(*overlaybdBuilderEngine).disableSparse = b.DisableSparse
 	case TurboOCI:
 		engine = NewTurboOCIBuilderEngine(engineBase)
 	}
