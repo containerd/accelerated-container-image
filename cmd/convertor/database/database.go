@@ -42,6 +42,7 @@ type LayerEntry struct {
 	Repository      string
 	ChainID         string
 	Host            string
+	Version         string
 }
 
 type ManifestEntry struct {
@@ -51,4 +52,5 @@ type ManifestEntry struct {
 	Repository      string
 	Host            string
 	MediaType       string
+	Version         string
 }
