@@ -78,10 +78,12 @@ jobs:
       - name: CI - record trace
         shell: bash
         run: |
+          set -x
           /opt/overlaybd/snapshotter/ctr rpull registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv
           echo "[ by record-trace ]"
           /opt/overlaybd/snapshotter/ctr record-trace --runtime "io.containerd.runc.v2" --disable-network-isolation --time 15 registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv_trace
           ctr i ls | grep 6.2.1_obdconv_trace
+          sleep 10s # wait for tcmu device to be removed
           echo "[ by label ]"
           touch /tmp/trace_file
           ctr run -d --snapshotter=overlaybd --snapshotter-label containerd.io/snapshot/overlaybd/record-trace=yes --snapshotter-label containerd.io/snapshot/overlaybd/record-trace-path=/tmp/trace_file registry.hub.docker.com/overlaybd/redis:6.2.1_obdconv demo

@@ -51,6 +51,7 @@ type overlaybdConvertResult struct {
 
 type overlaybdBuilderEngine struct {
 	*builderEngineBase
+	disableSparse   bool
 	overlaybdConfig *sn.OverlayBDBSConfig
 	overlaybdLayers []overlaybdConvertResult
 }
@@ -427,7 +428,10 @@ func (e *overlaybdBuilderEngine) getLayerDir(idx int) string {
 }
 
 func (e *overlaybdBuilderEngine) create(ctx context.Context, dir string, mkfs bool, vsizeGB int) error {
-	opts := []string{"-s", fmt.Sprintf("%d", vsizeGB)}
+	opts := []string{fmt.Sprintf("%d", vsizeGB)}
+	if !e.disableSparse {
+		opts = append(opts, "-s")
+	}
 	if mkfs {
 		opts = append(opts, "--mkfs")
 		logrus.Infof("mkfs for baselayer, vsize: %d GB", vsizeGB)

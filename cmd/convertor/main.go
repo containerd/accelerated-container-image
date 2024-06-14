@@ -48,6 +48,7 @@ var (
 	dbstr            string
 	dbType           string
 	concurrencyLimit int
+	disableSparse    bool
 
 	// certification
 	certDirs    []string
@@ -104,6 +105,7 @@ Version: ` + commitID,
 				NoUpload:         noUpload,
 				DumpManifest:     dumpManifest,
 				ConcurrencyLimit: concurrencyLimit,
+				DisableSparse:    disableSparse,
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -165,6 +167,7 @@ func init() {
 	rootCmd.Flags().StringVar(&dbstr, "db-str", "", "db str for overlaybd conversion")
 	rootCmd.Flags().StringVar(&dbType, "db-type", "", "type of db to use for conversion deduplication. Available: mysql. Default none")
 	rootCmd.Flags().IntVar(&concurrencyLimit, "concurrency-limit", 4, "the number of manifests that can be built at the same time, used for multi-arch images, 0 means no limit")
+	rootCmd.Flags().BoolVar(&disableSparse, "disable-sparse", false, "disable sparse file for overlaybd")
 
 	// certification
 	rootCmd.Flags().StringArrayVar(&certDirs, "cert-dir", nil, "In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key")
