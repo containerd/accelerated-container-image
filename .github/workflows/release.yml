@@ -8,7 +8,7 @@ on:
       - "v*"
 
 env:
-  GO_VERSION: "1.19"
+  GO_VERSION: "1.22.0"
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
         releasever="${releasever#refs/tags/}"
         echo "RELEASE_VERSION=${releasever}" >> $GITHUB_ENV
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 100
     - name: Setup buildx instance

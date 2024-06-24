@@ -30,7 +30,7 @@ import (
 	sn "github.com/containerd/accelerated-container-image/pkg/types"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/accelerated-container-image/pkg/version"
-	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/errdefs"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"

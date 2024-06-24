@@ -33,12 +33,12 @@ import (
 	"github.com/data-accelerator/zdfs"
 	"github.com/sirupsen/logrus"
 
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/log"
-	"github.com/containerd/containerd/mount"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/storage"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/core/snapshots/storage"
 	"github.com/containerd/continuity/fs"
+	"github.com/containerd/errdefs"
+	"github.com/containerd/log"
 	"github.com/moby/locker"
 	"github.com/pkg/errors"
 )

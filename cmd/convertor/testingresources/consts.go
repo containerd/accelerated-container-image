@@ -20,7 +20,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/containerd/containerd/reference"
+	"github.com/containerd/containerd/v2/pkg/reference"
 )
 
 /*

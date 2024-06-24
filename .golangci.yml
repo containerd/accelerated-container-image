@@ -6,7 +6,7 @@ linters:
     - gofmt
     - goimports
     - ineffassign
-    - vet
+    - govet
     - unused
     - misspell
   disable:
@@ -14,9 +14,8 @@ linters:
 
 linters-settings:
   depguard:
-    list-type: denylist
-    include-go-root: true
-    packages:
-      # use "io" or "os" instead
-      # https://go.dev/doc/go1.16#ioutil
-      - io/ioutil
+    rules:
+      main:
+        deny:
+          - pkg: io/ioutil
+            desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil

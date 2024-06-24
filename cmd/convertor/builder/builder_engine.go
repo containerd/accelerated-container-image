@@ -23,9 +23,9 @@ import (
 	"path"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
-	"github.com/containerd/containerd/archive/compression"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/continuity"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
