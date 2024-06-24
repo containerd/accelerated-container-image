@@ -22,9 +22,9 @@ import (
 	"testing"
 
 	testingresources "github.com/containerd/accelerated-container-image/cmd/convertor/testingresources"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	_ "github.com/containerd/containerd/pkg/testutil" // Handle custom root flag
+	"github.com/containerd/containerd/v2/core/images"
+	_ "github.com/containerd/containerd/v2/pkg/testutil" // Handle custom root flag
+	"github.com/containerd/errdefs"
 	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )

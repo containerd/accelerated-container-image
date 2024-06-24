@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	sn "github.com/containerd/accelerated-container-image/pkg/types"
-	"github.com/containerd/containerd/log"
+	"github.com/containerd/log"
 	"github.com/pkg/errors"
 )
 

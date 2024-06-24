@@ -29,9 +29,9 @@ import (
 
 	testingresources "github.com/containerd/accelerated-container-image/cmd/convertor/testingresources"
 	sn "github.com/containerd/accelerated-container-image/pkg/types"
-	"github.com/containerd/containerd/images"
-	_ "github.com/containerd/containerd/pkg/testutil" // Handle custom root flag
-	"github.com/containerd/containerd/remotes"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes"
+	_ "github.com/containerd/containerd/v2/pkg/testutil" // Handle custom root flag
 	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )

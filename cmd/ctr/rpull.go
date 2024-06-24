@@ -22,28 +22,28 @@ import (
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	ctrcontent "github.com/containerd/containerd/cmd/ctr/commands/content"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/snapshots"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	ctrcontent "github.com/containerd/containerd/v2/cmd/ctr/commands/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/snapshots"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-var rpullCommand = cli.Command{
+var rpullCommand = &cli.Command{
 	Name:        "rpull",
 	Usage:       "rpull an image from a remote for overlaybd snapshotter",
 	ArgsUsage:   "[flags] <ref>",
 	Description: `Fetch and prepare an image for use in containerd.`,
 	Flags: append(append(commands.RegistryFlags, commands.LabelFlag),
-		cli.StringFlag{
-			Name:   "snapshotter",
-			Usage:  "snapshotter name. Empty value stands for the default value.",
-			Value:  "overlaybd",
-			EnvVar: "CONTAINERD_SNAPSHOTTER",
+		&cli.StringFlag{
+			Name:    "snapshotter",
+			Usage:   "snapshotter name. Empty value stands for the default value.",
+			Value:   "overlaybd",
+			EnvVars: []string{"CONTAINERD_SNAPSHOTTER"},
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "download-blobs",
 			Usage: "download overlaybd blobs",
 		},

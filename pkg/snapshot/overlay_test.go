@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/containerd/containerd/pkg/testutil"
-	"github.com/containerd/containerd/snapshots"
-	"github.com/containerd/containerd/snapshots/testsuite"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/core/snapshots/testsuite"
+	"github.com/containerd/containerd/v2/pkg/testutil"
 )
 
 func newSnapshotterWithOpts(opts ...Opt) testsuite.SnapshotterFunc {

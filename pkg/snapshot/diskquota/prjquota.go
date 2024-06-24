@@ -27,11 +27,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/go-units"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
-	"github.com/containerd/containerd/mount"
+	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/docker/go-units"
 )
 
 const (

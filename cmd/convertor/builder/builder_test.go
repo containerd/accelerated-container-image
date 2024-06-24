@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/containerd/containerd/pkg/testutil" // Handle custom root flag
+	_ "github.com/containerd/containerd/v2/pkg/testutil" // Handle custom root flag
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 )
 

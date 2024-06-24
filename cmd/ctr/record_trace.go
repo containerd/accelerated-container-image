@@ -19,10 +19,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -33,26 +33,26 @@ import (
 	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
 	"github.com/containerd/accelerated-container-image/pkg/label"
 
-	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/cmd/ctr/commands/tasks"
-	"github.com/containerd/containerd/containers"
-	"github.com/containerd/containerd/content"
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
-	"github.com/containerd/containerd/leases"
-	"github.com/containerd/containerd/oci"
-	"github.com/containerd/containerd/platforms"
-	"github.com/containerd/containerd/plugin"
-	"github.com/containerd/containerd/remotes"
-	"github.com/containerd/containerd/snapshots"
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/cmd/ctr/commands/tasks"
+	"github.com/containerd/containerd/v2/core/containers"
+	"github.com/containerd/containerd/v2/core/content"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/leases"
+	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/core/snapshots"
+	"github.com/containerd/containerd/v2/pkg/oci"
+	"github.com/containerd/containerd/v2/plugins"
+	"github.com/containerd/errdefs"
 	"github.com/containerd/go-cni"
+	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
 )
 
@@ -99,43 +99,42 @@ var (
 	emptyDesc           ocispec.Descriptor
 )
 
-var recordTraceCommand = cli.Command{
-	Name:           "record-trace",
-	Usage:          "record trace for prefetch",
-	ArgsUsage:      "OldImage NewImage [COMMAND] [ARG...]",
-	Description:    "Make an new image from the old one, with a trace layer on top of it. A temporary container will be created and do the recording.",
-	SkipArgReorder: true,
+var recordTraceCommand = &cli.Command{
+	Name:        "record-trace",
+	Usage:       "record trace for prefetch",
+	ArgsUsage:   "OldImage NewImage [COMMAND] [ARG...]",
+	Description: "Make an new image from the old one, with a trace layer on top of it. A temporary container will be created and do the recording.",
 	Flags: []cli.Flag{
-		cli.UintFlag{
+		&cli.UintFlag{
 			Name:  "time",
 			Usage: "record time in seconds. When time expires, a TERM signal will be sent to the task. The task might fail to respond signal if time is too short.",
 			Value: 60,
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "working-dir",
 			Value: "/tmp/ctr-record-trace/",
 			Usage: "temporary working dir for trace files",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "snapshotter",
 			Usage: "snapshotter name.",
 			Value: "overlaybd",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "runtime",
 			Usage: "runtime name",
-			Value: plugin.RuntimeLinuxV1,
+			Value: string(plugins.RuntimePluginV2),
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "max-concurrent-downloads",
 			Usage: "Set the max concurrent downloads for each pull",
 			Value: 8,
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "disable-network-isolation",
 			Usage: "Do not use cni to provide network isolation, default is false",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "cni-plugin-dir",
 			Usage: "cni plugin dir",
 			Value: "/opt/cni/bin/",
@@ -143,7 +142,6 @@ var recordTraceCommand = cli.Command{
 	},
 
 	Action: func(cliCtx *cli.Context) (err error) {
-		rand.Seed(time.Now().UnixNano())
 		recordTime := time.Duration(cliCtx.Uint("time")) * time.Second
 		if recordTime == 0 {
 			return errors.New("time can't be 0")
@@ -509,7 +507,7 @@ func createContainer(ctx context.Context, client *containerd.Client, cliCtx *cli
 
 		key = uniqueObjectString()
 		// Specify the binary and arguments for the application to execute
-		args = cliCtx.Args()[2:]
+		args = cliCtx.Args().Slice()[2:]
 	)
 
 	cOpts = append(cOpts,

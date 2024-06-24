@@ -23,8 +23,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/containerd/containerd/errdefs"
-	"github.com/containerd/containerd/images"
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/errdefs"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 

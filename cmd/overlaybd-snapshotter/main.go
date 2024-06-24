@@ -30,7 +30,7 @@ import (
 	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
-	"github.com/containerd/containerd/contrib/snapshotservice"
+	"github.com/containerd/containerd/v2/contrib/snapshotservice"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -56,7 +56,7 @@ func parseConfig(fpath string) error {
 	return nil
 }
 
-// TODO: use github.com/urfave/cli
+// TODO: use github.com/urfave/cli/v2
 func main() {
 	pconfig = overlaybd.DefaultBootConfig()
 	fnConfig := defaultConfigPath
