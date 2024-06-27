@@ -574,8 +574,12 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			fsType, ok := obdInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
-				log.G(ctx).Warnf("cannot get fs type from label, %v, using %s", obdInfo.Labels, o.defaultFsType)
-				fsType = o.defaultFsType
+				if isTurboOCI, _, _ := o.checkTurboOCI(obdInfo.Labels); isTurboOCI {
+					_, fsType = o.turboOCIFsMeta(obdID)
+				} else {
+					fsType = o.defaultFsType
+				}
+				log.G(ctx).Warnf("cannot get fs type from label, %v, using %s", obdInfo.Labels, fsType)
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
@@ -733,7 +737,11 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
 			fsType, ok := parentInfo.Labels[label.OverlayBDBlobFsType]
 			if !ok {
-				fsType = o.defaultFsType
+				if isTurboOCI, _, _ := o.checkTurboOCI(parentInfo.Labels); isTurboOCI {
+					_, fsType = o.turboOCIFsMeta(parentID)
+				} else {
+					fsType = o.defaultFsType
+				}
 			}
 			if err := o.attachAndMountBlockDevice(ctx, parentID, RoDir, fsType, false); err != nil {
 				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
@@ -1355,8 +1363,13 @@ func (o *snapshotter) blockPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block")
 }
 
-func (o *snapshotter) turboOCIFsMeta(id string) string {
-	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta")
+func (o *snapshotter) turboOCIFsMeta(id string) (string, string) {
+	// TODO: make the priority order (multi-meta exists) configurable later if needed
+	erofsmeta := filepath.Join(o.root, "snapshots", id, "fs", "erofs.fs.meta")
+	if _, err := os.Stat(erofsmeta); err == nil {
+		return erofsmeta, "erofs"
+	}
+	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta"), "ext4"
 }
 
 func (o *snapshotter) magicFilePath(id string) string {
