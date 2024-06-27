@@ -489,12 +489,9 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}, nil
 		}
 
-		// Normal prepare
+		// Normal prepare for TurboOCI
 		if isTurboOCI, digest, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
 			log.G(ctx).Infof("%s is turboOCI.v1 layer: %s", s.ID, digest)
-			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
-				return nil, err
-			}
 			stype = storageTypeNormal
 		}
 		if stype == storageTypeRemoteBlock {
@@ -823,6 +820,17 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	}
 
 	log.G(ctx).Debugf("Commit info (id: %s, info: %v, stype: %d)", id, info.Labels, stype)
+
+	// For turboOCI, we need to construct OverlayBD spec after unpacking
+	// since there could be multiple fs metadata in a turboOCI layer
+	if isTurboOCI, digest, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
+		log.G(ctx).Infof("commit turboOCI.v1 layer: (%s, %s)", id, digest)
+		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
+			return errors.Wrapf(err, "failed to construct overlaybd config")
+		}
+		stype = storageTypeNormal
+	}
+
 	// Firstly, try to convert an OCIv1 tarball to a turboOCI layer.
 	// then change stype to 'storageTypeLocalBlock' which can make it attach a overlaybd block
 	if stype == storageTypeLocalLayer {
