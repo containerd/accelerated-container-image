@@ -160,7 +160,7 @@ func ApplyTurboOCI(ctx context.Context, dir, gzipMetaFile string, opts ...string
 		path.Join(dir, "config.json"),
 		"--gz_index_path", path.Join(dir, gzipMetaFile)}, opts...)
 	log.G(ctx).Debugf("%s %s", obdBinApply, strings.Join(args, " "))
-	out, err := exec.CommandContext(ctx, obdBinApply, args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, obdBinTurboOCIApply, args...).CombinedOutput()
 	if err != nil {
 		return errors.Wrapf(err, "failed to overlaybd-apply[turboOCI]: %s", out)
 	}

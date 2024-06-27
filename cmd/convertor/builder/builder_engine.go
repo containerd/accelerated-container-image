@@ -85,6 +85,7 @@ type builderEngineBase struct {
 	config       specs.Image
 	workDir      string
 	oci          bool
+	fstype       string
 	mkfs         bool
 	vsize        int
 	db           database.ConversionDatabase

@@ -41,7 +41,7 @@ const (
 	gzipMetaFile = "gzip.meta"
 
 	// index of block device
-	fsMetaFile = "ext4.fs.meta"
+	fsMetaFileSuffix = ".fs.meta"
 
 	// foci index layer (gzip)
 	tociLayerTar = "turboOCIv1.tar.gz"
@@ -103,12 +103,21 @@ func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	if err := e.apply(ctx, layerDir); err != nil {
 		return err
 	}
-	if err := e.commit(ctx, layerDir); err != nil {
+
+	var fsMetaFile string
+	if e.fstype == "" {
+		fsMetaFile = "ext4" + fsMetaFileSuffix
+	} else {
+		fsMetaFile = e.fstype + fsMetaFileSuffix
+	}
+
+	if err := e.commit(ctx, layerDir, fsMetaFile); err != nil {
 		return err
 	}
 	if err := e.createIdentifier(idx); err != nil {
 		return errors.Wrapf(err, "failed to create identifier %q", tociIdentifier)
 	}
+
 	files := []string{
 		path.Join(layerDir, fsMetaFile),
 		path.Join(layerDir, tociIdentifier),
@@ -249,7 +258,7 @@ func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string, mkfs boo
 		vsizeGB = e.vsize
 	}
 	opts := []string{"-s", fmt.Sprintf("%d", vsizeGB), "--turboOCI"}
-	if mkfs {
+	if mkfs && e.fstype != "erofs" {
 		opts = append(opts, "--mkfs")
 		logrus.Infof("mkfs for baselayer, vsize: %d GB", vsizeGB)
 	}
@@ -257,10 +266,14 @@ func (e *turboOCIBuilderEngine) create(ctx context.Context, dir string, mkfs boo
 }
 
 func (e *turboOCIBuilderEngine) apply(ctx context.Context, dir string) error {
+	if e.fstype != "" {
+		opts := []string{"--fstype", e.fstype}
+		return utils.ApplyTurboOCI(ctx, dir, gzipMetaFile, opts...)
+	}
 	return utils.ApplyTurboOCI(ctx, dir, gzipMetaFile)
 }
 
-func (e *turboOCIBuilderEngine) commit(ctx context.Context, dir string) error {
+func (e *turboOCIBuilderEngine) commit(ctx context.Context, dir string, fsMetaFile string) error {
 	if err := utils.Commit(ctx, dir, dir, false, "-z", "--fastoci"); err != nil {
 		return err
 	}
