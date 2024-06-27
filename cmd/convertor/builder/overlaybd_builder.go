@@ -45,8 +45,9 @@ const (
 )
 
 type overlaybdConvertResult struct {
-	desc    specs.Descriptor
-	chainID string
+	desc      specs.Descriptor
+	chainID   string
+	fromDedup bool
 }
 
 type overlaybdBuilderEngine struct {
@@ -95,12 +96,31 @@ func (e *overlaybdBuilderEngine) DownloadLayer(ctx context.Context, idx int) err
 func (e *overlaybdBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 	layerDir := e.getLayerDir(idx)
 
-	alreadyConverted := false
-	// check if we used a previously converted layer to skip conversion
-	if _, err := os.Stat(path.Join(layerDir, commitFile)); err == nil {
-		alreadyConverted = true
+	// If the layer is from dedup we should have a downloaded commit file
+	commitFilePresent := false
+	if _, err := os.Stat(path.Join(layerDir, commitFile)); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to check if layer %d is already present abort conversion: %w", idx, err)
+		}
+		// commit file is not present
+	} else {
+		commitFilePresent = true
+		logrus.Debugf("layer %d commit file detected", idx)
 	}
-	if !alreadyConverted {
+	if e.overlaybdLayers[idx].fromDedup {
+		// check if the previously converted layer is present
+		if commitFilePresent {
+			logrus.Debugf("layer %d is from dedup", idx)
+		} else {
+			return fmt.Errorf("layer %d is from dedup but commit file is missing", idx)
+		}
+	} else {
+		// This should not happen, but if it does, we should fail the conversion or
+		// risk corrupting the image.
+		if commitFilePresent {
+			return fmt.Errorf("layer %d is not from dedup but commit file is present", idx)
+		}
+
 		mkfs := e.mkfs && (idx == 0)
 		vsizeGB := 0
 		if idx == 0 {
@@ -143,6 +163,12 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	desc, err := getFileDesc(path.Join(layerDir, commitFile), false)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get descriptor for layer %d", idx)
+	}
+	if e.overlaybdLayers[idx].fromDedup {
+		// validate that the layer digests match if the layer is from dedup
+		if desc.Digest != e.overlaybdLayers[idx].desc.Digest {
+			return fmt.Errorf("layer %d digest mismatch, expected %s, got %s", idx, e.overlaybdLayers[idx].desc.Digest, desc.Digest)
+		}
 	}
 	desc.MediaType = e.mediaTypeImageLayer()
 	desc.Annotations = map[string]string{
@@ -355,12 +381,25 @@ func (e *overlaybdBuilderEngine) StoreConvertedLayerDetails(ctx context.Context,
 	if e.db == nil {
 		return nil
 	}
+	if e.overlaybdLayers[idx].fromDedup {
+		logrus.Infof("layer %d skip storing conversion details", idx)
+		return nil
+	}
 	return e.db.CreateLayerEntry(ctx, e.host, e.repository, e.overlaybdLayers[idx].desc.Digest, e.overlaybdLayers[idx].chainID, e.overlaybdLayers[idx].desc.Size)
 }
 
 func (e *overlaybdBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx int, desc specs.Descriptor) error {
 	targetFile := path.Join(e.getLayerDir(idx), commitFile)
-	return downloadLayer(ctx, e.fetcher, targetFile, desc, true)
+	err := downloadLayer(ctx, e.fetcher, targetFile, desc, true)
+	if err != nil {
+		// We should remove the commit file if the download failed to allow for fallback conversion
+		os.Remove(targetFile) // Remove any file that may have failed to download
+		return errors.Wrapf(err, "failed to download layer %d", idx)
+	}
+	// Mark that this layer is from dedup
+	e.overlaybdLayers[idx].fromDedup = true
+	e.overlaybdLayers[idx].desc = desc // If we are deduping store the dedup descriptor for later validation
+	return nil
 }
 
 func (e *overlaybdBuilderEngine) Cleanup() {
