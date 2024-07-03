@@ -39,6 +39,7 @@ var (
 	tagOutput        string
 	dir              string
 	oci              bool
+	fsType           string
 	mkfs             bool
 	verbose          bool
 	vsize            int
@@ -93,6 +94,7 @@ Version: ` + commitID,
 				PlainHTTP: plain,
 				WorkDir:   dir,
 				OCI:       oci,
+				FsType:    fsType,
 				Mkfs:      mkfs,
 				Vsize:     vsize,
 				CertOption: builder.CertOption{
@@ -159,6 +161,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
+	rootCmd.Flags().StringVar(&fsType, "fstype", "ext4", "filesystem type of converted image.")
 	rootCmd.Flags().BoolVarP(&mkfs, "mkfs", "", true, "make ext4 fs in bottom layer")
 	rootCmd.Flags().IntVarP(&vsize, "vsize", "", 64, "virtual block device size (GB)")
 	rootCmd.Flags().StringVar(&fastoci, "fastoci", "", "build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)")

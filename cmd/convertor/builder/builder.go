@@ -54,6 +54,7 @@ type BuilderOptions struct {
 	PlainHTTP bool
 	WorkDir   string
 	OCI       bool
+	FsType    string
 	Mkfs      bool
 	Vsize     int
 	DB        database.ConversionDatabase
@@ -234,6 +235,7 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 	}
 	engineBase.workDir = workdir
 	engineBase.oci = b.OCI
+	engineBase.fstype = b.FsType
 	engineBase.mkfs = b.Mkfs
 	engineBase.vsize = b.Vsize
 	engineBase.db = b.DB

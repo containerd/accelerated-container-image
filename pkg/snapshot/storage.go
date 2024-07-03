@@ -502,10 +502,11 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 		configJSON.RepoBlobURL = blobPrefixURL
 		if isTurboOCI, dataDgst, compType := o.checkTurboOCI(info.Labels); isTurboOCI {
+			fsmeta, _ := o.turboOCIFsMeta(id)
 			lower := sn.OverlayBDBSConfigLower{
 				Dir: o.upperPath(id),
 				// keep this to support ondemand turboOCI loading.
-				File:         o.turboOCIFsMeta(id),
+				File:         fsmeta,
 				TargetDigest: dataDgst,
 			}
 			if isGzipLayerType(compType) {
