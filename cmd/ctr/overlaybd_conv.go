@@ -21,41 +21,42 @@ import (
 	"time"
 
 	obdconv "github.com/containerd/accelerated-container-image/pkg/convertor"
-	"github.com/containerd/containerd/cmd/ctr/commands"
-	"github.com/containerd/containerd/images/converter"
-	"github.com/containerd/containerd/leases"
+
+	"github.com/containerd/containerd/v2/cmd/ctr/commands"
+	"github.com/containerd/containerd/v2/core/images/converter"
+	"github.com/containerd/containerd/v2/core/leases"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
-var convertCommand = cli.Command{
+var convertCommand = &cli.Command{
 	Name:        "obdconv",
 	Usage:       "convert image layer into overlaybd format type",
 	ArgsUsage:   "<src-image> <dst-image>",
 	Description: `Export images to an OCI tar[.gz] into zfile format`,
 	Flags: append(commands.RegistryFlags,
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "fstype",
 			Usage: "filesystem type(required), used to mount block device, support specifying mount options and mkfs options, separate fs type and options by ';', separate mount options by ',', separate mkfs options by ' '",
 			Value: "ext4",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "dbstr",
 			Usage: "data base config string used for layer deduplication",
 			Value: "",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "algorithm",
 			Usage: "compress algorithm uses in zfile, [lz4|zstd]",
 			Value: "",
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "bs",
 			Usage: "The size of a compressed data block in KB. Must be a power of two between 4K~64K [4/8/16/32/64]",
 			Value: 0,
 		},
-		cli.IntFlag{
+		&cli.IntFlag{
 			Name:  "vsize",
 			Usage: "virtual block device size (GB)",
 			Value: 64,

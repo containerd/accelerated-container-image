@@ -37,7 +37,7 @@ Users can compile the latest code to install or download the [release](https://g
 #### Compile from source
 
 Install dependencies:
-- golang 1.19+
+- golang 1.22+
 
 Run the following commands to build:
 ```bash
