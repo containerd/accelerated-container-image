@@ -53,8 +53,8 @@ RUN apt-get update && apt-get install -y apt-transport-https ca-certificates cur
     apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io && \
     apt-get install -y libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
-    dpkg -i overlaybd-${OBD_VERSION}-0ubuntu1.22.04.x86_64.deb && \
+    wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-20240717.b5b704b.ubuntu1.22.04.x86_64.deb && \
+    dpkg -i overlaybd-${OBD_VERSION}-20240717.b5b704b.ubuntu1.22.04.x86_64.deb && \
     dpkg -i overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb && \
     sed -i 's/"autoRemoveDev": false,/"autoRemoveDev": true,/g' /etc/overlaybd-snapshotter/config.json && \
     cat /etc/overlaybd-snapshotter/config.json && \

@@ -22,12 +22,16 @@ do
 
     tag_obd="${tag}_overlaybd"
     tag_turbo="${tag}_turbo"
+    tag_turbo_erofs="${tag}_turbo_erofs"
     manifest_obd="${workspace}/manifest.json"
     manifest_turbo="${workspace}/manifest-turbo.json"
+    manifest_turbo_erofs="${workspace}/manifest-turbo-erofs.json"
     config_obd="${workspace}/config.json"
     config_turbo="${workspace}/config-turbo.json"
+    config_turbo_erofs="${workspace}/config-turbo-erofs.json"
     output_obd="${workspace}/convert.overlaybd.out"
     output_turbo="${workspace}/convert.turbo.out"
+    output_turbo_erofs="${workspace}/convert.turbo.erofs.out"
 
     ${convertor} -r "${registry}/${img}" -i "${tag}" --overlaybd "${tag_obd}" -d "${workspace}/overlaybd_tmp_conv" &> "${output_obd}"
     curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_obd}" "https://${registry}/v2/${img}/manifests/${tag_obd}" &> /dev/null
@@ -41,11 +45,18 @@ do
     configDigest=${configDigest//\"/}
     curl -o "${config_turbo}" "https://${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
 
+    ${convertor} -r "${registry}/${img}" -i "${tag}" --turboOCI "${tag_turbo_erofs}" --fstype erofs -d "${workspace}/turbo_erofs_tmp_conv" &> "${output_turbo_erofs}"
+    curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" "https://${registry}/v2/${img}/manifests/${tag_turbo_erofs}"
+    curl -H "Accept: application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json" -o "${manifest_turbo_erofs}" "https://${registry}/v2/${img}/manifests/${tag_turbo_erofs}" &> /dev/null
+    configDigest=$(jq '.config.digest' "${manifest_turbo_erofs}")
+    configDigest=${configDigest//\"/}
+    curl -o "${config_turbo_erofs}" "https://${registry}/v2/${img}/blobs/${configDigest}" &> /dev/null
+
     prefix=$(date +%Y%m%d%H%M%S)
 
-    mode=("manifest" "config" "manifest" "config")
-    actual=("${manifest_obd}" "${config_obd}" "${manifest_turbo}" "${config_turbo}")
-    expected=("${ci_base}/${img}/manifest.json" "${ci_base}/${img}/config.json" "${ci_base}/${img}/manifest-turbo.json" "${ci_base}/${img}/config-turbo.json")
+    mode=("manifest" "config" "manifest" "config" "manifest" "config")
+    actual=("${manifest_obd}" "${config_obd}" "${manifest_turbo}" "${config_turbo}" "${manifest_turbo_erofs}" "${config_turbo_erofs}")
+    expected=("${ci_base}/${img}/manifest.json" "${ci_base}/${img}/config.json" "${ci_base}/${img}/manifest-turbo.json" "${ci_base}/${img}/config-turbo.json" "${ci_base}/${img}/manifest-turbo-erofs.json" "${ci_base}/${img}/config-turbo-erofs.json")
 
     conv_res=0
     n=${#mode[@]}
