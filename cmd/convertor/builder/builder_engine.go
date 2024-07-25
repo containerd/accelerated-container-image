@@ -27,10 +27,10 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/continuity"
+	"github.com/containerd/log"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 )
 
 type BuilderEngineType int
@@ -39,6 +39,22 @@ const (
 	Overlaybd BuilderEngineType = iota
 	TurboOCI
 )
+
+const (
+	ArtifactTypeOverlaybd = "application/vnd.containerd.overlaybd.native.v1+json"
+	ArtifactTypeTurboOCI  = "application/vnd.containerd.overlaybd.turbo.v1+json"
+)
+
+func (engine BuilderEngineType) ArtifactType() string {
+	switch engine {
+	case Overlaybd:
+		return ArtifactTypeOverlaybd
+	case TurboOCI:
+		return ArtifactTypeTurboOCI
+	default:
+		return ""
+	}
+}
 
 type builderEngine interface {
 	DownloadLayer(ctx context.Context, idx int) error
@@ -96,6 +112,7 @@ type builderEngineBase struct {
 	reserve      bool
 	noUpload     bool
 	dumpManifest bool
+	referrer     bool
 }
 
 func (e *builderEngineBase) isGzipLayer(ctx context.Context, idx int) (bool, error) {
@@ -164,14 +181,14 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.
 		if err = uploadBytes(ctx, e.pusher, e.manifest.Config, cbuf); err != nil {
 			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload config")
 		}
-		logrus.Infof("config uploaded")
+		log.G(ctx).Infof("config uploaded")
 	}
 	if e.dumpManifest {
 		confPath := path.Join(e.workDir, "config.json")
 		if err := continuity.AtomicWriteFile(confPath, cbuf, 0644); err != nil {
 			return specs.Descriptor{}, err
 		}
-		logrus.Infof("config dumped")
+		log.G(ctx).Infof("config dumped")
 	}
 
 	e.manifest.MediaType = e.mediaTypeManifest()
@@ -189,14 +206,14 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.
 			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload manifest")
 		}
 		e.outputDesc = manifestDesc
-		logrus.Infof("manifest uploaded")
+		log.G(ctx).Infof("manifest uploaded, %s", manifestDesc.Digest)
 	}
 	if e.dumpManifest {
 		descPath := path.Join(e.workDir, "manifest.json")
 		if err := continuity.AtomicWriteFile(descPath, cbuf, 0644); err != nil {
 			return specs.Descriptor{}, err
 		}
-		logrus.Infof("manifest dumped")
+		log.G(ctx).Infof("manifest dumped")
 	}
 	return manifestDesc, nil
 }

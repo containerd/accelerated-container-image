@@ -70,6 +70,9 @@ type BuilderOptions struct {
 
 	// disable sparse file when converting overlaybd
 	DisableSparse bool
+
+	// Push manifests with subject
+	Referrer bool
 }
 
 type graphBuilder struct {
@@ -164,13 +167,31 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		}
 
 		// upload index
+		if b.Referrer {
+			index.ArtifactType = b.Engine.ArtifactType()
+			index.Subject = &v1.Descriptor{
+				MediaType: src.MediaType,
+				Digest:    src.Digest,
+				Size:      src.Size,
+			}
+		}
+		if b.OCI {
+			index.MediaType = v1.MediaTypeImageIndex
+		}
 		indexBytes, err = json.Marshal(index)
 		if err != nil {
 			return v1.Descriptor{}, fmt.Errorf("failed to marshal index: %w", err)
 		}
-		expected := src
-		expected.Digest = digest.FromBytes(indexBytes)
-		expected.Size = int64(len(indexBytes))
+		if b.DumpManifest {
+			if err := os.WriteFile(filepath.Join(b.WorkDir, "index.json"), indexBytes, 0644); err != nil {
+				return v1.Descriptor{}, fmt.Errorf("failed to dump index: %w", err)
+			}
+		}
+		expected := v1.Descriptor{
+			MediaType: index.MediaType,
+			Digest:    digest.FromBytes(indexBytes),
+			Size:      int64(len(indexBytes)),
+		}
 		var pusher remotes.Pusher
 		if tag {
 			pusher = b.tagPusher
@@ -180,6 +201,7 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		if err := uploadBytes(ctx, pusher, expected, indexBytes); err != nil {
 			return v1.Descriptor{}, fmt.Errorf("failed to upload index: %w", err)
 		}
+		log.G(ctx).Infof("index uploaded, %s", expected.Digest)
 		return expected, nil
 	default:
 		return v1.Descriptor{}, fmt.Errorf("unsupported media type %q", src.MediaType)
@@ -232,6 +254,7 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 		manifest:  *manifest,
 		config:    *config,
 		inputDesc: src,
+		referrer:  b.Referrer,
 	}
 	engineBase.workDir = workdir
 	engineBase.oci = b.OCI
@@ -267,8 +290,11 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 	if err != nil {
 		return v1.Descriptor{}, fmt.Errorf("failed to build %s: %w", workdir, err)
 	}
+
+	// preserve the other fields from src descriptor
 	src.Digest = desc.Digest
 	src.Size = desc.Size
+	src.MediaType = desc.MediaType
 	return src, nil
 }
 

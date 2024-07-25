@@ -42,6 +42,7 @@ Flags:
   -o, --output-tag string         tag for image converting to
   -d, --dir string                directory used for temporary data (default "tmp_conv")
       --oci                       export image with oci spec
+      --fstype string             filesystem type of converted image. (default "ext4")
       --mkfs                      make ext4 fs in bottom layer (default true)
       --vsize int                 virtual block device size (GB) (default 64)
       --fastoci string            build 'Overlaybd-Turbo OCIv1' format (old name of turboOCIv1. deprecated)
@@ -50,6 +51,8 @@ Flags:
       --db-str string             db str for overlaybd conversion
       --db-type string            type of db to use for conversion deduplication. Available: mysql. Default none
       --concurrency-limit int     the number of manifests that can be built at the same time, used for multi-arch images, 0 means no limit (default 4)
+      --disable-sparse            disable sparse file for overlaybd
+      --referrer                  push converted manifests with subject, note '--oci' will be enabled automatically if '--referrer' is set, cause the referrer must be in OCI format.
       --cert-dir stringArray      In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key
       --root-ca stringArray       root CA certificates
       --client-cert stringArray   client cert certificates, should form in ${cert-file}:${key-file}
@@ -64,6 +67,73 @@ $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd --vsize 256
 
+```
+
+### Referrers API support (Experimental)
+
+Referrers API provides the ability to reference artifacts to existing artifacts, it returns all artifacts that have a `subject` field of the given manifest digest. If your registry has supported this feature, you can enable `--referrer` so that the converted image will be referenced to the original image. See [Listing Referrers](https://github.com/opencontainers/distribution-spec/blob/v1.1.0/spec.md#listing-referrers) and  for more details.
+
+The artifact type for overlaybd and turboOCIv1 is `application/vnd.containerd.overlaybd.native.v1+json` and `application/vnd.containerd.overlaybd.turbo.v1+json` respectively.
+
+The format of the converted images is as follows, note that if the original image is an index (multi-arch image), all converted indexes and manifests will have a `subject` field.
+
+#### index.json
+
+```
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "artifactType": "application/vnd.containerd.overlaybd.native.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:b0a40a33547de0961b6e0064a298e55484a2636830ba8bf5d05e34fae88b1443",
+      "size": 882,
+      "platform": {
+        "architecture": "386",
+        "os": "linux"
+      }
+    },
+    ...
+  ],
+  "subject": {
+    "mediaType": "application/vnd.docker.distribution.manifest.list.v2+json",
+    "digest": "sha256:5df8d0e068b9c8c95c330607dfd96db51ac0b670b3a974ab23449866c0aa70a1",
+    "size": 1076
+  }
+}
+```
+
+#### manifest.json
+
+```
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.containerd.overlaybd.native.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:e006fc50e6cec5e81844abb28abd0a01f4ff599432818a3bb9dfb96ce3e5daae",
+    "size": 571
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar",
+      "digest": "sha256:63e766ab33f12958a0d94676a0bf5f7b800e04e4fac2124d785a8a54a8108e45",
+      "size": 3933696,
+      "annotations": {
+        "containerd.io/snapshot/overlaybd/blob-digest": "sha256:63e766ab33f12958a0d94676a0bf5f7b800e04e4fac2124d785a8a54a8108e45",
+        "containerd.io/snapshot/overlaybd/blob-size": "3933696",
+        "containerd.io/snapshot/overlaybd/version": "0.1.0"
+      }
+    }
+  ],
+  "subject": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:096958b089cdfa4b345dba0ae0a1e43bea59e4de6e084c26429b6c85096322cf",
+    "size": 528
+  }
+}
 ```
 
 ### Layer/Manifest Deduplication

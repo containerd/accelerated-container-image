@@ -202,6 +202,14 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) (specs.Descript
 		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	}
+	if e.referrer {
+		e.manifest.ArtifactType = ArtifactTypeTurboOCI
+		e.manifest.Subject = &specs.Descriptor{
+			MediaType: e.inputDesc.MediaType,
+			Digest:    e.inputDesc.Digest,
+			Size:      e.inputDesc.Size,
+		}
+	}
 	return e.uploadManifestAndConfig(ctx)
 }
 
@@ -234,7 +242,9 @@ func (e *turboOCIBuilderEngine) StoreConvertedManifestDetails(ctx context.Contex
 }
 
 func (e *turboOCIBuilderEngine) Cleanup() {
-	os.RemoveAll(e.workDir)
+	if !e.reserve {
+		os.RemoveAll(e.workDir)
+	}
 }
 
 func (e *turboOCIBuilderEngine) getLayerDir(idx int) string {
