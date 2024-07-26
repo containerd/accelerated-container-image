@@ -1,0 +1,36 @@
+name: Unit Test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - 'main'
+
+jobs:
+  unit-test:
+    name: Unit Test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/github.com/containerd/accelerated-container-image
+          fetch-depth: 100
+
+      - name: install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.0'
+
+      - name: set env
+        shell: bash
+        run: |
+          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+
+      - name: unit test
+        working-directory: src/github.com/containerd/accelerated-container-image
+        run: |
+          sudo GO_TESTFLAGS=-v make test
