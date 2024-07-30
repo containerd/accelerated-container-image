@@ -198,7 +198,14 @@ func (e *overlaybdBuilderEngine) UploadImage(ctx context.Context) (specs.Descrip
 		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
 	}
-
+	if e.referrer {
+		e.manifest.ArtifactType = ArtifactTypeOverlaybd
+		e.manifest.Subject = &specs.Descriptor{
+			MediaType: e.inputDesc.MediaType,
+			Digest:    e.inputDesc.Digest,
+			Size:      e.inputDesc.Size,
+		}
+	}
 	return e.uploadManifestAndConfig(ctx)
 }
 

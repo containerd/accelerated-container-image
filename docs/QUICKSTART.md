@@ -249,7 +249,7 @@ sudo nerdctl rmi registry.hub.docker.com/overlaybd/redis:6.2.1_obd_new
 
 ```bash
 # userspace-image-convertor will automatically pull and push images from and to the registry
-sudo /opt/overlaybd/snapshotter/convertor -r registry.hub.docker.com/library -i redis:6.2.1 -o 6.2.1_obd_new
+sudo /opt/overlaybd/snapshotter/convertor -r registry.hub.docker.com/library/redis -i 6.2.1 -o 6.2.1_obd_new
 ```
 
 ## Image build
