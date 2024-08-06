@@ -208,6 +208,13 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		return nil, err
 	}
 
+	root, err := filepath.EvalSymlinks(bootConfig.Root)
+	if err != nil {
+		log.L.Errorf("invalid root: %s. (%s)", bootConfig.Root, err.Error())
+		return nil, err
+	}
+	log.L.Infof("new snapshotter: root = %s", root)
+
 	metacopyOption := ""
 	if _, err := os.Stat("/sys/module/overlay/parameters/metacopy"); err == nil {
 		metacopyOption = "metacopy=on"
@@ -224,7 +231,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 	}
 
 	return &snapshotter{
-		root:              bootConfig.Root,
+		root:              root,
 		rwMode:            bootConfig.RwMode,
 		ms:                ms,
 		indexOff:          indexOff,

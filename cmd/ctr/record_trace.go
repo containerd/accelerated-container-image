@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -111,6 +112,11 @@ var recordTraceCommand = &cli.Command{
 			Value: 60,
 		},
 		&cli.StringFlag{
+			Name:  "priority_list",
+			Usage: "path of a file-list contains files to be prefetched",
+			Value: "",
+		},
+		&cli.StringFlag{
 			Name:  "working-dir",
 			Value: "/tmp/ctr-record-trace/",
 			Usage: "temporary working dir for trace files",
@@ -140,7 +146,12 @@ var recordTraceCommand = &cli.Command{
 			Value: "/opt/cni/bin/",
 		},
 	},
-
+	Before: func(cliCtx *cli.Context) error {
+		if cliCtx.IsSet("priority_list") && cliCtx.Args().Len() > 2 {
+			return errors.New("command args and priority_list can't be set at the same time")
+		}
+		return nil
+	},
 	Action: func(cliCtx *cli.Context) (err error) {
 		recordTime := time.Duration(cliCtx.Uint("time")) * time.Second
 		if recordTime == 0 {
@@ -206,89 +217,105 @@ var recordTraceCommand = &cli.Command{
 		if traceFd, err = os.Create(traceFile); err != nil {
 			return errors.New("failed to create trace file")
 		}
-		_ = traceFd.Close()
 		defer os.Remove(traceFile)
+		if !cliCtx.IsSet("priority_list") {
+			_ = traceFd.Close()
 
-		// Create lease
-		ctx, deleteLease, err := client.WithLease(ctx,
-			leases.WithID(uniqueObjectString()),
-			leases.WithExpiration(maxLeaseTime),
-		)
-		if err != nil {
-			return errors.Wrap(err, "failed to create lease")
-		}
-		defer deleteLease(ctx)
-
-		// Create isolated network
-		if !cliCtx.Bool("disable-network-isolation") {
-			networkNamespace = uniqueObjectString()
-			namespacePath = "/var/run/netns/" + networkNamespace
-			if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
-				return errors.Wrapf(err, "failed to add netns")
+			// Create lease
+			ctx, deleteLease, err := client.WithLease(ctx,
+				leases.WithID(uniqueObjectString()),
+				leases.WithExpiration(maxLeaseTime),
+			)
+			if err != nil {
+				return errors.Wrap(err, "failed to create lease")
 			}
-			defer func() {
-				if nextErr := exec.Command("ip", "netns", "delete", networkNamespace).Run(); err == nil && nextErr != nil {
-					err = errors.Wrapf(err, "failed to delete netns")
+			defer deleteLease(ctx)
+
+			// Create isolated network
+			if !cliCtx.Bool("disable-network-isolation") {
+				networkNamespace = uniqueObjectString()
+				namespacePath = "/var/run/netns/" + networkNamespace
+				if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
+					return errors.Wrapf(err, "failed to add netns")
 				}
-			}()
-			cniObj, err := createIsolatedNetwork(cliCtx)
+				defer func() {
+					if nextErr := exec.Command("ip", "netns", "delete", networkNamespace).Run(); err == nil && nextErr != nil {
+						err = errors.Wrapf(err, "failed to delete netns")
+					}
+				}()
+				cniObj, err := createIsolatedNetwork(cliCtx)
+				if err != nil {
+					return err
+				}
+				defer func() {
+					if nextErr := cniObj.Remove(ctx, networkNamespace, namespacePath); err == nil && nextErr != nil {
+						err = errors.Wrapf(nextErr, "failed to teardown network")
+					}
+				}()
+				if _, err = cniObj.Setup(ctx, networkNamespace, namespacePath); err != nil {
+					return errors.Wrapf(err, "failed to setup network for namespace")
+				}
+			}
+
+			// Create container and run task
+			fmt.Println("Create container")
+			container, err := createContainer(ctx, client, cliCtx, image, traceFile)
 			if err != nil {
 				return err
 			}
-			defer func() {
-				if nextErr := cniObj.Remove(ctx, networkNamespace, namespacePath); err == nil && nextErr != nil {
-					err = errors.Wrapf(nextErr, "failed to teardown network")
-				}
-			}()
-			if _, err = cniObj.Setup(ctx, networkNamespace, namespacePath); err != nil {
-				return errors.Wrapf(err, "failed to setup network for namespace")
+			defer container.Delete(ctx, containerd.WithSnapshotCleanup)
+
+			task, err := tasks.NewTask(ctx, client, container, "", nil, false, "", nil)
+			if err != nil {
+				return err
 			}
-		}
+			defer task.Delete(ctx)
 
-		// Create container and run task
-		fmt.Println("Create container")
-		container, err := createContainer(ctx, client, cliCtx, image, traceFile)
-		if err != nil {
-			return err
-		}
-		defer container.Delete(ctx, containerd.WithSnapshotCleanup)
+			var statusC <-chan containerd.ExitStatus
+			if statusC, err = task.Wait(ctx); err != nil {
+				return err
+			}
 
-		task, err := tasks.NewTask(ctx, client, container, "", nil, false, "", nil)
-		if err != nil {
-			return err
-		}
-		defer task.Delete(ctx)
+			if err := task.Start(ctx); err != nil {
+				return err
+			}
+			fmt.Println("Task is running ...")
 
-		var statusC <-chan containerd.ExitStatus
-		if statusC, err = task.Wait(ctx); err != nil {
-			return err
-		}
+			timer := time.NewTimer(recordTime)
+			watchStop := make(chan bool)
 
-		if err := task.Start(ctx); err != nil {
-			return err
-		}
-		fmt.Println("Task is running ...")
+			// Start a thread to watch timeout and signals
+			go watchThread(ctx, timer, task, watchStop)
 
-		timer := time.NewTimer(recordTime)
-		watchStop := make(chan bool)
+			// Wait task stopped
+			status := <-statusC
+			if _, _, err := status.Result(); err != nil {
+				return errors.Wrapf(err, "failed to get exit status")
+			}
 
-		// Start a thread to watch timeout and signals
-		go watchThread(ctx, timer, task, watchStop)
+			if timer.Stop() {
+				watchStop <- true
+				fmt.Println("Task finished before timeout ...")
+			}
 
-		// Wait task stopped
-		status := <-statusC
-		if _, _, err := status.Result(); err != nil {
-			return errors.Wrapf(err, "failed to get exit status")
-		}
-
-		if timer.Stop() {
-			watchStop <- true
-			fmt.Println("Task finished before timeout ...")
-		}
-
-		// Collect trace
-		if err = collectTrace(traceFile); err != nil {
-			return err
+			// Collect trace
+			if err = collectTrace(traceFile); err != nil {
+				return err
+			}
+		} else {
+			fmt.Println("Set priority list as acceleration layer")
+			defer traceFd.Close()
+			fn := cliCtx.String("priority_list")
+			inf, err := os.OpenFile(fn, os.O_RDONLY, 0644)
+			if err != nil {
+				fmt.Printf("failed to open priority list: %s", err.Error())
+				return err
+			}
+			defer inf.Close()
+			_, err = io.Copy(traceFd, inf)
+			if err != nil {
+				return err
+			}
 		}
 
 		// Load trace file into content, and generate an acceleration layer
@@ -455,22 +482,23 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 	newManifest.Config = newConfigDesc
 	newManifest.Layers = append(oldManifest.Layers, l.Desc)
 
+	imageMediaType := oldManifest.MediaType
+
 	// V2 manifest is not adopted in OCI spec yet, so follow the docker registry V2 spec here
 	var newManifestV2 = struct {
 		ocispec.Manifest
 		MediaType string `json:"mediaType"`
 	}{
 		Manifest:  newManifest,
-		MediaType: images.MediaTypeDockerSchema2Manifest,
+		MediaType: imageMediaType, //images.MediaTypeDockerSchema2Manifest,
 	}
 
 	newManifestData, err := json.MarshalIndent(newManifestV2, "", "   ")
 	if err != nil {
 		return emptyDesc, err
 	}
-
 	newManifestDesc := ocispec.Descriptor{
-		MediaType: images.MediaTypeDockerSchema2Manifest,
+		MediaType: imageMediaType, // images.MediaTypeDockerSchema2Manifest,
 		Digest:    digest.Canonical.FromBytes(newManifestData),
 		Size:      int64(len(newManifestData)),
 	}

@@ -72,6 +72,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
 * See the [PERFORMANCE](docs/PERFORMANCE.md) test about the acceleration.
 
+* Enable 'record-trace' function can achieve higher performance for the entrypoint that needs to read amount of data at container startup. See [ENABLE_TRACE](docs/trace-prefetch.md).
+
 * See how to convert OCI image into overlaybd with specified file system at [MULTI_FS_SUPPORT](docs/MULTI_FS_SUPPORT.md).
 
 * See how to use layer deduplication for image conversion at [IMAGE_CONVERTOR](docs/IMAGE_CONVERTOR.md).

@@ -8,15 +8,38 @@ There are many ways to do prefetch, for instance, we can simply read extra data 
 
 Another way is to [prioritize files and use landmarks](https://github.com/containerd/stargz-snapshotter/blob/master/docs/stargz-estargz.md#prioritized-files-and-landmark-files), which is already adopted in Google's stargz. The storage engine runtime will prefetch the range where prioritized files are contained. And finally this information will be leveraged for increasing cache hit ratio and mitigating read overhead.
 
-In this article we are about to introduce a new prefetch mechanism based on time sequenced I/O patterns (trace). This mechanism has been integrated as a feature into `ctr record-trace` command.
+In this article we are about to introduce two prefetch modes in overlayBD. One is to set prioritized files, another is a new prefetch mechanism based on time sequenced I/O patterns (trace).
+These two mechanisms have been integrated as a feature into `ctr record-trace` command.
 
-## Trace Prefetch
+## Prefetch Mode
+
+### Prioritize Files
+
+Setting prioritized files is a simple way to improve container's cold start time. It is suitable for the condition where the target files needed be fully loaded.
+
+When overlaybd device has been created, it will get prioritized files from the priority_list and analyze the filesystem via libext4 before mounting, then download the target files to overalybd's cache.
+
+**Only support images based on EXT4 filesystem**
+
+The priority list is a simple text file, each line contains a file path like follow:
+```bash
+## cat /tmp/priority_list.txt
+/usr/bin/containerd
+/usr/bin/nerdctl
+/opt/cni/dhcp
+/opt/cni/vlan
+```
+
+
+### Trace Prefetch
 
 Since every single I/O request happens on user's own filesystem will eventually be mapped into one overlaybd's layer blob, we can then record all I/Os from the layer blob's perspective, and replay them later. That's why we call it Trace Prefetch.
 
 Trace prefetch is time based, and it has greater granularity and predication accuracy than stargz. We don't mark a file, because user app might only need to read a small part of it in the beginning, simply prefetching the whole file would be less efficient. Instead, we replay the trace, by the exact I/O records that happened before. Each record contains only necessary information, such as the offset and length of the blob being read.
 
-Trace is stored as an independent image layer, and MUST always be the uppermost one. Neither image manifest nor container snapshotter needs to know if it is a trace layer, snapshotter just downloads and extracts it as usual. The overlaybd backstore MUST recognize trace layer, and replay it accordingly.
+**!! Note !!**
+
+Both priority list and I/O trace are stored as an independent image layer, and MUST always be the uppermost one. Neither image manifest nor container snapshotter needs to know if it is a trace layer, snapshotter just downloads and extracts it as usual. The overlaybd backstore MUST recognize trace layer, and replay it accordingly.
 
 ## Terminology
 
@@ -42,14 +65,18 @@ After Recording and Pushing, users could pull and run the specific image somewhe
 
 The example usage of building a new image with trace layer would be as follows:
 ```
-bin/ctr rpull --download-blobs <old_image>
+bin/ctr rpull --download-blobs <image>
 
-bin/ctr record-trace --time 20 <old_image> <local>
+## trace prefetch
+bin/ctr record-trace --time 20 <image> <image_with_trace>
 
-ctr i push <new_image> <local>
+## prioritized files
+bin/ctr record-trace --priority_list <path/to/filelist> <image> <image_with_trace>
+
+ctr i push <image_with_trace>
 ```
 
-Note the `old_image` must be in overlaybd format. A temporary container will be created and do the recording. The recording progress will be terminated by either timeout, or user signals.
+Note the `<image>` must be in overlaybd format. A temporary container will be created and do the recording. The recording progress will be terminated by either timeout, or user signals.
 
 Due to current limitations, this command might ask you remove the old image locally, in order to prepare a clean environment for the recording.
 
