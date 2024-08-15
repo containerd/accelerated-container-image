@@ -60,6 +60,20 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     It is an overlaybd-based remote image format which enables the original OCI image to be a remote one without conversion. It is similar to [SOCI](https://github.com/awslabs/soci-snapshotter), but provides block device interface, which has advantages than FUSE-based formats in performance and stability.
 
+## Docker Image
+
+The `Dockerfile` is supplied to build the image of the overlaybd convertor. You can build the docker image by yourself as follows:
+
+```
+docker build -f Dockerfile -t overlaybd-convertor .
+```
+
+Then run the overlaybd convertor image (see [QUICKSTART](docs/QUICKSTART.md) for more details):
+
+```
+docker run overlaybd-convertor -r registry.hub.docker.com/library/redis -i 6.2.1 -o 6.2.1_obd_new
+```
+
 ## Getting Started
 
 * [QUICKSTART](docs/QUICKSTART.md) helps quickly run an overlaybd image including basic usage.
