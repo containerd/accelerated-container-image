@@ -19,6 +19,7 @@ package snapshot
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -211,6 +212,23 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	return nil
 }
 
+// determine whether the block device represented
+// by @path is eorfs filesystem
+func IsErofsFilesystem(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	byte4 := make([]byte, 4)
+	_, err = f.ReadAt(byte4, 1024)
+	if err != nil {
+		return false
+	}
+	return binary.LittleEndian.Uint32(byte4) == 0xe0f5e1e2
+}
+
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
@@ -362,6 +380,10 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 			options := strings.Split(fsType, ";")
 			fstype := options[0]
+
+			if IsErofsFilesystem(device) {
+				fstype = "erofs"
+			}
 
 			if mkfs {
 				args := []string{"-t", fstype}
