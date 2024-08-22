@@ -10,9 +10,10 @@ require (
 	github.com/containerd/go-cni v1.1.9
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v0.2.1
-	github.com/data-accelerator/zdfs v0.1.5-0.20240710071456-86adeb4b7e8d
+	github.com/data-accelerator/zdfs v0.1.5
 	github.com/docker/go-units v0.5.0
 	github.com/go-sql-driver/mysql v1.8.1
+	github.com/jessevdk/go-flags v1.6.1
 	github.com/moby/locker v1.0.1
 	github.com/moby/sys/mountinfo v0.7.1
 	github.com/opencontainers/go-digest v1.0.0
