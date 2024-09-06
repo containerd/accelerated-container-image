@@ -29,6 +29,7 @@ import (
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot/diskquota"
 
+	mylog "github.com/containerd/accelerated-container-image/internal/log"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	"github.com/data-accelerator/zdfs"
 	"github.com/sirupsen/logrus"
@@ -944,7 +945,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		if err == nil {
 			err = o.unmountAndDetachBlockDevice(ctx, id, key)
 			if err != nil {
-				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+				return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 			}
 		}
 	}
@@ -961,10 +962,18 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 			if st, err := o.identifySnapshotStorageType(ctx, s.ParentIDs[0], info); err == nil && st != storageTypeNormal {
 				err = o.unmountAndDetachBlockDevice(ctx, s.ParentIDs[0], "")
 				if err != nil {
-					return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+					return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 				}
 			}
 		}
+	}
+
+	// Just in case, check if snapshot contains mountpoint
+	mounted, err := o.isMounted(ctx, o.overlaybdMountpoint(id))
+	if err != nil {
+		return mylog.TracedErrorf(ctx, "failed to check mountpoint: %w", err)
+	} else if mounted {
+		return mylog.TracedErrorf(ctx, "try to remove snapshot %s which still have mountpoint", id)
 	}
 
 	_, _, err = storage.Remove(ctx, key)
