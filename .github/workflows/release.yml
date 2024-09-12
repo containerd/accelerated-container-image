@@ -55,7 +55,7 @@ jobs:
         docker buildx build --build-arg RELEASE_NUM=${RELEASE_NUM} --build-arg RELEASE_VERSION=${RELEASE_VERSION} --build-arg GO_VERSION=${{ env.GO_VERSION }} -f .github/workflows/release/Dockerfile --platform=linux/amd64,linux/arm64 -o releases/ .
         ls -l releases/*/
     - name: Upload
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: releases
         path: releases/*/overlaybd-snapshotter*
@@ -67,7 +67,7 @@ jobs:
     needs: [build]
     steps:
       - name: Download builds and release notes
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v4
       - name: Display downloaded files
         shell: bash
         run: ls -l releases/*/
@@ -88,7 +88,7 @@ jobs:
     needs: [build]
     steps:
       - name: Download builds and release notes
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v4
       - name: Display downloaded files
         shell: bash
         run: ls -l releases/*/
