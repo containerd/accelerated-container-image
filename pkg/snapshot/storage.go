@@ -68,13 +68,37 @@ const (
 	obdMaxDataAreaMB = 4
 )
 
+type mountMatcherFunc func(fields []string, separatorIndex int) bool
+
 func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
+	matcher := func(fields []string, separatorIndex int) bool {
+		// ... but in Linux <= 3.9 mounting a cifs with spaces in a share name
+		// (like "//serv/My Documents") _may_ end up having a space in the last field
+		// of mountinfo (like "unc=//serv/My Documents"). Since kernel 3.10-rc1, cifs
+		// option unc= is ignored,  so a space should not appear. In here we ignore
+		// those "extra" fields caused by extra spaces.
+		fstype := fields[separatorIndex+1]
+		vfsOpts := fields[separatorIndex+3]
+		return fstype == "overlay" && strings.Contains(vfsOpts, dir)
+	}
+	return o.matchMounts(ctx, matcher)
+}
+
+func (o *snapshotter) isMounted(ctx context.Context, mountpoint string) (bool, error) {
+	matcher := func(fields []string, separatorIndex int) bool {
+		mp := fields[4]
+		return path.Clean(mountpoint) == path.Clean(mp)
+	}
+	return o.matchMounts(ctx, matcher)
+}
+
+func (o *snapshotter) matchMounts(ctx context.Context, matcher mountMatcherFunc) (bool, error) {
 	f, err := os.Open("/proc/self/mountinfo")
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
-	b, err := o.parseAndCheckMounted(ctx, f, dir)
+	b, err := o.parseAndCheckMounted(ctx, f, matcher)
 	if err != nil {
 		log.G(ctx).Errorf("Parsing mounts fields, error: %v", err)
 		return false, err
@@ -82,7 +106,7 @@ func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool
 	return b, nil
 }
 
-func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, dir string) (bool, error) {
+func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, matcher mountMatcherFunc) (bool, error) {
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		if err := s.Err(); err != nil {
@@ -139,21 +163,15 @@ func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, dir
 			log.G(ctx).Warnf("Parsing '%s' failed: not enough fields after a separator", text)
 			continue
 		}
-		// ... but in Linux <= 3.9 mounting a cifs with spaces in a share name
-		// (like "//serv/My Documents") _may_ end up having a space in the last field
-		// of mountinfo (like "unc=//serv/My Documents"). Since kernel 3.10-rc1, cifs
-		// option unc= is ignored,  so a space should not appear. In here we ignore
-		// those "extra" fields caused by extra spaces.
-		fstype := fields[i+1]
-		vfsOpts := fields[i+3]
-		if fstype == "overlay" && strings.Contains(vfsOpts, dir) {
+
+		if matcher(fields, i) {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-// unmountAndDetachBlockDevice
+// unmountAndDetachBlockDevice will do nothing if the device is already destroyed
 func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) (err error) {
 	devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
 	if err != nil {
