@@ -36,6 +36,7 @@ var (
 	user             string
 	plain            bool
 	tagInput         string
+	digestInput      string
 	tagOutput        string
 	dir              string
 	oci              bool
@@ -74,6 +75,10 @@ Version: ` + commitID,
 				logrus.SetLevel(logrus.DebugLevel)
 			}
 			tb := ""
+			if digestInput == "" && tagInput == "" {
+				logrus.Error("one of input-tag [-i] or input-digest [-g] is required")
+				os.Exit(1)
+			}
 			if overlaybd == "" && fastoci == "" && turboOCI == "" {
 				if tagOutput == "" {
 					logrus.Error("output-tag is required, you can specify it by [-o|--overlaybd|--turboOCI]")
@@ -93,8 +98,12 @@ Version: ` + commitID,
 			}
 
 			ctx := context.Background()
+			ref := repo + ":" + tagInput
+			if tagInput == "" {
+				ref = repo + "@" + digestInput
+			}
 			opt := builder.BuilderOptions{
-				Ref:       repo + ":" + tagInput,
+				Ref:       ref,
 				Auth:      user,
 				PlainHTTP: plain,
 				WorkDir:   dir,
@@ -163,7 +172,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&user, "username", "u", "", "user[:password] Registry user and password")
 	rootCmd.Flags().BoolVarP(&plain, "plain", "", false, "connections using plain HTTP")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "", false, "show debug log")
-	rootCmd.Flags().StringVarP(&tagInput, "input-tag", "i", "", "tag for image converting from (required)")
+	rootCmd.Flags().StringVarP(&tagInput, "input-tag", "i", "", "tag for image converting from (required when input-digest is not set)")
+	rootCmd.Flags().StringVarP(&digestInput, "input-digest", "g", "", "digest for image converting from (required when input-tag is not set)")
 	rootCmd.Flags().StringVarP(&tagOutput, "output-tag", "o", "", "tag for image converting to")
 	rootCmd.Flags().StringVarP(&dir, "dir", "d", "tmp_conv", "directory used for temporary data")
 	rootCmd.Flags().BoolVarP(&oci, "oci", "", false, "export image with oci spec")
@@ -191,7 +201,6 @@ func init() {
 	rootCmd.Flags().BoolVar(&dumpManifest, "dump-manifest", false, "dump manifest")
 
 	rootCmd.MarkFlagRequired("repository")
-	rootCmd.MarkFlagRequired("input-tag")
 }
 
 func main() {

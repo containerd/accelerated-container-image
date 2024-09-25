@@ -50,11 +50,12 @@ jobs:
         shell: bash
         run: |
           bash new_registry.sh
-          bash prepare_image.sh registry.hub.docker.com/overlaybd/centos:centos7.9.2009 localhost:5000/centos:centos7.9.2009 && \
-          bash prepare_image.sh registry.hub.docker.com/overlaybd/ubuntu:22.04          localhost:5000/ubuntu:22.04 && \
-          bash prepare_image.sh registry.hub.docker.com/overlaybd/redis:7.2.3           localhost:5000/redis:7.2.3 && \
-          bash prepare_image.sh registry.hub.docker.com/overlaybd/wordpress:6.4.2       localhost:5000/wordpress:6.4.2 && \
-          bash prepare_image.sh registry.hub.docker.com/overlaybd/nginx:1.25.3          localhost:5000/nginx:1.25.3
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/centos:centos7.9.2009                                                                   localhost:5000/centos:centos7.9.2009 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/ubuntu:22.04                                                                            localhost:5000/ubuntu:22.04 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/redis:7.2.3                                                                             localhost:5000/redis:7.2.3 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/redis@sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc           localhost:5000/redis@sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/wordpress:6.4.2                                                                         localhost:5000/wordpress:6.4.2 && \
+          bash prepare_image.sh registry.hub.docker.com/overlaybd/nginx:1.25.3                                                                            localhost:5000/nginx:1.25.3
 
       - name: CI - uconv reproduce
         working-directory: ci/uconv_reproduce
@@ -69,6 +70,14 @@ jobs:
           /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -i 7.2.3 --overlaybd 7.2.3_overlaybd --turboOCI 7.2.3_turbo
           bash run_container.sh localhost:5000/redis:7.2.3_overlaybd
           bash run_container.sh localhost:5000/redis:7.2.3_turbo
+
+      - name: CI - uconv E2E with digest input
+        working-directory: ci/scripts
+        shell: bash
+        run: |
+          /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -g sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc --overlaybd 309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_overlaybd --turboOCI sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
+          bash run_container.sh localhost:5000/redis:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_overlaybd
+          bash run_container.sh localhost:5000/redis:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
 
       - name: install Go
         uses: actions/setup-go@v5
