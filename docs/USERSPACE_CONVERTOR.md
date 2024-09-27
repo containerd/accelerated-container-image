@@ -38,7 +38,8 @@ Flags:
   -u, --username string           user[:password] Registry user and password
       --plain                     connections using plain HTTP
       --verbose                   show debug log
-  -i, --input-tag string          tag for image converting from (required)
+  -i, --input-tag string          tag for image converting from (required when input-digest is not set)
+  -g, --input-digest string       digest for image converting from (required when input-tag is not set)
   -o, --output-tag string         tag for image converting to
   -d, --dir string                directory used for temporary data (default "tmp_conv")
       --oci                       export image with oci spec
@@ -64,6 +65,7 @@ Flags:
 
 # examples
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd
+$ bin/convertor -r docker.io/overlaybd/redis -u user:pass -g sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc -o 309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_obd
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 --overlaybd 6.2.6_obd --fastoci 6.2.6_foci
 $ bin/convertor -r docker.io/overlaybd/redis -u user:pass -i 6.2.6 -o 6.2.6_obd --vsize 256
 
