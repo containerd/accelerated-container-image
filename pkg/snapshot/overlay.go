@@ -17,6 +17,7 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -1379,10 +1380,18 @@ func (o *snapshotter) blockPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block")
 }
 
+func IsErofsSupported() bool {
+	fs, err := os.ReadFile("/proc/filesystems")
+	if err != nil || !bytes.Contains(fs, []byte("\terofs\n")) {
+		return false
+	}
+	return true
+}
+
 func (o *snapshotter) turboOCIFsMeta(id string) (string, string) {
 	// TODO: make the priority order (multi-meta exists) configurable later if needed
 	erofsmeta := filepath.Join(o.root, "snapshots", id, "fs", "erofs.fs.meta")
-	if _, err := os.Stat(erofsmeta); err == nil {
+	if _, err := os.Stat(erofsmeta); err == nil && IsErofsSupported() {
 		return erofsmeta, "erofs"
 	}
 	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta"), "ext4"
