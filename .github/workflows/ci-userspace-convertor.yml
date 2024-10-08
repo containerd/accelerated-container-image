@@ -75,7 +75,7 @@ jobs:
         working-directory: ci/scripts
         shell: bash
         run: |
-          /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -g sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc --overlaybd 309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_overlaybd --turboOCI sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
+          /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -g sha256:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc --overlaybd 309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_overlaybd --turboOCI 309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
           bash run_container.sh localhost:5000/redis:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_overlaybd
           bash run_container.sh localhost:5000/redis:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
 
