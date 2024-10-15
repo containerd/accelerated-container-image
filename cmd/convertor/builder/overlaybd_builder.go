@@ -282,7 +282,7 @@ func (e *overlaybdBuilderEngine) CheckForConvertedManifest(ctx context.Context) 
 	entry := e.db.GetManifestEntryForRepo(ctx, e.host, e.repository, e.mediaTypeManifest(), e.inputDesc.Digest)
 	if entry != nil && entry.ConvertedDigest != "" {
 		convertedDesc := specs.Descriptor{
-			MediaType: e.mediaTypeImageLayer(),
+			MediaType: e.mediaTypeManifest(),
 			Digest:    entry.ConvertedDigest,
 			Size:      entry.DataSize,
 		}
