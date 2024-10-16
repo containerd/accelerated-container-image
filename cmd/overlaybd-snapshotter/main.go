@@ -76,6 +76,20 @@ func main() {
 		go metrics.Init()
 		logrus.Infof("set Prometheus metrics exporter in http://localhost:%d%s", metrics.Config.Port, metrics.Config.UriPrefix)
 	}
+	contain := func(fsType string) bool {
+		for _, fst := range pconfig.TurboFsType {
+			if fst == fsType {
+				return true
+			}
+		}
+		return false
+	}
+	if !contain("ext4") {
+		pconfig.TurboFsType = append(pconfig.TurboFsType, "ext4")
+	}
+	if !contain("erofs") {
+		pconfig.TurboFsType = append(pconfig.TurboFsType, "erofs")
+	}
 
 	if err := setLogLevel(pconfig.LogLevel); err != nil {
 		logrus.Errorf("failed to set log level: %v", err)
