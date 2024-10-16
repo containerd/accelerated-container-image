@@ -97,6 +97,7 @@ type BootConfig struct {
 	DefaultFsType     string                 `json:"defaultFsType"`
 	RootfsQuota       string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
 	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
+	TurboFsType       []string               `json:"turboFsType"`
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -115,6 +116,10 @@ func DefaultBootConfig() *BootConfig {
 		DefaultFsType:     "ext4",
 		RootfsQuota:       "",
 		Tenant:            -1,
+		TurboFsType: []string{
+			"ext4",
+			"erofs",
+		},
 	}
 }
 
@@ -183,6 +188,7 @@ type snapshotter struct {
 	defaultFsType     string
 	tenant            int
 	locker            *locker.Locker
+	turboFsType       []string
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -244,6 +250,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		mirrorRegistry:    bootConfig.MirrorRegistry,
 		defaultFsType:     bootConfig.DefaultFsType,
 		locker:            locker.New(),
+		turboFsType:       bootConfig.TurboFsType,
 		tenant:            bootConfig.Tenant,
 		quotaSize:         bootConfig.RootfsQuota,
 		quotaDriver: &diskquota.PrjQuotaDriver{
@@ -1390,10 +1397,19 @@ func IsErofsSupported() bool {
 
 func (o *snapshotter) turboOCIFsMeta(id string) (string, string) {
 	// TODO: make the priority order (multi-meta exists) configurable later if needed
-	erofsmeta := filepath.Join(o.root, "snapshots", id, "fs", "erofs.fs.meta")
-	if _, err := os.Stat(erofsmeta); err == nil && IsErofsSupported() {
-		return erofsmeta, "erofs"
+	for _, fsType := range o.turboFsType {
+		fsmeta := filepath.Join(o.root, "snapshots", id, "fs", fsType+".fs.meta")
+		if _, err := os.Stat(fsmeta); err == nil {
+			if fsType == "erofs" && !IsErofsSupported() {
+				log.L.Warn("erofs is not supported on this system, fallback to other fs type")
+				continue
+			}
+			return fsmeta, fsType
+		} else if !errors.Is(err, os.ErrNotExist) {
+			log.L.Errorf("error while checking fs meta file: %s", err)
+		}
 	}
+	log.L.Warn("no fs meta file found, fallback to ext4")
 	return filepath.Join(o.root, "snapshots", id, "fs", "ext4.fs.meta"), "ext4"
 }
 
