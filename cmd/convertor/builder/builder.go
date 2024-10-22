@@ -100,7 +100,7 @@ func (b *graphBuilder) Build(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to obtain new pusher: %w", err)
 	}
-	tagPusher, err := b.Resolver.Pusher(ctx, b.TargetRef) // append '@' to avoid tag
+	tagPusher, err := b.Resolver.Pusher(ctx, b.TargetRef)
 	if err != nil {
 		return fmt.Errorf("failed to obtain new tag pusher: %w", err)
 	}
@@ -283,8 +283,10 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 
 	// build
 	builder := &overlaybdBuilder{
-		layers: len(engineBase.manifest.Layers),
-		engine: engine,
+		layers:  len(engineBase.manifest.Layers),
+		engine:  engine,
+		pusher:  engineBase.pusher,
+		fetcher: engineBase.fetcher,
 	}
 	desc, err := builder.Build(ctx)
 	if err != nil {
@@ -347,8 +349,10 @@ func Build(ctx context.Context, opt BuilderOptions) error {
 }
 
 type overlaybdBuilder struct {
-	layers int
-	engine builderEngine
+	layers  int
+	engine  builderEngine
+	pusher  remotes.Pusher
+	fetcher remotes.Fetcher
 }
 
 // Build return a descriptor of the converted target, as the caller may need it
@@ -363,6 +367,21 @@ func (b *overlaybdBuilder) Build(ctx context.Context) (v1.Descriptor, error) {
 	// when errors are encountered fallback to regular conversion
 	if convertedDesc, err := b.engine.CheckForConvertedManifest(ctx); err == nil && convertedDesc.Digest != "" {
 		logrus.Infof("Image found already converted in registry with digest %s", convertedDesc.Digest)
+		// fetch the already converted manifest and push with new tag
+		convertedManifest, err := fetchManifest(ctx, b.fetcher, convertedDesc)
+		if err != nil {
+			return v1.Descriptor{}, fmt.Errorf("failed to fetch converted manifest: %w", err)
+		}
+		cbuf, err := json.Marshal(convertedManifest)
+		if err != nil {
+			return v1.Descriptor{}, fmt.Errorf("failed to marshal converted manifest: %w", err)
+		}
+		// ensure that output tag is pushed even if the manifest is already converted and found in registry
+		// push output tag only if the pusher is tagPusher
+		if err := uploadBytes(ctx, b.pusher, convertedDesc, cbuf); err != nil {
+			return v1.Descriptor{}, fmt.Errorf("failed to upload converted manifest: %w", err)
+		}
+		log.G(ctx).Infof("converted manifest uploaded, %s", convertedDesc.Digest)
 		return convertedDesc, nil
 	}
 
