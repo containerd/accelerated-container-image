@@ -51,15 +51,14 @@ jobs:
           echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
-      # TODO(fuweid): remove the env GO111MODULE=off in new version of go
       - name: install dependencies
         shell: bash
         env:
-          GO111MODULE: off
+          GO111MODULE: on
         run: |
           echo "::group:: install dependencies"
-          go get -u -v github.com/vbatts/git-validation
-          go get -u -v github.com/kunalkushwaha/ltag
+          go install -v github.com/vbatts/git-validation@latest
+          go install -v github.com/kunalkushwaha/ltag@latest
           echo "::endgroup::"
 
       - name: DCO checker
