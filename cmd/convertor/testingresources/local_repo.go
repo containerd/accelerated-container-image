@@ -163,18 +163,22 @@ func (r *RepoStore) Exists(ctx context.Context, descriptor v1.Descriptor) (bool,
 // Push pushes a blob to the in memory repository. If the blob already exists, it returns an error.
 // Tag is optional and can be empty.
 func (r *RepoStore) Push(ctx context.Context, desc v1.Descriptor, tag string, content []byte) error {
-	exists, err := r.Exists(ctx, desc)
+	manifestExists, err := r.Exists(ctx, desc)
 	if err != nil {
 		return err
 	}
-	if exists {
-		return nil // No error is returned on push if image is already present
+
+	// Verify content by computing the digest. Real registries are expected to do this.
+	contentDigest := digest.FromBytes(content)
+	if contentDigest != desc.Digest {
+		return fmt.Errorf("content digest %s does not match descriptor digest %s", contentDigest.String(), desc.Digest.String())
 	}
+
 	isManifest := false
 	switch desc.MediaType {
 	case v1.MediaTypeImageManifest, images.MediaTypeDockerSchema2Manifest:
 		isManifest = true
-		if r.opts.ManifestPushIgnoresLayers {
+		if r.opts.ManifestPushIgnoresLayers || manifestExists {
 			break // No layer verification necessary
 		}
 		manifest := v1.Manifest{}
@@ -185,12 +189,12 @@ func (r *RepoStore) Push(ctx context.Context, desc v1.Descriptor, tag string, co
 				return err
 			}
 			if !exists {
-				return fmt.Errorf("Layer %s not found", layer.Digest.String())
+				return fmt.Errorf("layer %s not found", layer.Digest.String())
 			}
 		}
 	case v1.MediaTypeImageIndex, images.MediaTypeDockerSchema2ManifestList:
 		isManifest = true
-		if r.opts.ManifestPushIgnoresLayers {
+		if r.opts.ManifestPushIgnoresLayers || manifestExists {
 			break // No manifest verification necessary
 		}
 		manifestList := v1.Index{}
@@ -201,12 +205,14 @@ func (r *RepoStore) Push(ctx context.Context, desc v1.Descriptor, tag string, co
 				return err
 			}
 			if !exists {
-				return fmt.Errorf("Sub manifest %s not found", subManifestDesc.Digest.String())
+				return fmt.Errorf("sub manifest %s not found", subManifestDesc.Digest.String())
 			}
 		}
 	}
 	r.inmemoryRepo.blobs[desc.Digest.String()] = content
 
+	// We need to always store the manifest digest to tag mapping as the latest pushed manifest
+	// may have a different digest than the previous one.
 	if isManifest && tag != "" {
 		r.inmemoryRepo.tags[tag] = desc.Digest
 	}

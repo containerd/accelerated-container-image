@@ -467,3 +467,22 @@ func Test_writeConfig(t *testing.T) {
 		}
 	})
 }
+
+func Test_tagPreviouslyConvertedManifest(t *testing.T) {
+	ctx := context.Background()
+	resolver := testingresources.GetTestResolver(t, ctx)
+	pusher := testingresources.GetTestPusherFromResolver(t, ctx, resolver, "sample.localstore.io/hello-world:anothertag")
+	fetcher := testingresources.GetTestFetcherFromResolver(t, ctx, resolver, testingresources.DockerV2_Manifest_Simple_Converted_Ref)
+
+	_, convertedDesc, err := resolver.Resolve(ctx, testingresources.DockerV2_Manifest_Simple_Converted_Ref) // Simulate a previously converted manifest
+	testingresources.Assert(t, err == nil, "Could not resolve manifest")
+	convertedDesc.Annotations = map[string]string{} // Simulate a manifest that has been converted and is found by digest
+
+	err = tagPreviouslyConvertedManifest(ctx, pusher, fetcher, convertedDesc)
+	testingresources.Assert(t, err == nil, "Could not tag previously converted manifest")
+
+	// Check if the manifest was tagged correctly
+	_, desc, err := resolver.Resolve(ctx, "sample.localstore.io/hello-world:anothertag")
+	testingresources.Assert(t, err == nil, "Could not resolve tagged manifest")
+	testingresources.Assert(t, desc.Digest == convertedDesc.Digest, "Tagged manifest digest does not match original")
+}

@@ -363,7 +363,13 @@ func (b *overlaybdBuilder) Build(ctx context.Context) (v1.Descriptor, error) {
 	// when errors are encountered fallback to regular conversion
 	if convertedDesc, err := b.engine.CheckForConvertedManifest(ctx); err == nil && convertedDesc.Digest != "" {
 		logrus.Infof("Image found already converted in registry with digest %s", convertedDesc.Digest)
-		return convertedDesc, nil
+		// Even if the image has been found we still need to make sure the requested tag is set
+		// fetch the manifest then push again with the requested tag
+		if err := b.engine.TagPreviouslyConvertedManifest(ctx, convertedDesc); err != nil {
+			logrus.Warnf("failed to tag previously converted manifest: %s. Falling back to regular conversion", err)
+		} else {
+			return convertedDesc, nil
+		}
 	}
 
 	// Errgroups will close the context after wait returns so the operations need their own

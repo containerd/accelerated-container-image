@@ -234,6 +234,21 @@ func uploadBytes(ctx context.Context, pusher remotes.Pusher, desc specs.Descript
 	return content.Copy(ctx, cw, bytes.NewReader(data), desc.Size, desc.Digest)
 }
 
+func tagPreviouslyConvertedManifest(ctx context.Context, pusher remotes.Pusher, fetcher remotes.Fetcher, desc specs.Descriptor) error {
+	manifest := specs.Manifest{}
+	if err := fetch(ctx, fetcher, desc, &manifest); err != nil {
+		return fmt.Errorf("failed to fetch converted manifest: %w", err)
+	}
+	cbuf, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	if err := uploadBytes(ctx, pusher, desc, cbuf); err != nil {
+		return fmt.Errorf("failed to tag converted manifest: %w", err)
+	}
+	return nil
+}
+
 func buildArchiveFromFiles(ctx context.Context, target string, compress compression.Compression, files ...string) error {
 	archive, err := os.Create(target)
 	if err != nil {
