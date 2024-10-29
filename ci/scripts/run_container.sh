@@ -2,6 +2,8 @@
 #
 # rpull and run on-demand
 
+set -x
+
 image=$1
 container_name=${2:-test}
 
@@ -11,6 +13,7 @@ exit_code=0
 if ! ctr run -d --net-host --snapshotter=overlaybd "${image}" "${container_name}"; then
   exit_code=1
 fi
+lsblk
 if ! ctr t ls | grep "${container_name}"; then
   exit_code=1
 fi

@@ -70,6 +70,9 @@ jobs:
           /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -i 7.2.3 --overlaybd 7.2.3_overlaybd --turboOCI 7.2.3_turbo
           bash run_container.sh localhost:5000/redis:7.2.3_overlaybd
           bash run_container.sh localhost:5000/redis:7.2.3_turbo
+          /opt/overlaybd/snapshotter/convertor -r localhost:5000/redis -i 7.2.3 --overlaybd 7.2.3_overlaybd_256 --turboOCI 7.2.3_turbo_256 --vsize 256
+          bash run_container.sh localhost:5000/redis:7.2.3_overlaybd_256
+          bash run_container.sh localhost:5000/redis:7.2.3_turbo_256
 
       - name: CI - uconv E2E with digest input
         working-directory: ci/scripts
