@@ -139,5 +139,9 @@ func (e *mockFuzzBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx 
 	return nil
 }
 
+func (e *mockFuzzBuilderEngine) TagPreviouslyConvertedManifest(ctx context.Context, desc specs.Descriptor) error {
+	return nil
+}
+
 func (e *mockFuzzBuilderEngine) Cleanup() {
 }

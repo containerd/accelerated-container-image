@@ -337,6 +337,11 @@ func (e *overlaybdBuilderEngine) CheckForConvertedManifest(ctx context.Context) 
 	return specs.Descriptor{}, errdefs.ErrNotFound
 }
 
+// If a converted manifest has been found we still need to tag it to match the expected output tag.
+func (e *overlaybdBuilderEngine) TagPreviouslyConvertedManifest(ctx context.Context, desc specs.Descriptor) error {
+	return tagPreviouslyConvertedManifest(ctx, e.pusher, e.fetcher, desc)
+}
+
 // mountImage is responsible for mounting a specific manifest from a source repository, this includes
 // mounting all layers + config and then pushing the manifest.
 func (e *overlaybdBuilderEngine) mountImage(ctx context.Context, manifest specs.Manifest, desc specs.Descriptor, mountRepository string) error {

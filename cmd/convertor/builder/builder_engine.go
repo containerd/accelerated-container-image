@@ -89,6 +89,9 @@ type Deduplicateable interface {
 	// store manifest digest -> converted manifest to avoid re-conversion
 	CheckForConvertedManifest(ctx context.Context) (specs.Descriptor, error)
 
+	// tag a converted manifest -> converted manifest to avoid re-conversion
+	TagPreviouslyConvertedManifest(ctx context.Context, desc specs.Descriptor) error
+
 	// store manifest digest -> converted manifest to avoid re-conversion
 	StoreConvertedManifestDetails(ctx context.Context) error
 }

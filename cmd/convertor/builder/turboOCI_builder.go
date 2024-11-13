@@ -213,6 +213,11 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) (specs.Descript
 	return e.uploadManifestAndConfig(ctx)
 }
 
+// If a converted manifest has been found we still need to tag it to match the expected output tag.
+func (e *turboOCIBuilderEngine) TagPreviouslyConvertedManifest(ctx context.Context, desc specs.Descriptor) error {
+	return tagPreviouslyConvertedManifest(ctx, e.pusher, e.fetcher, desc)
+}
+
 // Layer deduplication in FastOCI is not currently supported due to conversion not
 // being reproducible at the moment which can lead to occasional bugs.
 
