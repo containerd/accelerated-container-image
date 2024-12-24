@@ -85,6 +85,7 @@ type Registry struct {
 }
 
 type BootConfig struct {
+	AsyncRemove       bool                   `json:"asyncRemove"`
 	Address           string                 `json:"address"`
 	Root              string                 `json:"root"`
 	LogLevel          string                 `json:"verbose"`
@@ -102,6 +103,7 @@ type BootConfig struct {
 
 func DefaultBootConfig() *BootConfig {
 	return &BootConfig{
+		AsyncRemove:     false,
 		LogLevel:        "info",
 		RwMode:          "overlayfs",
 		LogReportCaller: false,
@@ -141,6 +143,15 @@ var defaultConfig = SnapshotterConfig{
 
 // Opt is an option to configure the snapshotter
 type Opt func(config *SnapshotterConfig) error
+
+// AsynchronousRemove defers removal of filesystem content until
+// the Cleanup method is called. Removals will make the snapshot
+// referred to by the key unavailable and make the key immediately
+// available for re-use.
+func AsynchronousRemove(config *BootConfig) error {
+	config.AsyncRemove = true
+	return nil
+}
 
 // snapshotter is implementation of github.com/containerd/containerd/snapshots.Snapshotter.
 //
@@ -189,6 +200,7 @@ type snapshotter struct {
 	tenant            int
 	locker            *locker.Locker
 	turboFsType       []string
+	asyncRemove       bool
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -256,6 +268,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		quotaDriver: &diskquota.PrjQuotaDriver{
 			QuotaIDs: make(map[uint32]struct{}),
 		},
+		asyncRemove: bootConfig.AsyncRemove,
 	}, nil
 }
 
@@ -910,6 +923,63 @@ func (o *snapshotter) commit(ctx context.Context, name, key string, opts ...snap
 	return id, info, nil
 }
 
+func (o *snapshotter) cleanupDirectories(ctx context.Context) ([]string, error) {
+	// Get a write transaction to ensure no other write transaction can be entered
+	// while the cleanup is scanning.
+	ctx, t, err := o.ms.TransactionContext(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	defer t.Rollback()
+	return o.getCleanupDirectories(ctx, t)
+}
+func (o *snapshotter) getCleanupDirectories(ctx context.Context, t storage.Transactor) ([]string, error) {
+	ids, err := storage.IDMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	snapshotDir := filepath.Join(o.root, "snapshots")
+	fd, err := os.Open(snapshotDir)
+	if err != nil {
+		return nil, err
+	}
+	defer fd.Close()
+
+	dirs, err := fd.Readdirnames(0)
+	if err != nil {
+		return nil, err
+	}
+
+	cleanup := []string{}
+	for _, d := range dirs {
+		if _, ok := ids[d]; ok {
+			continue
+		}
+
+		cleanup = append(cleanup, filepath.Join(snapshotDir, d))
+	}
+
+	return cleanup, nil
+}
+
+// Cleanup cleans up disk resources from removed or abandoned snapshots// Cleanup cleans up disk resources from removed or abandoned snapshots
+func (o *snapshotter) Cleanup(ctx context.Context) error {
+	cleanup, err := o.cleanupDirectories(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, dir := range cleanup {
+		if err := os.RemoveAll(dir); err != nil {
+			log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
+		}
+	}
+
+	return nil
+}
+
 // Remove abandons the snapshot identified by key. The snapshot will
 // immediately become unavailable and unrecoverable.
 func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
@@ -988,9 +1058,23 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	if err != nil {
 		return errors.Wrap(err, "failed to remove")
 	}
-
-	if err := os.RemoveAll(o.snPath(id)); err != nil && !os.IsNotExist(err) {
-		return err
+	if !o.asyncRemove {
+		var removals []string
+		removals, err = o.getCleanupDirectories(ctx, t)
+		if err != nil {
+			return errors.Wrap(err, "unable to get directories for removal")
+		}
+		defer func() {
+			if err == nil {
+				for _, dir := range removals {
+					if err := os.RemoveAll(dir); err != nil {
+						log.G(ctx).WithError(err).WithField("path", dir).Warn("failed to remove directory")
+					}
+				}
+			}
+		}()
+	} else {
+		log.G(ctx).Info("asyncRemove enabled, remove snapshots in Cleanup() method.")
 	}
 
 	rollback = false

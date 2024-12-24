@@ -51,8 +51,8 @@ func parseConfig(fpath string) error {
 	if err := json.Unmarshal(data, pconfig); err != nil {
 		return errors.Wrapf(err, "failed to parse plugin config from %s", string(data))
 	}
-	logrus.Infof("snapshotter commitID: %s, rwMode: %s, autoRemove: %v, writableLayerType: %s",
-		commitID, pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType)
+	logrus.Infof("snapshotter commitID: %s, rwMode: %s, autoRemove: %v, writableLayerType: %s, asyncRemoveSnapshot: %v",
+		commitID, pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType, pconfig.AsyncRemove)
 	return nil
 }
 

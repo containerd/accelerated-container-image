@@ -9,6 +9,7 @@ To configure overlaybd as a Prometheus target, you need to specify `uriPrefix` a
 ```json
 {
     "root": "/var/lib/containerd/io.containerd.snapshotter.v1.overlaybd",
+    "asyncRemove": false,
     "address": "/run/overlaybd-snapshotter/overlaybd.sock",
     "verbose": "info",
     "rwMode": "overlayfs",
