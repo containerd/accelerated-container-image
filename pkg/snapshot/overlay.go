@@ -121,8 +121,8 @@ func DefaultBootConfig() *BootConfig {
 		RootfsQuota:       "",
 		Tenant:            -1,
 		TurboFsType: []string{
-			"ext4",
 			"erofs",
+			"ext4",
 		},
 	}
 }
