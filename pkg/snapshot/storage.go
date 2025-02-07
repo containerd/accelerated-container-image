@@ -542,7 +542,15 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 		configJSON.RepoBlobURL = blobPrefixURL
 		if isTurboOCI, dataDgst, compType := o.checkTurboOCI(info.Labels); isTurboOCI {
-			fsmeta, _ := o.turboOCIFsMeta(id)
+			var fsmeta string
+
+			// If parent layers exist, follow the meta choice from the bottom layer
+			if info.Parent != "" {
+				_, fsmeta = filepath.Split(configJSON.Lowers[0].File)
+				fsmeta = filepath.Join(o.root, "snapshots", id, "fs", fsmeta)
+			} else {
+				fsmeta, _ = o.turboOCIFsMeta(id)
+			}
 			lower := sn.OverlayBDBSConfigLower{
 				Dir: o.upperPath(id),
 				// keep this to support ondemand turboOCI loading.
