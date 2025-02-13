@@ -66,6 +66,9 @@ const (
 	// param used to restrict tcmu data area size
 	// it is worked by setting max_data_area_mb for devices in configfs.
 	obdMaxDataAreaMB = 4
+
+	// Just in case someone really needs to force to ext4
+	ext4FSFallbackFile = ".TurboOCI_ext4"
 )
 
 type mountMatcherFunc func(fields []string, separatorIndex int) bool
@@ -542,7 +545,15 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 
 		configJSON.RepoBlobURL = blobPrefixURL
 		if isTurboOCI, dataDgst, compType := o.checkTurboOCI(info.Labels); isTurboOCI {
-			fsmeta, _ := o.turboOCIFsMeta(id)
+			var fsmeta string
+
+			// If parent layers exist, follow the meta choice from the bottom layer
+			if info.Parent != "" {
+				_, fsmeta = filepath.Split(configJSON.Lowers[0].File)
+				fsmeta = filepath.Join(o.root, "snapshots", id, "fs", fsmeta)
+			} else {
+				fsmeta, _ = o.turboOCIFsMeta(id)
+			}
 			lower := sn.OverlayBDBSConfigLower{
 				Dir: o.upperPath(id),
 				// keep this to support ondemand turboOCI loading.
@@ -649,6 +660,22 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		configJSON.Upper = sn.OverlayBDBSConfigUpper{
 			Index: o.overlaybdWritableIndexPath(id),
 			Data:  o.overlaybdWritableDataPath(id),
+		}
+	}
+
+	if isTurboOCI, _, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
+		// If the fallback file exists, enforce TurboOCI fstype to EXT4
+		ext4FSFallbackPath := filepath.Join(o.root, ext4FSFallbackFile)
+		_, err = os.Stat(ext4FSFallbackPath)
+		if err == nil && configJSON.Lowers[0].File != "" {
+			var newLowers []sn.OverlayBDBSConfigLower
+			log.G(ctx).Infof("fallback to EXT4 since %s exists", ext4FSFallbackPath)
+			for _, l := range configJSON.Lowers {
+				s, _ := filepath.Split(l.File)
+				l.File = filepath.Join(s, "ext4.fs.meta")
+				newLowers = append(newLowers, l)
+			}
+			configJSON.Lowers = newLowers
 		}
 	}
 	configBuffer, _ := json.MarshalIndent(configJSON, "", "  ")

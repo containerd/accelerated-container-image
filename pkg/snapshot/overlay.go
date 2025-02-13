@@ -21,8 +21,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -119,8 +121,8 @@ func DefaultBootConfig() *BootConfig {
 		RootfsQuota:       "",
 		Tenant:            -1,
 		TurboFsType: []string{
-			"ext4",
 			"erofs",
+			"ext4",
 		},
 	}
 }
@@ -606,9 +608,9 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				if isTurboOCI, _, _ := o.checkTurboOCI(obdInfo.Labels); isTurboOCI {
 					_, fsType = o.turboOCIFsMeta(obdID)
 				} else {
+					log.G(ctx).Warnf("cannot get fs type from label, %v, using %s", obdInfo.Labels, fsType)
 					fsType = o.defaultFsType
 				}
-				log.G(ctx).Warnf("cannot get fs type from label, %v, using %s", obdInfo.Labels, fsType)
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
@@ -1471,16 +1473,31 @@ func (o *snapshotter) blockPath(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block")
 }
 
+var erofsSupported = false
+var erofsSupportedOnce sync.Once
+
+// If EROFS fsmeta exists and is prioritized, check and modprobe erofs
 func IsErofsSupported() bool {
-	fs, err := os.ReadFile("/proc/filesystems")
-	if err != nil || !bytes.Contains(fs, []byte("\terofs\n")) {
-		return false
-	}
-	return true
+	erofsSupportedOnce.Do(func() {
+		fs, err := os.ReadFile("/proc/filesystems")
+		if err != nil || !bytes.Contains(fs, []byte("\terofs\n")) {
+			// Try to `modprobe erofs` again
+			cmd := exec.Command("modprobe", "erofs")
+			_, err = cmd.CombinedOutput()
+			if err != nil {
+				return
+			}
+			fs, err = os.ReadFile("/proc/filesystems")
+			if err != nil || !bytes.Contains(fs, []byte("\terofs\n")) {
+				return
+			}
+		}
+		erofsSupported = true
+	})
+	return erofsSupported
 }
 
 func (o *snapshotter) turboOCIFsMeta(id string) (string, string) {
-	// TODO: make the priority order (multi-meta exists) configurable later if needed
 	for _, fsType := range o.turboFsType {
 		fsmeta := filepath.Join(o.root, "snapshots", id, "fs", fsType+".fs.meta")
 		if _, err := os.Stat(fsmeta); err == nil {
