@@ -1,6 +1,7 @@
 module github.com/containerd/accelerated-container-image
 
 go 1.22.0
+toolchain go1.24.1
 
 require (
 	github.com/containerd/containerd/api v1.8.0-rc.2
@@ -13,7 +14,6 @@ require (
 	github.com/data-accelerator/zdfs v0.1.5
 	github.com/docker/go-units v0.5.0
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/jessevdk/go-flags v1.6.1
 	github.com/moby/locker v1.0.1
 	github.com/moby/sys/mountinfo v0.7.1
 	github.com/opencontainers/go-digest v1.0.0
@@ -24,8 +24,8 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
 	github.com/urfave/cli/v2 v2.27.2
-	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.21.0
+	golang.org/x/sync v0.12.0
+	golang.org/x/sys v0.31.0
 	google.golang.org/grpc v1.63.2
 	oras.land/oras-go/v2 v2.5.0
 )
@@ -90,8 +90,8 @@ require (
 	go.opentelemetry.io/otel/trace v1.26.0 // indirect
 	golang.org/x/exp v0.0.0-20231214170342-aacd6d4b4611 // indirect
 	golang.org/x/mod v0.18.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240415180920-8c6c420018be // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
