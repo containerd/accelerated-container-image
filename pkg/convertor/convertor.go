@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
@@ -482,6 +482,11 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 
 	eg, ctx := errgroup.WithContext(ctx)
 	for idx, desc := range srcDescs {
+		// Skip provenance and attestation layers
+		if isProvenanceLayer(desc) {
+			log.G(ctx).Infof("Skipping provenance layer: %s", desc.MediaType)
+			continue
+		}
 		chain = append(chain, srcDiffIDs[idx])
 		chainID := identity.ChainID(chain).String()
 
@@ -781,4 +786,45 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 		}
 		return &newMfstDesc, nil
 	}
+}
+
+// isProvenanceLayer checks if a layer descriptor represents provenance/attestation metadata
+func isProvenanceLayer(desc ocispec.Descriptor) bool {
+	// Check for common provenance and attestation media types
+	provenanceTypes := []string{
+		"application/vnd.in-toto+json",
+		"application/vnd.dev.cosign.simplesigning.v1+json",
+		"application/vnd.dev.sigstore.bundle+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+	}
+	
+	for _, pType := range provenanceTypes {
+		if strings.Contains(desc.MediaType, pType) {
+			return true
+		}
+	}
+	
+	// Check for provenance-related artifact types
+	if desc.ArtifactType != "" {
+		if strings.Contains(desc.ArtifactType, "provenance") ||
+		   strings.Contains(desc.ArtifactType, "attestation") ||
+		   strings.Contains(desc.ArtifactType, "signature") {
+			return true
+		}
+	}
+	
+	// Check annotations for provenance markers
+	if desc.Annotations != nil {
+		if _, exists := desc.Annotations["in-toto.io/predicate-type"]; exists {
+			return true
+		}
+		if _, exists := desc.Annotations["vnd.docker.reference.type"]; exists {
+			if refType := desc.Annotations["vnd.docker.reference.type"]; 
+			   refType == "attestation-manifest" || strings.Contains(refType, "provenance") {
+				return true
+			}
+		}
+	}
+	
+	return false
 }
