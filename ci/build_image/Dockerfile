@@ -37,12 +37,12 @@ RUN make && \
     nfpm pkg --packager rpm --target /tmp/
 
 # build image
-FROM ubuntu:22.04 AS release
+FROM ubuntu:24.04 AS release
 ARG OBD_VERSION
 ARG RELEASE_VERSION
 SHELL ["/bin/bash", "-c"]
 WORKDIR /app
-COPY --from=builder /tmp/overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb .
+COPY --from=builder /tmp/overlaybd-snapshotter_*.deb .
 COPY ./ci/build_image/start_services.sh .
 
 RUN apt-get update && apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common && \
@@ -53,9 +53,14 @@ RUN apt-get update && apt-get install -y apt-transport-https ca-certificates cur
     apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io && \
     apt-get install -y libnl-3-200 libnl-genl-3-200 libcurl4-openssl-dev libaio-dev wget less kmod && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-20240717.b5b704b.ubuntu1.22.04.x86_64.deb && \
-    dpkg -i overlaybd-${OBD_VERSION}-20240717.b5b704b.ubuntu1.22.04.x86_64.deb && \
-    dpkg -i overlaybd-snapshotter_${RELEASE_VERSION}_amd64.deb && \
+    case "$(dpkg --print-architecture)" in \
+        amd64) OBD_ARCH=x86_64 ;; \
+        arm64) OBD_ARCH=aarch64 ;; \
+        *) echo "Unsupported architecture: $(dpkg --print-architecture)"; exit 1 ;; \
+    esac && \
+    wget https://github.com/containerd/overlaybd/releases/download/v${OBD_VERSION}/overlaybd-${OBD_VERSION}-20250610.859f8c8.ubuntu1.24.04.${OBD_ARCH}.deb && \
+    dpkg -i overlaybd-${OBD_VERSION}-20250610.859f8c8.ubuntu1.24.04.${OBD_ARCH}.deb && \
+    dpkg -i overlaybd-snapshotter_*.deb && \
     sed -i 's/"autoRemoveDev": false,/"autoRemoveDev": true,/g' /etc/overlaybd-snapshotter/config.json && \
     cat /etc/overlaybd-snapshotter/config.json && \
     mkdir -p /etc/containerd/ && \

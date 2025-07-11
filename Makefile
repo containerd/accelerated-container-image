@@ -2,6 +2,12 @@
 SN_DESTDIR=/opt/overlaybd/snapshotter
 SN_CFGDIR=/etc/overlaybd-snapshotter
 
+# versioning
+RELEASE_VERSION?=1.3.0-runloop
+RELEASE_NUM?=1
+OBD_VERSION?=1.0.15
+GO_VERSION?=1.23
+
 # command
 COMMANDS=overlaybd-snapshotter ctr convertor
 BINARIES=$(addprefix bin/,$(COMMANDS))
@@ -32,3 +38,37 @@ test: ## run tests that require root
 
 clean:
 	@rm -rf ./bin
+	@rm -f *.deb
+
+deb-amd64: ## build .deb package for amd64
+	@echo "Building .deb package for amd64..."
+	@docker buildx build \
+		--platform linux/amd64 \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg RELEASE_VERSION=$(RELEASE_VERSION) \
+		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
+		--build-arg OBD_VERSION=$(OBD_VERSION) \
+		-f ci/build_image/Dockerfile \
+		-t aci-builder-amd64 \
+		--load .
+	@docker run --rm -v $(PWD):/output aci-builder-amd64 \
+		sh -c "cp /app/overlaybd-snapshotter_*.deb /output/"
+
+deb-arm64: ## build .deb package for arm64
+	@echo "Building .deb package for arm64..."
+	@docker buildx build \
+		--platform linux/arm64 \
+		--build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg RELEASE_VERSION=$(RELEASE_VERSION) \
+		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
+		--build-arg OBD_VERSION=$(OBD_VERSION) \
+		-f ci/build_image/Dockerfile \
+		-t aci-builder-arm64 \
+		--load .
+	@docker run --rm -v $(PWD):/output aci-builder-arm64 \
+		sh -c "cp /app/overlaybd-snapshotter_*.deb /output/"
+
+deb: deb-amd64 deb-arm64 ## build .deb packages for both amd64 and arm64
+
+help: ## show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
