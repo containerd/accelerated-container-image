@@ -175,6 +175,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 		label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 		label.OverlayBDBlobDigest: desc.Digest.String(),
 		label.OverlayBDBlobSize:   fmt.Sprintf("%d", desc.Size),
+		label.OverlayBDBlobFsType: e.fstype,
 	}
 	if !e.noUpload {
 		if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, commitFile), desc); err != nil {
@@ -463,6 +464,7 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 			label.OverlayBDVersion:    version.OverlayBDVersionNumber,
 			label.OverlayBDBlobDigest: digester.Digest().String(),
 			label.OverlayBDBlobSize:   fmt.Sprintf("%d", countWriter.c),
+			label.OverlayBDBlobFsType: e.fstype,
 		},
 	}
 	if !e.noUpload {

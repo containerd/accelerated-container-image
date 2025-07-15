@@ -529,6 +529,7 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 					Annotations: map[string]string{
 						label.OverlayBDBlobDigest: remoteDesc.Digest.String(),
 						label.OverlayBDBlobSize:   fmt.Sprintf("%d", remoteDesc.Size),
+						label.OverlayBDBlobFsType: fsType,
 					},
 				},
 				DiffID: remoteDesc.Digest,
