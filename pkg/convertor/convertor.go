@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
@@ -798,34 +798,33 @@ func isProvenanceLayer(desc ocispec.Descriptor) bool {
 		"application/vnd.dev.sigstore.bundle+json",
 		"application/vnd.docker.distribution.manifest.v2+json",
 	}
-	
+
 	for _, pType := range provenanceTypes {
 		if strings.Contains(desc.MediaType, pType) {
 			return true
 		}
 	}
-	
+
 	// Check for provenance-related artifact types
 	if desc.ArtifactType != "" {
 		if strings.Contains(desc.ArtifactType, "provenance") ||
-		   strings.Contains(desc.ArtifactType, "attestation") ||
-		   strings.Contains(desc.ArtifactType, "signature") {
+			strings.Contains(desc.ArtifactType, "attestation") ||
+			strings.Contains(desc.ArtifactType, "signature") {
 			return true
 		}
 	}
-	
+
 	// Check annotations for provenance markers
 	if desc.Annotations != nil {
 		if _, exists := desc.Annotations["in-toto.io/predicate-type"]; exists {
 			return true
 		}
 		if _, exists := desc.Annotations["vnd.docker.reference.type"]; exists {
-			if refType := desc.Annotations["vnd.docker.reference.type"]; 
-			   refType == "attestation-manifest" || strings.Contains(refType, "provenance") {
+			if refType := desc.Annotations["vnd.docker.reference.type"]; refType == "attestation-manifest" || strings.Contains(refType, "provenance") {
 				return true
 			}
 		}
 	}
-	
+
 	return false
 }

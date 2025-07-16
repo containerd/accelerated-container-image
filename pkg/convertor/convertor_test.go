@@ -117,8 +117,8 @@ func TestIsProvenanceLayer(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "empty descriptor",
-			desc: ocispec.Descriptor{},
+			name:     "empty descriptor",
+			desc:     ocispec.Descriptor{},
 			expected: false,
 		},
 	}
