@@ -19,18 +19,22 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"math/rand"
 	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	mylog "github.com/containerd/accelerated-container-image/internal/log"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/v2/contrib/snapshotservice"
+	"github.com/containerd/log"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -41,6 +45,16 @@ const defaultConfigPath = "/etc/overlaybd-snapshotter/config.json"
 
 var pconfig *overlaybd.BootConfig
 var commitID string = "unknown"
+
+func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	requestID := mylog.GenerateRequestID()
+	ctx = mylog.WithRequestID(ctx, requestID)
+
+	// Add to containerd's logger context
+	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
+
+	return handler(ctx, req)
+}
 
 func parseConfig(fpath string) error {
 	logrus.Info("parse config file: ", fpath)
@@ -104,7 +118,10 @@ func main() {
 	}
 	defer sn.Close()
 
-	srv := grpc.NewServer()
+	// Initialize random seed for request ID generation
+	rand.Seed(time.Now().UnixNano())
+
+	srv := grpc.NewServer(grpc.UnaryInterceptor(requestIDInterceptor))
 	snapshotsapi.RegisterSnapshotsServer(srv, snapshotservice.FromSnapshotter(sn))
 
 	address := strings.TrimSpace(pconfig.Address)

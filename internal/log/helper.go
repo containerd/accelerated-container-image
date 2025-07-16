@@ -19,9 +19,33 @@ package log
 import (
 	"context"
 	"fmt"
+	"math/rand"
 
 	clog "github.com/containerd/log"
 )
+
+type requestIDKey struct{}
+
+var chars = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+
+func GenerateRequestID() string {
+	b := make([]rune, 4)
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(b)
+}
+
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, id)
+}
+
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
 
 func TracedErrorf(ctx context.Context, format string, args ...any) error {
 	err := fmt.Errorf(format, args...)
