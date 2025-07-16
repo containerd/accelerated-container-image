@@ -1,0 +1,32 @@
+# Build artifacts
+bin/
+*.deb
+*.rpm
+
+# Test data and mocks
+ci/e2e/resources/
+cmd/convertor/testingresources/mocks/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/

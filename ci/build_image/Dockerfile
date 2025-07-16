@@ -17,12 +17,15 @@ ARG GO_VERSION
 ARG GO_IMAGE=golang:${GO_VERSION}
 FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS builder
 WORKDIR /src
-COPY . .
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
 ENV DEBIAN_FRONTEND=noninteractive
 RUN echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | tee /etc/apt/sources.list.d/goreleaser.list &&  \
     apt update && \
     apt install -y nfpm && \
-    go mod tidy
+    go mod download
+# Copy the rest of the source code
+COPY . .
 
 ARG TARGETOS TARGETARCH
 ENV GOOS=${TARGETOS}
