@@ -51,25 +51,29 @@ import (
 type storageType int
 
 const (
-	// storageTypeUnknown is placeholder for unknown type.
+	// storageTypeUnknown is a placeholder for unidentified storage types.
+	// Used when file format detection fails or storage type cannot be determined.
 	storageTypeUnknown storageType = iota
 
-	// storageTypeNormal means that the unpacked layer data is from tar.gz
-	// or other valid media type from OCI image spec. This kind of the
-	// snapshotter can be used as normal lowerdir layer of overlayFS.
+	// storageTypeNormal represents standard OCI image layers (tar.gz, etc.).
+	// Used for regular container images and pause containers that fall back to
+	// standard overlayFS operations without overlaybd optimizations.
 	storageTypeNormal
 
-	// storageTypeLocalBlock means that the unpacked layer data is in
-	// Overlaybd format.
+	// storageTypeLocalBlock represents data in optimized overlaybd format.
+	// Provides faster layer access through local block device mounting.
+	// Can be read-only or writable depending on configuration.
 	storageTypeLocalBlock
 
-	// storageTypeRemoteBlock means that there is no unpacked layer data.
-	// But there are labels to mark data that will be pulling on demand.
+	// storageTypeRemoteBlock represents remote overlaybd format with on-demand loading.
+	// No local unpacked data; uses remote pulling based on blob metadata labels.
+	// Optimized for fastest container startup without full image download.
+	// Always read-only.
 	storageTypeRemoteBlock
 
-	// storageTypeLocalLayer means that the unpacked layer data is in
-	// a tar file, which needs to generate overlaybd-turboOCI meta before
-	// create an overlaybd device
+	// storageTypeLocalLayer represents uncompressed tar files needing conversion.
+	// Intermediate state before becoming storageTypeLocalBlock.
+	// Triggers conversion to turboOCI format during commit operation.
 	storageTypeLocalLayer
 )
 
@@ -1588,6 +1592,17 @@ func isOverlaybdFileHeader(header []byte) bool {
 	magic0 := *(*uint64)(unsafe.Pointer(&header[0]))
 	magic1 := *(*uint64)(unsafe.Pointer(&header[8]))
 	magic2 := *(*uint64)(unsafe.Pointer(&header[16]))
-	return (magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632) ||
-		(magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426)
+	
+	// Check for ZFile-based overlaybd format: "ZFile " + "tuji.yyf" + "@Alibaba"
+	// magic0: 281910587246170 represents "ZFile " (little-endian)
+	// magic1: 7384066304294679924 represents "tuji.yyf" (little-endian)
+	// magic2: 7017278244700045632 represents "@Alibaba" (little-endian)
+	zfileFormat := magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632
+	
+	// Check for LSMT-based overlaybd format: "LSMT " + binary data
+	// magic0: 564050879402828 represents "LSMT " (little-endian)
+	// magic1 & magic2: additional format-specific binary data
+	lsmtFormat := magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426
+	
+	return zfileFormat || lsmtFormat
 }
