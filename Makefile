@@ -48,10 +48,10 @@ deb-amd64: ## build .deb package for amd64
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg RELEASE_VERSION=$(RELEASE_VERSION) \
 		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
-		--build-arg OBD_VERSION=$(OBD_VERSION) \
 		--cache-from type=local,src=/tmp/.buildx-cache \
 		--cache-to type=local,dest=/tmp/.buildx-cache \
-		-f ci/build_image/Dockerfile \
+		-f ci/build_image/Dockerfile.deb \
+		--target deb-only \
 		-t aci-builder-amd64 \
 		--load .
 	@docker run --rm -v $(PWD):/output aci-builder-amd64 \
@@ -65,10 +65,10 @@ deb-arm64: ## build .deb package for arm64
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg RELEASE_VERSION=$(RELEASE_VERSION) \
 		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
-		--build-arg OBD_VERSION=$(OBD_VERSION) \
 		--cache-from type=local,src=/tmp/.buildx-cache \
 		--cache-to type=local,dest=/tmp/.buildx-cache \
-		-f ci/build_image/Dockerfile \
+		-f ci/build_image/Dockerfile.deb \
+		--target deb-only \
 		-t aci-builder-arm64 \
 		--load .
 	@docker run --rm -v $(PWD):/output aci-builder-arm64 \
