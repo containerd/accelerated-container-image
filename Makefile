@@ -50,7 +50,7 @@ deb-amd64: ## build .deb package for amd64
 		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
 		--cache-from type=local,src=/tmp/.buildx-cache \
 		--cache-to type=local,dest=/tmp/.buildx-cache \
-		-f ci/build_image/Dockerfile.deb \
+		-f ci/build_image/Dockerfile.build_deb \
 		--target deb-only \
 		-t aci-builder-amd64 \
 		--load .
@@ -67,7 +67,7 @@ deb-arm64: ## build .deb package for arm64
 		--build-arg RELEASE_NUM=$(RELEASE_NUM) \
 		--cache-from type=local,src=/tmp/.buildx-cache \
 		--cache-to type=local,dest=/tmp/.buildx-cache \
-		-f ci/build_image/Dockerfile.deb \
+		-f ci/build_image/Dockerfile.build_deb \
 		--target deb-only \
 		-t aci-builder-arm64 \
 		--load .
