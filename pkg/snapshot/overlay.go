@@ -372,18 +372,17 @@ func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage,
 }
 
 func (o *snapshotter) getWritableType(ctx context.Context, id string, info snapshots.Info) (mode string) {
-	defer func() {
-		log.G(ctx).Infof("snapshot R/W label: %s", mode)
-	}()
-	// check image type (OCIv1 or overlaybd)
-	if id != "" {
-		if _, err := o.loadBackingStoreConfig(id); err != nil {
-			log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
-			return RoDir
-		}
-	} else {
-		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
+	// Extract image reference for better logging context
+	imageRef := ""
+	if img, ok := info.Labels[label.CRIImageRef]; ok {
+		imageRef = img
+	} else if img, ok := info.Labels[label.TargetImageRef]; ok {
+		imageRef = img
 	}
+
+	defer func() {
+		log.G(ctx).Infof("snapshot R/W mode selected: %s (image: %s, snapshotID: %s)", mode, imageRef, id)
+	}()
 	// overlaybd
 	rwMode := func(m string) string {
 		if m == "dir" {
@@ -395,11 +394,36 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 		return RoDir
 	}
 	m, ok := info.Labels[label.SupportReadWriteMode]
-	if !ok {
-		return rwMode(o.rwMode)
+	if ok {
+		log.G(ctx).Debugf("SupportReadWriteMode label found for snapshot %s: %s", id, m)
+		return rwMode(m)
 	}
 
-	return rwMode(m)
+	if o.rwMode == "dev" {
+		// Check to see if this is an overlaybd snapshot based on labels or filesystem.
+
+		// First, check for overlaybd blob metadata in labels
+		_, hasOverlayBDBlob := info.Labels[label.OverlayBDBlobDigest]
+		_, hasOverlayBDSize := info.Labels[label.OverlayBDBlobSize]
+
+		if hasOverlayBDBlob && hasOverlayBDSize {
+			log.G(ctx).Debugf("OverlayBD labels detected for snapshot %s - using overlaybd (rwMode: %s)", id, o.rwMode)
+			return rwMode(o.rwMode)
+		}
+		// Fallback to checking the filesystem if labels are not present
+		stype, err := o.identifySnapshotStorageType(ctx, id, info)
+		if err == nil && (stype == storageTypeLocalBlock || stype == storageTypeRemoteBlock) {
+			log.G(ctx).Debugf("OverlayBD filesystem detected for snapshot %s - using overlaybd (rwMode: %s)", id, o.rwMode)
+			return rwMode(o.rwMode)
+		}
+
+		// This appears to be a standard OCI layer.
+		log.G(ctx).Debugf("Fallback: No overlaybd labels or filesystem found for image %s (snapshot %s) - using overlayfs (RoDir)", imageRef, id)
+		return RoDir
+	}
+
+	log.G(ctx).Debugf("Returning default rwMode for snapshot %s: %s", id, o.rwMode)
+	return rwMode(o.rwMode)
 }
 
 func (o *snapshotter) checkTurboOCI(labels map[string]string) (bool, string, string) {
@@ -443,7 +467,31 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	if err != nil {
 		return nil, err
 	}
-	log.G(ctx).Infof("sn: %s, labels:[%+v]", id, info.Labels)
+	// Extract image reference for logging
+	imageRef := ""
+	if img, ok := info.Labels[label.CRIImageRef]; ok {
+		imageRef = img
+	} else if img, ok := info.Labels[label.TargetImageRef]; ok {
+		imageRef = img
+	}
+
+	log.G(ctx).Debugf("Creating snapshot %s for image: %s", id, imageRef)
+
+	hasOverlayBDBlob := false
+	hasImageRef := false
+
+	if _, ok := info.Labels[label.OverlayBDBlobDigest]; ok {
+		hasOverlayBDBlob = true
+	}
+	if _, ok := info.Labels[label.CRIImageRef]; ok {
+		hasImageRef = true
+	}
+	if _, ok := info.Labels[label.TargetImageRef]; ok {
+		hasImageRef = true
+	}
+	if hasOverlayBDBlob && !hasImageRef {
+		log.G(ctx).Warnf("Image %s (snapshot %s) has overlaybd blob metadata but missing image reference labels", imageRef, id)
+	}
 	defer func() {
 		// the transaction rollback makes created snapshot invalid, just clean it.
 		if retErr != nil && rollback {
@@ -555,18 +603,30 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	if o.isPrepareRootfs(info) {
 
 		log.G(ctx).Infof("Preparing rootfs(%s). writeType: %s", s.ID, writeType)
-		if writeType != RoDir {
-			stype = storageTypeLocalBlock
-			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
-				log.G(ctx).Errorln(err.Error())
-				return nil, err
-			}
-		} else if parent != "" {
+		if parent != "" {
+			// Inherit storage type from parent (this child layer cannot diverge from the parent's storage type).
 			stype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 			if err != nil {
 				return nil, err
 			}
 		}
+
+		if writeType != RoDir {
+			if stype == storageTypeRemoteBlock || stype == storageTypeLocalBlock {
+				// If the parent is a remote or local block, use local block for the writable child layer.
+				log.G(ctx).Debugf("Using local block storage for writable snapshot %s (writeType: %s)", s.ID, writeType)
+				stype = storageTypeLocalBlock
+				if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
+					log.G(ctx).Errorln(err.Error())
+					return nil, err
+				}
+			} else {
+				// Fallback to normal overlayfs if the parent is not an overlaybd layer.
+				stype = storageTypeNormal
+				log.G(ctx).Debugf("Parent snapshot '%s' (ID: %s) is not an overlaybd layer. Defaulting writable child snapshot '%s' (ID: %s) to normal overlayfs.", parent, parentID, key, s.ID)
+			}
+		}
+
 		switch stype {
 		case storageTypeLocalBlock, storageTypeRemoteBlock:
 			if parent != "" {
@@ -649,6 +709,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	switch stype {
 	case storageTypeNormal:
 		if _, ok := info.Labels[label.LayerToTurboOCI]; ok {
+			log.G(ctx).Debugf("turboOCI mount: id=%s", s.ID)
 			m = []mount.Mount{
 				{
 					Source: o.upperPath(s.ID),
@@ -660,9 +721,11 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				},
 			}
 		} else {
+			log.G(ctx).Debugf("normal overlay mount: id=%s", s.ID)
 			m = o.normalOverlayMount(s)
 		}
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
+		log.G(ctx).Debugf("basedOnBlockDeviceMount: id=%s, writeType=%s", s.ID, writeType)
 		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
 		if err != nil {
 			return nil, errors.Wrapf(err, "%s", err.Error())
@@ -678,6 +741,28 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 // Prepare creates an active snapshot identified by key descending from the provided parent.
 func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
 	log.G(ctx).Infof("Prepare (key: %s, parent: %s)", key, parent)
+
+	// Extract labels from opts to see what's being passed to us.
+	var allLabels map[string]string
+	for _, opt := range opts {
+		var tempInfo snapshots.Info
+		if err := opt(&tempInfo); err == nil && tempInfo.Labels != nil {
+			if allLabels == nil {
+				allLabels = make(map[string]string)
+			}
+			for k, v := range tempInfo.Labels {
+				allLabels[k] = v
+			}
+		}
+	}
+
+	// Log what we received from containerd
+	if len(allLabels) > 0 {
+		log.G(ctx).Debugf("Prepare: Received %d labels from containerd", len(allLabels))
+	} else {
+		log.G(ctx).Debugf("Prepare: No labels received from containerd (opts count: %d)", len(opts))
+	}
+
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -877,7 +962,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	// Firstly, try to convert an OCIv1 tarball to a turboOCI layer.
 	// then change stype to 'storageTypeLocalBlock' which can make it attach a overlaybd block
 	if stype == storageTypeLocalLayer {
-		log.G(ctx).Infof("convet a local blob to turboOCI layer (sn: %s)", id)
+		// PERFORMANCE WARNING: Converting local layer to turboOCI format
+		log.G(ctx).Warnf("Converting local blob to turboOCI layer (sn: %s). This is a heavyweight operation that processes the entire layer and may take significant time.", id)
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
 			return errors.Wrapf(err, "failed to construct overlaybd config")
 		}
@@ -1372,22 +1458,44 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			log.G(ctx).Errorf("write imageRef '%s'. path: %s, err: %v", img, filepath.Join(path, "image_ref"), err)
 		}
 	} else {
-		log.G(ctx).Warnf("imageRef meta not found.")
+		for labelKey := range info.Labels {
+			if strings.Contains(labelKey, "overlaybd") {
+				log.G(ctx).Warnf("No image reference labels found for overlaybd snapshot %s (ID: %s) during creation.", info.Name, id)
+				break
+			}
+		}
 	}
 	return id, info, nil
 }
 
 func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string, info snapshots.Info) (storageType, error) {
+	// Extract image reference for logging
+	imageRef := ""
+	if img, ok := info.Labels[label.CRIImageRef]; ok {
+		imageRef = img
+	} else if img, ok := info.Labels[label.TargetImageRef]; ok {
+		imageRef = img
+	}
+
 	if _, ok := info.Labels[label.TargetSnapshotRef]; ok {
 		_, hasBDBlobSize := info.Labels[label.OverlayBDBlobSize]
 		_, hasBDBlobDigest := info.Labels[label.OverlayBDBlobDigest]
 		_, hasRef := info.Labels[label.TargetImageRef]
 		_, hasCriRef := info.Labels[label.CRIImageRef]
 
+		log.G(ctx).Debugf("Storage type analysis for snapshot %s (image: %s): blob-size=%t, blob-digest=%t, target-ref=%t, cri-ref=%t",
+			id, imageRef, hasBDBlobSize, hasBDBlobDigest, hasRef, hasCriRef)
+
 		if hasBDBlobSize && hasBDBlobDigest {
 			if hasRef || hasCriRef {
 				return storageTypeRemoteBlock, nil
+			} else {
+				log.G(ctx).Warnf("Image %s (snapshot %s) has overlaybd blob metadata (blob-size=%t, blob-digest=%t) but missing critical image reference labels (target-ref=%t, cri-ref=%t).",
+					imageRef, id, hasBDBlobSize, hasBDBlobDigest, hasRef, hasCriRef)
 			}
+		} else {
+			log.G(ctx).Debugf("Snapshot %s (image: %s) missing overlaybd blob metadata: blob-size=%t, blob-digest=%t",
+				id, imageRef, hasBDBlobSize, hasBDBlobDigest)
 		}
 
 	}
@@ -1398,7 +1506,7 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 	if err == nil {
 		return st, nil
 	}
-	log.G(ctx).Debugf("failed to identify by %s, error %v, try to identify by writable_data", filePath, err)
+	log.G(ctx).Debugf("failed to identify by magic file %s, error %v, try to identify by sealed file/writable_data", filePath, err)
 
 	// check sealed data file
 	filePath = o.overlaybdSealedFilePath(id)
@@ -1428,6 +1536,7 @@ func (o *snapshotter) identifySnapshotStorageType(ctx context.Context, id string
 			log.G(ctx).Debugf("%s/config.v1.json found, return storageTypeRemoteBlock", id)
 			return storageTypeRemoteBlock, nil
 		}
+		log.G(ctx).Debugf("Falling back to normal storage type for snapshot %s", id)
 		return storageTypeNormal, nil
 	}
 
@@ -1592,17 +1701,17 @@ func isOverlaybdFileHeader(header []byte) bool {
 	magic0 := *(*uint64)(unsafe.Pointer(&header[0]))
 	magic1 := *(*uint64)(unsafe.Pointer(&header[8]))
 	magic2 := *(*uint64)(unsafe.Pointer(&header[16]))
-	
+
 	// Check for ZFile-based overlaybd format: "ZFile " + "tuji.yyf" + "@Alibaba"
 	// magic0: 281910587246170 represents "ZFile " (little-endian)
 	// magic1: 7384066304294679924 represents "tuji.yyf" (little-endian)
 	// magic2: 7017278244700045632 represents "@Alibaba" (little-endian)
 	zfileFormat := magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632
-	
+
 	// Check for LSMT-based overlaybd format: "LSMT " + binary data
 	// magic0: 564050879402828 represents "LSMT " (little-endian)
 	// magic1 & magic2: additional format-specific binary data
 	lsmtFormat := magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426
-	
+
 	return zfileFormat || lsmtFormat
 }
