@@ -261,16 +261,21 @@ func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.S
 }
 
 func (c *overlaybdConvertor) Convert(ctx context.Context, srcManifest ocispec.Manifest, fsType string) (ocispec.Descriptor, error) {
+	fmt.Printf("Convert: Reading config blob\n")
 	configData, err := content.ReadBlob(ctx, c.cs, srcManifest.Config)
 	if err != nil {
+		fmt.Printf("Convert: ERROR reading config blob: %v\n", err)
 		return emptyDesc, err
 	}
 
+	fmt.Printf("Convert: Unmarshaling image config\n")
 	var srcCfg ocispec.Image
 	if err := json.Unmarshal(configData, &srcCfg); err != nil {
+		fmt.Printf("Convert: ERROR unmarshaling config: %v\n", err)
 		return emptyDesc, err
 	}
 
+	fmt.Printf("Convert: Starting layer conversion for %d layers\n", len(srcManifest.Layers))
 	committedLayers, err := c.convertLayers(ctx, srcManifest.Layers, srcCfg.RootFS.DiffIDs, fsType)
 	if err != nil {
 		return emptyDesc, err
@@ -461,6 +466,7 @@ func (c *overlaybdConvertor) sentToRemote(ctx context.Context, desc ocispec.Desc
 // convertLayers applys image layers on overlaybd with specified filesystem and
 // exports the layers based on zfile.
 func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]Layer, error) {
+	fmt.Printf("convertLayers: Starting conversion of %d layers\n", len(srcDescs))
 	var (
 		lastParentID string = ""
 		err          error
@@ -487,17 +493,24 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			log.G(ctx).Infof("Skipping provenance layer: %s", desc.MediaType)
 			continue
 		}
+		fmt.Printf("convertLayers: Processing layer %d/%d (digest: %s)\n", idx+1, len(srcDescs), desc.Digest)
 		chain = append(chain, srcDiffIDs[idx])
 		chainID := identity.ChainID(chain).String()
+		fmt.Printf("convertLayers: Layer chainID: %s\n", chainID)
 
 		var remoteDesc ocispec.Descriptor
 
 		if c.remote {
+			fmt.Printf("convertLayers: Looking for remote layer\n")
 			remoteDesc, err = c.findRemote(ctx, chainID)
 			if err != nil {
 				if !errdefs.IsNotFound(err) {
+					fmt.Printf("convertLayers: ERROR finding remote: %v\n", err)
 					return nil, err
 				}
+				fmt.Printf("convertLayers: Remote layer not found, will process locally\n")
+			} else {
+				fmt.Printf("convertLayers: Found remote layer\n")
 			}
 		}
 
@@ -551,10 +564,13 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 		opts = append(opts, snapshots.WithLabels(map[string]string{
 			label.ZFileConfig: string(cfgStr),
 		}))
+		fmt.Printf("convertLayers: Applying OCI layer %d to overlaybd\n", idx+1)
 		lastParentID, err = c.applyOCIV1LayerInObd(ctx, lastParentID, desc, opts, nil)
 		if err != nil {
+			fmt.Printf("convertLayers: ERROR applying layer %d: %v\n", idx+1, err)
 			return nil, err
 		}
+		fmt.Printf("convertLayers: Successfully applied layer %d, new snapshot ID: %s\n", idx+1, lastParentID)
 
 		if c.remote {
 			// must synchronize registry and db, can not do concurrently
@@ -591,29 +607,37 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	snOpts []snapshots.Opt, // apply for the commit snapshotter
 	afterApply func(root string) error, // do something after apply tar stream
 ) (string, error) {
+	fmt.Printf("applyOCIV1LayerInObd: Starting layer application (digest: %s, size: %d)\n", desc.Digest, desc.Size)
 
+	fmt.Printf("applyOCIV1LayerInObd: Getting reader for layer content\n")
 	ra, err := c.cs.ReaderAt(ctx, desc)
 	if err != nil {
+		fmt.Printf("applyOCIV1LayerInObd: ERROR getting reader: %v\n", err)
 		return emptyString, errors.Wrapf(err, "failed to get reader %s from content store", desc.Digest)
 	}
 	defer ra.Close()
+	fmt.Printf("applyOCIV1LayerInObd: Successfully got reader for layer content\n")
 
 	var (
 		key    string
 		mounts []mount.Mount
 	)
 
+	fmt.Printf("applyOCIV1LayerInObd: Preparing snapshot (parentID: %s)\n", parentID)
 	for {
 		key = fmt.Sprintf(convSnapshotNameFormat, UniquePart())
+		fmt.Printf("applyOCIV1LayerInObd: Attempting to prepare snapshot with key: %s\n", key)
 		mounts, err = c.sn.Prepare(ctx, key, parentID, snOpts...)
 		if err != nil {
 			// retry other key
 			if errdefs.IsAlreadyExists(err) {
+				fmt.Printf("applyOCIV1LayerInObd: Snapshot key already exists, retrying with new key\n")
 				continue
 			}
+			fmt.Printf("applyOCIV1LayerInObd: ERROR preparing snapshot: %v\n", err)
 			return emptyString, errors.Wrapf(err, "failed to preprare snapshot %q", key)
 		}
-
+		fmt.Printf("applyOCIV1LayerInObd: Successfully prepared snapshot, got %d mounts\n", len(mounts))
 		break
 	}
 
@@ -754,6 +778,7 @@ func WithClient(client *containerd.Client) Option {
 
 func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
+		fmt.Printf("IndexConvertFunc: Starting conversion function\n")
 		var copts options
 		for _, o := range opts {
 			if err := o(&copts); err != nil {
@@ -762,25 +787,38 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 		}
 		client := copts.client
 		imgRef := copts.imgRef
+		fmt.Printf("IndexConvertFunc: Getting snapshot service for overlaybd\n")
 		sn := client.SnapshotService("overlaybd")
 
+		fmt.Printf("IndexConvertFunc: Getting source image: %s\n", imgRef)
 		srcImg, err := client.GetImage(ctx, imgRef)
 		if err != nil {
+			fmt.Printf("IndexConvertFunc: ERROR getting source image: %v\n", err)
 			return nil, err
 		}
+		fmt.Printf("IndexConvertFunc: Successfully got source image\n")
 
+		fmt.Printf("IndexConvertFunc: Reading manifest for image\n")
+		fmt.Printf("IndexConvertFunc: Image target digest: %s, mediaType: %s, size: %d\n",
+			srcImg.Target().Digest, srcImg.Target().MediaType, srcImg.Target().Size)
+		fmt.Printf("IndexConvertFunc: Using platform: %s\n", platforms.Default())
 		srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
 		if err != nil {
+			fmt.Printf("IndexConvertFunc: ERROR reading manifest: %v\n", err)
 			return nil, errors.Wrapf(err, "failed to read manifest")
 		}
+		fmt.Printf("IndexConvertFunc: Successfully read manifest with %d layers\n", len(srcManifest.Layers))
 		zfileCfg := ZFileConfig{
 			Algorithm: copts.algorithm,
 			BlockSize: copts.blockSize,
 		}
+		fmt.Printf("IndexConvertFunc: Creating OverlayBD convertor\n")
 		c, err := NewOverlaybdConvertor(ctx, cs, sn, copts.resolver, imgRef, copts.dbstr, zfileCfg, copts.vsize)
 		if err != nil {
+			fmt.Printf("IndexConvertFunc: ERROR creating convertor: %v\n", err)
 			return nil, err
 		}
+		fmt.Printf("IndexConvertFunc: Starting layer conversion with fsType: %s\n", copts.fsType)
 		newMfstDesc, err := c.Convert(ctx, srcManifest, copts.fsType)
 		if err != nil {
 			return nil, err

@@ -108,15 +108,19 @@ var convertCommand = &cli.Command{
 		fmt.Printf("vsize: %d GB\n", vsize)
 		obdOpts = append(obdOpts, obdconv.WithVsize(vsize))
 
+		fmt.Printf("Getting resolver...\n")
 		resolver, err := commands.GetResolver(ctx, context)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("Resolver obtained successfully\n")
+
 		obdOpts = append(obdOpts, obdconv.WithResolver(resolver))
 		obdOpts = append(obdOpts, obdconv.WithImageRef(srcImage))
 		obdOpts = append(obdOpts, obdconv.WithClient(cli))
 		convertOpts = append(convertOpts, converter.WithIndexConvertFunc(obdconv.IndexConvertFunc(obdOpts...)))
 
+		fmt.Printf("Starting conversion...\n")
 		newImg, err := converter.Convert(ctx, cli, targetImage, srcImage, convertOpts...)
 		if err != nil {
 			return err
