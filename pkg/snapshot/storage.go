@@ -254,12 +254,17 @@ func IsErofsFilesystem(path string) bool {
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
 func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
+	log.G(ctx).Debugf("Starting block device attachment for snapshot %s (writable: %s, fsType: %s)", snID, writable, fsType)
 
 	log.G(ctx).Debugf("lookup device mountpoint(%s) if exists before attach.", snID)
-	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
+	mountPoint := o.overlaybdMountpoint(snID)
+	if err := lookup(mountPoint); err == nil {
+		log.G(ctx).Debugf("device mountpoint(%s) already exists, skip attach.", mountPoint)
 		return nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.G(ctx).Warnf("device mountpoint(%s) exists, but lookup failed: %v, continue to attach.", mountPoint, err)
 	} else {
-		log.G(ctx).Infof(err.Error())
+		log.G(ctx).Debugf("device mountpoint(%s) not exists, continue to attach.", mountPoint)
 	}
 
 	targetPath := o.overlaybdTargetPath(snID)
@@ -427,7 +432,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					}
 				}
 				args = append(args, device)
-				log.G(ctx).Infof("fs type: %s, mkfs options: %v", fstype, args)
+				log.G(ctx).Infof("Creating %s filesystem on %s (this may take a moment)", fstype, device)
 				out, err := exec.CommandContext(ctx, "mkfs", args...).CombinedOutput()
 				if err != nil {
 					return errors.Wrapf(err, "failed to mkfs for dev %s: %s", device, out)
@@ -479,6 +484,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					}
 				}
 			}
+			log.G(ctx).Debugf("Completed block device attachment for snapshot %s", snID)
 			return nil
 		}
 	}
