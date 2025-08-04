@@ -73,6 +73,10 @@ type BuilderOptions struct {
 
 	// Push manifests with subject
 	Referrer bool
+
+	// CustomResolver allows using a custom resolver instead of the default docker resolver
+	// Used for tar import/export functionality
+	CustomResolver remotes.Resolver
 }
 
 type graphBuilder struct {
@@ -299,46 +303,55 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 }
 
 func Build(ctx context.Context, opt BuilderOptions) error {
-	tlsConfig, err := loadTLSConfig(opt.CertOption)
-	if err != nil {
-		return fmt.Errorf("failed to load certifications: %w", err)
-	}
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:       30 * time.Second,
-			KeepAlive:     30 * time.Second,
-			FallbackDelay: 300 * time.Millisecond,
-		}).DialContext,
-		MaxConnsPerHost:       32, // max http concurrency
-		MaxIdleConns:          32,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		TLSClientConfig:       tlsConfig,
-		ExpectContinueTimeout: 5 * time.Second,
-	}
-	client := &http.Client{Transport: transport}
-	resolver := docker.NewResolver(docker.ResolverOptions{
-		Hosts: docker.ConfigureDefaultRegistries(
-			docker.WithAuthorizer(docker.NewDockerAuthorizer(
-				docker.WithAuthClient(client),
-				docker.WithAuthHeader(make(http.Header)),
-				docker.WithAuthCreds(func(s string) (string, string, error) {
-					if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
-						return opt.Auth[0:i], opt.Auth[i+1:], nil
+	var resolver remotes.Resolver
+	
+	// Use custom resolver if provided, otherwise create default docker resolver
+	if opt.CustomResolver != nil {
+		log.G(ctx).Info("using custom resolver (tar import mode)")
+		resolver = opt.CustomResolver
+	} else {
+		log.G(ctx).Info("using docker registry resolver")
+		tlsConfig, err := loadTLSConfig(opt.CertOption)
+		if err != nil {
+			return fmt.Errorf("failed to load certifications: %w", err)
+		}
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:       30 * time.Second,
+				KeepAlive:     30 * time.Second,
+				FallbackDelay: 300 * time.Millisecond,
+			}).DialContext,
+			MaxConnsPerHost:       32, // max http concurrency
+			MaxIdleConns:          32,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			TLSClientConfig:       tlsConfig,
+			ExpectContinueTimeout: 5 * time.Second,
+		}
+		client := &http.Client{Transport: transport}
+		resolver = docker.NewResolver(docker.ResolverOptions{
+			Hosts: docker.ConfigureDefaultRegistries(
+				docker.WithAuthorizer(docker.NewDockerAuthorizer(
+					docker.WithAuthClient(client),
+					docker.WithAuthHeader(make(http.Header)),
+					docker.WithAuthCreds(func(s string) (string, string, error) {
+						if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
+							return opt.Auth[0:i], opt.Auth[i+1:], nil
+						}
+						return "", "", nil
+					}),
+				)),
+				docker.WithClient(client),
+				docker.WithPlainHTTP(func(s string) (bool, error) {
+					if opt.PlainHTTP {
+						return docker.MatchAllHosts(s)
+					} else {
+						return false, nil
 					}
-					return "", "", nil
 				}),
-			)),
-			docker.WithClient(client),
-			docker.WithPlainHTTP(func(s string) (bool, error) {
-				if opt.PlainHTTP {
-					return docker.MatchAllHosts(s)
-				} else {
-					return false, nil
-				}
-			}),
-		),
-	})
+			),
+		})
+	}
 
 	return (&graphBuilder{
 		Resolver:       resolver,
