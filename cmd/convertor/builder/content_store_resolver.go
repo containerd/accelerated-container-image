@@ -143,67 +143,25 @@ func NewContentStoreResolverFromTar(ctx context.Context, tarPath string) (*Conte
 			continue
 		}
 
-		// Check if this is an image index (multi-arch) that needs to be traversed
+		// Check if this is an image index (multi-arch) 
 		if manifest.MediaType == v1.MediaTypeImageIndex || manifest.MediaType == "application/vnd.docker.distribution.manifest.list.v2+json" {
-			log.G(ctx).Infof("  📁 FOUND IMAGE INDEX: Traversing nested manifests...")
+			log.G(ctx).Infof("  📁 FOUND IMAGE INDEX: Importing as-is for multi-arch conversion")
 			
-			// Read the nested index content
-			nestedIndexContent, err := content.ReadBlob(ctx, store, manifest)
-			if err != nil {
-				log.G(ctx).Errorf("  ❌ Failed to read nested index: %v", err)
-				continue
+			// Import the index itself - let the builder handle platform traversal
+			ref := fmt.Sprintf("imported:%s", manifest.Digest.Encoded()[:12])
+			if manifest.Annotations != nil {
+				if name, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
+					ref = name
+					log.G(ctx).Infof("  Using annotation-based ref: %s", ref)
+				}
 			}
 
-			var nestedIndex v1.Index
-			if err := json.Unmarshal(nestedIndexContent, &nestedIndex); err != nil {
-				log.G(ctx).Errorf("  ❌ Failed to unmarshal nested index: %v", err)
-				continue
+			image := images.Image{
+				Name:   ref,
+				Target: manifest,
 			}
-
-			log.G(ctx).Infof("  📁 Found %d platform-specific manifests in index", len(nestedIndex.Manifests))
-			
-			// Process each platform-specific manifest in the nested index
-			for j, platformManifest := range nestedIndex.Manifests {
-				log.G(ctx).Infof("    === Platform Manifest %d/%d ===", j+1, len(nestedIndex.Manifests))
-				log.G(ctx).Infof("      MediaType: %s", platformManifest.MediaType)
-				log.G(ctx).Infof("      Digest: %s", platformManifest.Digest)
-				
-				if platformManifest.Platform != nil {
-					platform := fmt.Sprintf("%s/%s", platformManifest.Platform.OS, platformManifest.Platform.Architecture)
-					if platformManifest.Platform.Variant != "" {
-						platform += "/" + platformManifest.Platform.Variant
-					}
-					log.G(ctx).Infof("      Platform: %s", platform)
-				}
-
-				// Skip provenance manifests in nested index too
-				if isProvenanceManifestWithContent(ctx, store, platformManifest) {
-					log.G(ctx).Infof("      ❌ SKIPPING: Nested provenance manifest")
-					continue
-				}
-
-				// Generate platform-specific reference name
-				platformRef := fmt.Sprintf("imported:%s", platformManifest.Digest.Encoded()[:12])
-				if manifest.Annotations != nil {
-					if name, ok := manifest.Annotations["org.opencontainers.image.ref.name"]; ok {
-						platformRef = name
-						if platformManifest.Platform != nil {
-							platform := fmt.Sprintf("%s-%s", platformManifest.Platform.OS, platformManifest.Platform.Architecture)
-							if platformManifest.Platform.Variant != "" {
-								platform += "-" + platformManifest.Platform.Variant
-							}
-							platformRef = fmt.Sprintf("%s-%s", name, platform)
-						}
-					}
-				}
-
-				platformImage := images.Image{
-					Name:   platformRef,
-					Target: platformManifest,
-				}
-				imageStore.Create(ctx, platformImage)
-				log.G(ctx).Infof("      ✅ IMPORTED PLATFORM: %s -> %s", platformRef, platformManifest.Digest)
-			}
+			imageStore.Create(ctx, image)
+			log.G(ctx).Infof("  ✅ IMPORTED INDEX: %s -> %s (will be processed as multi-arch)", ref, manifest.Digest)
 			continue
 		}
 
@@ -493,6 +451,7 @@ func isProvenanceManifest(desc v1.Descriptor) bool {
 
 	for _, pType := range provenanceTypes {
 		if strings.Contains(desc.MediaType, pType) {
+			log.L.Debugf("🔍 FILTERING: MediaType contains provenance type: %s", pType)
 			return true
 		}
 	}
@@ -502,6 +461,7 @@ func isProvenanceManifest(desc v1.Descriptor) bool {
 		if strings.Contains(desc.ArtifactType, "provenance") ||
 			strings.Contains(desc.ArtifactType, "attestation") ||
 			strings.Contains(desc.ArtifactType, "signature") {
+			log.L.Debugf("🔍 FILTERING: ArtifactType contains provenance marker: %s", desc.ArtifactType)
 			return true
 		}
 	}
@@ -509,15 +469,18 @@ func isProvenanceManifest(desc v1.Descriptor) bool {
 	// Check annotations for provenance markers
 	if desc.Annotations != nil {
 		if _, exists := desc.Annotations["in-toto.io/predicate-type"]; exists {
+			log.L.Debugf("🔍 FILTERING: Found in-toto.io/predicate-type annotation")
 			return true
 		}
 		if _, exists := desc.Annotations["vnd.docker.reference.type"]; exists {
 			if refType := desc.Annotations["vnd.docker.reference.type"]; refType == "attestation-manifest" || strings.Contains(refType, "provenance") {
+				log.L.Debugf("🔍 FILTERING: Found vnd.docker.reference.type: %s", refType)
 				return true
 			}
 		}
 	}
 
+	log.L.Debugf("🔍 NOT FILTERING: No provenance markers found for digest: %s", desc.Digest.Encoded()[:12])
 	return false
 }
 

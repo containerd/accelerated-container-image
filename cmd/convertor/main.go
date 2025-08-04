@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/builder"
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
@@ -126,14 +127,41 @@ Version: ` + commitID,
 					os.Exit(1)
 				}
 				
-				// Set reference to first available image
+				// Find the multi-arch index to build all architectures
 				images, err := importResolver.ImageStore().List(ctx)
 				if err != nil || len(images) == 0 {
 					logrus.Error("no images found in tar file")
 					os.Exit(1)
 				}
-				ref := images[0].Name
-				logrus.Infof("using imported image: %s", ref)
+				
+				// Look for the main index (should have the original reference name)
+				var ref string
+				var isMultiArch bool
+				for _, img := range images {
+					// The main index usually has the original tag name (e.g., "latest")
+					// Platform-specific manifests have names like "latest-linux-amd64"
+					if !strings.Contains(img.Name, "-linux-") && !strings.Contains(img.Name, "imported:") {
+						ref = img.Name
+						isMultiArch = (img.Target.MediaType == "application/vnd.oci.image.index.v1+json")
+						break
+					}
+				}
+				
+				// Fallback: if no main index found, use first image
+				if ref == "" {
+					ref = images[0].Name
+					isMultiArch = (images[0].Target.MediaType == "application/vnd.oci.image.index.v1+json")
+					logrus.Warnf("no main index found, using first image: %s", ref)
+				} else {
+					logrus.Infof("found main image reference: %s", ref)
+				}
+				
+				// Log what we're building
+				if isMultiArch {
+					logrus.Infof("building multi-arch image with %d total imported images", len(images))
+				} else {
+					logrus.Infof("building single-arch image: %s", ref)
+				}
 				
 				// Choose resolver based on export mode
 				if exportTar != "" {
