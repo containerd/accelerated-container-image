@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/v2/core/content"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/images/archive"
@@ -440,46 +441,12 @@ func ExportContentStoreToTar(ctx context.Context, store content.Store, imageStor
 	return archive.Export(ctx, store, tarFile, exportOpts...)
 }
 
-// isProvenanceManifest checks if a manifest descriptor represents provenance/attestation metadata
+// isProvenanceManifest is a wrapper around the shared utils function with debug logging
 func isProvenanceManifest(desc v1.Descriptor) bool {
-	// Check for common provenance and attestation media types
-	provenanceTypes := []string{
-		"application/vnd.in-toto+json",
-		"application/vnd.dev.cosign.simplesigning.v1+json",
-		"application/vnd.dev.sigstore.bundle+json",
+	if utils.IsProvenanceDescriptor(desc) {
+		log.L.Debugf("🔍 FILTERING: Provenance descriptor detected: %s", desc.Digest.Encoded()[:12])
+		return true
 	}
-
-	for _, pType := range provenanceTypes {
-		if strings.Contains(desc.MediaType, pType) {
-			log.L.Debugf("🔍 FILTERING: MediaType contains provenance type: %s", pType)
-			return true
-		}
-	}
-
-	// Check for provenance-related artifact types
-	if desc.ArtifactType != "" {
-		if strings.Contains(desc.ArtifactType, "provenance") ||
-			strings.Contains(desc.ArtifactType, "attestation") ||
-			strings.Contains(desc.ArtifactType, "signature") {
-			log.L.Debugf("🔍 FILTERING: ArtifactType contains provenance marker: %s", desc.ArtifactType)
-			return true
-		}
-	}
-
-	// Check annotations for provenance markers
-	if desc.Annotations != nil {
-		if _, exists := desc.Annotations["in-toto.io/predicate-type"]; exists {
-			log.L.Debugf("🔍 FILTERING: Found in-toto.io/predicate-type annotation")
-			return true
-		}
-		if _, exists := desc.Annotations["vnd.docker.reference.type"]; exists {
-			if refType := desc.Annotations["vnd.docker.reference.type"]; refType == "attestation-manifest" || strings.Contains(refType, "provenance") {
-				log.L.Debugf("🔍 FILTERING: Found vnd.docker.reference.type: %s", refType)
-				return true
-			}
-		}
-	}
-
 	log.L.Debugf("🔍 NOT FILTERING: No provenance markers found for digest: %s", desc.Digest.Encoded()[:12])
 	return false
 }

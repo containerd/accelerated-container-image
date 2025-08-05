@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
@@ -133,6 +134,16 @@ func (b *graphBuilder) Build(ctx context.Context) error {
 }
 
 func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool) (v1.Descriptor, error) {
+	// Skip provenance and attestation manifests (check by platform and content)
+	if src.Platform != nil && src.Platform.OS == "unknown" && src.Platform.Architecture == "unknown" {
+		// This might be a provenance manifest, check if it should be skipped
+		if utils.IsProvenanceDescriptor(src) {
+			log.G(ctx).Infof("skipping provenance manifest: %s (platform: %s/%s)", src.Digest, src.Platform.OS, src.Platform.Architecture)
+			// Return a special "skipped" descriptor instead of an error
+			return v1.Descriptor{}, nil
+		}
+	}
+
 	switch src.MediaType {
 	case v1.MediaTypeImageManifest, images.MediaTypeDockerSchema2Manifest:
 		return b.buildOne(ctx, src, tag)
@@ -151,17 +162,24 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 			return v1.Descriptor{}, fmt.Errorf("failed to unmarshal index: %w", err)
 		}
 		var wg sync.WaitGroup
-		for _i, _m := range index.Manifests {
-			i := _i
-			m := _m
+		var mu sync.Mutex
+		var filteredManifests []v1.Descriptor
+		
+		for _, m := range index.Manifests {
+			manifest := m
 			wg.Add(1)
 			b.group.Go(func() error {
 				defer wg.Done()
-				target, err := b.process(ctx, m, false)
+				target, err := b.process(ctx, manifest, false)
 				if err != nil {
-					return fmt.Errorf("failed to build %q: %w", m.Digest, err)
+					return fmt.Errorf("failed to build %q: %w", manifest.Digest, err)
 				}
-				index.Manifests[i] = target
+				// Only add non-empty descriptors (skip provenance manifests)
+				if target.Digest != "" {
+					mu.Lock()
+					filteredManifests = append(filteredManifests, target)
+					mu.Unlock()
+				}
 				return nil
 			})
 		}
@@ -169,6 +187,9 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		if ctx.Err() != nil {
 			return v1.Descriptor{}, ctx.Err()
 		}
+		
+		// Update index with only the non-provenance manifests
+		index.Manifests = filteredManifests
 
 		// upload index
 		if b.Referrer {
