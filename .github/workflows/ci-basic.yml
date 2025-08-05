@@ -1,5 +1,6 @@
 name: CI | Basic
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       image-tag:
