@@ -1,5 +1,6 @@
 name: CI | E2E
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       commit-hash:

@@ -1,5 +1,6 @@
 name: CI | Build Image
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       commit-hash:
