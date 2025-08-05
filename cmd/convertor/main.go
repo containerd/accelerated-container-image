@@ -56,8 +56,9 @@ var (
 	referrer         bool
 
 	// tar import/export
-	importTar string
-	exportTar string
+	importTar        string
+	exportTar        string
+	tarExportRepo    string
 
 	// certification
 	certDirs    []string
@@ -115,13 +116,14 @@ Version: ` + commitID,
 			
 			// Handle tar import/export mode
 			var opt builder.BuilderOptions
-			var contentStoreResolver interface{}
-			var fileBasedResolver *builder.FileBasedResolver
+			var importResolver *builder.ContentStoreResolver
+			var exportResolver *builder.FileBasedResolver
 			
 			if importTar != "" {
 				// Import mode - create content store resolver from tar
 				logrus.Infof("importing from tar file: %s", importTar)
-				importResolver, err := builder.NewContentStoreResolverFromTar(ctx, importTar)
+				var err error
+				importResolver, err = builder.NewContentStoreResolverFromTar(ctx, importTar)
 				if err != nil {
 					logrus.Errorf("failed to import tar file: %v", err)
 					os.Exit(1)
@@ -167,17 +169,24 @@ Version: ` + commitID,
 				if exportTar != "" {
 					// For tar export, use FileBasedResolver to capture converted layers locally
 					logrus.Infof("tar export mode: using file-based resolver to capture converted layers")
-					fileResolver, err := builder.NewFileBasedResolver(importResolver.Store(), importResolver.ImageStore())
+					var err error
+					exportResolver, err = builder.NewFileBasedResolver(importResolver.Store(), importResolver.ImageStore())
 					if err != nil {
 						logrus.Errorf("failed to create file-based resolver: %v", err)
 						os.Exit(1)
 					}
-					contentStoreResolver = fileResolver
-					fileBasedResolver = fileResolver
-					repo = "localhost/converted"
+					repo = tarExportRepo
+					
+					// Setup cleanup for export resolver temporary directory
+					defer func() {
+						if !reserve && exportResolver != nil {
+							if err := exportResolver.CleanupTempDir(); err != nil {
+								logrus.Warnf("failed to cleanup export temporary directory: %v", err)
+							}
+						}
+					}()
 				} else {
 					// For registry push, use import resolver directly
-					contentStoreResolver = importResolver
 					if repo == "" {
 						logrus.Error("repository is required when not using export-tar")
 						os.Exit(1)
@@ -186,10 +195,10 @@ Version: ` + commitID,
 				
 				// Type assert to remotes.Resolver interface
 				var resolver remotes.Resolver
-				if fileBasedResolver != nil {
-					resolver = fileBasedResolver
+				if exportResolver != nil {
+					resolver = exportResolver
 				} else {
-					resolver = contentStoreResolver.(*builder.ContentStoreResolver)
+					resolver = importResolver
 				}
 				
 				opt = builder.BuilderOptions{
@@ -273,18 +282,13 @@ Version: ` + commitID,
 				logrus.Info("overlaybd build finished")
 				
 				// Handle tar export if requested
-				if exportTar != "" && fileBasedResolver != nil {
+				if exportTar != "" && exportResolver != nil {
 					logrus.Infof("exporting converted overlaybd layers to tar file: %s", exportTar)
-					if err := builder.ExportContentStoreToTar(ctx, fileBasedResolver.OutputStore(), fileBasedResolver.OutputImageStore(), exportTar); err != nil {
+					if err := builder.ExportContentStoreToTar(ctx, exportResolver.OutputStore(), exportResolver.OutputImageStore(), exportTar); err != nil {
 						logrus.Errorf("failed to export tar file: %v", err)
 						os.Exit(1)
 					}
 					logrus.Info("tar export finished")
-					
-					// Cleanup temporary directory
-					if err := fileBasedResolver.CleanupTempDir(); err != nil {
-						logrus.Warnf("failed to cleanup temporary directory: %v", err)
-					}
 				}
 			}
 			if tb != "" {
@@ -298,18 +302,13 @@ Version: ` + commitID,
 				logrus.Info("TurboOCIv1 build finished")
 				
 				// Handle tar export if requested
-				if exportTar != "" && fileBasedResolver != nil {
+				if exportTar != "" && exportResolver != nil {
 					logrus.Infof("exporting converted turboOCI layers to tar file: %s", exportTar)
-					if err := builder.ExportContentStoreToTar(ctx, fileBasedResolver.OutputStore(), fileBasedResolver.OutputImageStore(), exportTar); err != nil {
+					if err := builder.ExportContentStoreToTar(ctx, exportResolver.OutputStore(), exportResolver.OutputImageStore(), exportTar); err != nil {
 						logrus.Errorf("failed to export tar file: %v", err)
 						os.Exit(1)
 					}
 					logrus.Info("tar export finished")
-					
-					// Cleanup temporary directory
-					if err := fileBasedResolver.CleanupTempDir(); err != nil {
-						logrus.Warnf("failed to cleanup temporary directory: %v", err)
-					}
 				}
 			}
 		},
@@ -342,6 +341,7 @@ func init() {
 	// tar import/export
 	rootCmd.Flags().StringVar(&importTar, "import-tar", "", "import image from tar file (OCI layout format)")
 	rootCmd.Flags().StringVar(&exportTar, "export-tar", "", "export converted image to tar file (OCI layout format)")
+	rootCmd.Flags().StringVar(&tarExportRepo, "tar-export-repo", "localhost/converted", "repository name used in exported tar file (only used with --export-tar)")
 
 	// certification
 	rootCmd.Flags().StringArrayVar(&certDirs, "cert-dir", nil, "In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key")
