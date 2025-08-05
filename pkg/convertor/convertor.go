@@ -72,7 +72,7 @@ var (
 	convSnapshotNameFormat = "overlaybd-conv-%s"
 	ConvContentNameFormat  = convSnapshotNameFormat
 
-	tracer = otel.Tracer("github.com/containerd/accelerated-container-image/pkg/convertor")
+	tracer = otel.Tracer("accelerated-container-image/pkg/convertor")
 )
 
 type ZFileConfig struct {
