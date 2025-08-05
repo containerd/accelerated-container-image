@@ -31,6 +31,7 @@ import (
 	mylog "github.com/containerd/accelerated-container-image/internal/log"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
+	"github.com/containerd/accelerated-container-image/pkg/tracing"
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/v2/contrib/snapshotservice"
@@ -72,6 +73,20 @@ func parseConfig(fpath string) error {
 
 // TODO: use github.com/urfave/cli/v2
 func main() {
+	ctx := context.Background()
+
+	// Initialize OpenTelemetry
+	shutdown, err := tracing.InitTracer(ctx)
+	if err != nil {
+		logrus.Errorf("Failed to initialize tracer: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := shutdown(ctx); err != nil {
+			logrus.Errorf("Failed to shutdown tracer: %v", err)
+		}
+	}()
+
 	pconfig = overlaybd.DefaultBootConfig()
 	fnConfig := defaultConfigPath
 	if len(os.Args) == 2 {
@@ -122,7 +137,7 @@ func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	srv := grpc.NewServer(grpc.UnaryInterceptor(requestIDInterceptor))
-	snapshotsapi.RegisterSnapshotsServer(srv, snapshotservice.FromSnapshotter(sn))
+	snapshotsapi.RegisterSnapshotsServer(srv, tracing.WithTracing(snapshotservice.FromSnapshotter(sn)))
 
 	address := strings.TrimSpace(pconfig.Address)
 

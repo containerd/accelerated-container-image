@@ -25,6 +25,7 @@ import (
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/builder"
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/accelerated-container-image/pkg/tracing"
 	"github.com/containerd/containerd/v2/core/remotes"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
@@ -359,11 +360,28 @@ func init() {
 }
 
 func main() {
+	ctx := context.Background()
+
+	// Initialize OpenTelemetry
+	shutdown, err := tracing.InitTracer(ctx)
+	if err != nil {
+		logrus.Errorf("Failed to initialize tracer: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := shutdown(ctx); err != nil {
+			logrus.Errorf("Failed to shutdown tracer: %v", err)
+		}
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 
 	go func() {
 		<-sigChan
+		if err := shutdown(context.Background()); err != nil {
+			logrus.Errorf("Failed to shutdown tracer: %v", err)
+		}
 		os.Exit(0)
 	}()
 

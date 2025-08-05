@@ -32,6 +32,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/accelerated-container-image/pkg/version"
@@ -67,6 +71,8 @@ var (
 
 	convSnapshotNameFormat = "overlaybd-conv-%s"
 	ConvContentNameFormat  = convSnapshotNameFormat
+
+	tracer = otel.Tracer("github.com/containerd/accelerated-container-image/pkg/convertor")
 )
 
 type ZFileConfig struct {
@@ -261,10 +267,18 @@ func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.S
 }
 
 func (c *overlaybdConvertor) Convert(ctx context.Context, srcManifest ocispec.Manifest, fsType string) (ocispec.Descriptor, error) {
+	ctx, span := tracer.Start(ctx, "Convert",
+		trace.WithAttributes(
+			attribute.String("fsType", fsType),
+			attribute.Int("layerCount", len(srcManifest.Layers)),
+		))
+	defer span.End()
+
 	fmt.Printf("Convert: Reading config blob\n")
 	configData, err := content.ReadBlob(ctx, c.cs, srcManifest.Config)
 	if err != nil {
 		fmt.Printf("Convert: ERROR reading config blob: %v\n", err)
+		span.RecordError(err)
 		return emptyDesc, err
 	}
 
@@ -466,6 +480,13 @@ func (c *overlaybdConvertor) sentToRemote(ctx context.Context, desc ocispec.Desc
 // convertLayers applys image layers on overlaybd with specified filesystem and
 // exports the layers based on zfile.
 func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]Layer, error) {
+	ctx, span := tracer.Start(ctx, "convertLayers",
+		trace.WithAttributes(
+			attribute.String("fsType", fsType),
+			attribute.Int("layerCount", len(srcDescs)),
+		))
+	defer span.End()
+
 	fmt.Printf("convertLayers: Starting conversion of %d layers\n", len(srcDescs))
 	var (
 		lastParentID string = ""
@@ -607,6 +628,14 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	snOpts []snapshots.Opt, // apply for the commit snapshotter
 	afterApply func(root string) error, // do something after apply tar stream
 ) (string, error) {
+	ctx, span := tracer.Start(ctx, "applyOCIV1LayerInObd",
+		trace.WithAttributes(
+			attribute.String("layerDigest", desc.Digest.String()),
+			attribute.Int64("layerSize", desc.Size),
+			attribute.String("parentID", parentID),
+		))
+	defer span.End()
+
 	fmt.Printf("applyOCIV1LayerInObd: Starting layer application (digest: %s, size: %d)\n", desc.Digest, desc.Size)
 
 	fmt.Printf("applyOCIV1LayerInObd: Getting reader for layer content\n")
