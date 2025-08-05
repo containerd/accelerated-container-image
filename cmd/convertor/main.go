@@ -21,9 +21,11 @@ import (
 	"database/sql"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/builder"
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/containerd/v2/core/remotes"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
 
@@ -53,6 +55,11 @@ var (
 	disableSparse    bool
 	referrer         bool
 
+	// tar import/export
+	importTar        string
+	exportTar        string
+	tarExportRepo    string
+
 	// certification
 	certDirs    []string
 	rootCAs     []string
@@ -75,8 +82,16 @@ Version: ` + commitID,
 				logrus.SetLevel(logrus.DebugLevel)
 			}
 			tb := ""
-			if digestInput == "" && tagInput == "" {
-				logrus.Error("one of input-tag [-i] or input-digest [-g] is required")
+			if importTar == "" && digestInput == "" && tagInput == "" {
+				logrus.Error("one of input-tag [-i], input-digest [-g], or import-tar is required")
+				os.Exit(1)
+			}
+			if importTar != "" && (digestInput != "" || tagInput != "") {
+				logrus.Error("import-tar cannot be used with input-tag or input-digest")
+				os.Exit(1)
+			}
+			if importTar == "" && repo == "" {
+				logrus.Error("repository is required when not using import-tar")
 				os.Exit(1)
 			}
 			if overlaybd == "" && fastoci == "" && turboOCI == "" {
@@ -98,31 +113,145 @@ Version: ` + commitID,
 			}
 
 			ctx := context.Background()
-			ref := repo + ":" + tagInput
-			if tagInput == "" {
-				ref = repo + "@" + digestInput
-			}
-			opt := builder.BuilderOptions{
-				Ref:       ref,
-				Auth:      user,
-				PlainHTTP: plain,
-				WorkDir:   dir,
-				OCI:       oci,
-				FsType:    fsType,
-				Mkfs:      mkfs,
-				Vsize:     vsize,
-				CertOption: builder.CertOption{
-					CertDirs:    certDirs,
-					RootCAs:     rootCAs,
-					ClientCerts: clientCerts,
-					Insecure:    insecure,
-				},
-				Reserve:          reserve,
-				NoUpload:         noUpload,
-				DumpManifest:     dumpManifest,
-				ConcurrencyLimit: concurrencyLimit,
-				DisableSparse:    disableSparse,
-				Referrer:         referrer,
+			
+			// Handle tar import/export mode
+			var opt builder.BuilderOptions
+			var importResolver *builder.ContentStoreResolver
+			var exportResolver *builder.FileBasedResolver
+			
+			if importTar != "" {
+				// Import mode - create content store resolver from tar
+				logrus.Infof("importing from tar file: %s", importTar)
+				var err error
+				importResolver, err = builder.NewContentStoreResolverFromTar(ctx, importTar)
+				if err != nil {
+					logrus.Errorf("failed to import tar file: %v", err)
+					os.Exit(1)
+				}
+				
+				// Find the multi-arch index to build all architectures
+				images, err := importResolver.ImageStore().List(ctx)
+				if err != nil || len(images) == 0 {
+					logrus.Error("no images found in tar file")
+					os.Exit(1)
+				}
+				
+				// Look for the main index (should have the original reference name)
+				var ref string
+				var isMultiArch bool
+				for _, img := range images {
+					// The main index usually has the original tag name (e.g., "latest")
+					// Platform-specific manifests have names like "latest-linux-amd64"
+					if !strings.Contains(img.Name, "-linux-") && !strings.Contains(img.Name, "imported:") {
+						ref = img.Name
+						isMultiArch = (img.Target.MediaType == "application/vnd.oci.image.index.v1+json")
+						break
+					}
+				}
+				
+				// Fallback: if no main index found, use first image
+				if ref == "" {
+					ref = images[0].Name
+					isMultiArch = (images[0].Target.MediaType == "application/vnd.oci.image.index.v1+json")
+					logrus.Warnf("no main index found, using first image: %s", ref)
+				} else {
+					logrus.Infof("found main image reference: %s", ref)
+				}
+				
+				// Log what we're building
+				if isMultiArch {
+					logrus.Infof("building multi-arch image with %d total imported images", len(images))
+				} else {
+					logrus.Infof("building single-arch image: %s", ref)
+				}
+				
+				// Choose resolver based on export mode
+				if exportTar != "" {
+					// For tar export, use FileBasedResolver to capture converted layers locally
+					logrus.Infof("tar export mode: using file-based resolver to capture converted layers")
+					var err error
+					exportResolver, err = builder.NewFileBasedResolver(importResolver.Store(), importResolver.ImageStore())
+					if err != nil {
+						logrus.Errorf("failed to create file-based resolver: %v", err)
+						os.Exit(1)
+					}
+					repo = tarExportRepo
+					
+					// Setup cleanup for export resolver temporary directory
+					defer func() {
+						if !reserve && exportResolver != nil {
+							if err := exportResolver.CleanupTempDir(); err != nil {
+								logrus.Warnf("failed to cleanup export temporary directory: %v", err)
+							}
+						}
+					}()
+				} else {
+					// For registry push, use import resolver directly
+					if repo == "" {
+						logrus.Error("repository is required when not using export-tar")
+						os.Exit(1)
+					}
+				}
+				
+				// Type assert to remotes.Resolver interface
+				var resolver remotes.Resolver
+				if exportResolver != nil {
+					resolver = exportResolver
+				} else {
+					resolver = importResolver
+				}
+				
+				opt = builder.BuilderOptions{
+					Ref:              ref,
+					Auth:             user,
+					PlainHTTP:        plain,
+					WorkDir:          dir,
+					OCI:              oci,
+					FsType:           fsType,
+					Mkfs:             mkfs,
+					Vsize:            vsize,
+					CustomResolver:   resolver,
+					CertOption: builder.CertOption{
+						CertDirs:    certDirs,
+						RootCAs:     rootCAs,
+						ClientCerts: clientCerts,
+						Insecure:    insecure,
+					},
+					Reserve:          reserve,
+					NoUpload:         noUpload,
+					DumpManifest:     dumpManifest,
+					ConcurrencyLimit: concurrencyLimit,
+					DisableSparse:    disableSparse,
+					Referrer:         referrer,
+				}
+			} else {
+				// Normal registry mode
+				ref := repo + ":" + tagInput
+				if tagInput == "" {
+					ref = repo + "@" + digestInput
+				}
+				opt = builder.BuilderOptions{
+					Ref:       ref,
+					Auth:      user,
+					PlainHTTP: plain,
+					WorkDir:   dir,
+					OCI:       oci,
+					FsType:    fsType,
+					Mkfs:      mkfs,
+					Vsize:     vsize,
+					CertOption: builder.CertOption{
+						CertDirs:    certDirs,
+						RootCAs:     rootCAs,
+						ClientCerts: clientCerts,
+						Insecure:    insecure,
+					},
+					Reserve:          reserve,
+					NoUpload:         noUpload,
+					DumpManifest:     dumpManifest,
+					ConcurrencyLimit: concurrencyLimit,
+					DisableSparse:    disableSparse,
+					Referrer:         referrer,
+				}
 			}
 			if overlaybd != "" {
 				logrus.Info("building [Overlaybd - Native]  image...")
@@ -151,6 +280,16 @@ Version: ` + commitID,
 					os.Exit(1)
 				}
 				logrus.Info("overlaybd build finished")
+				
+				// Handle tar export if requested
+				if exportTar != "" && exportResolver != nil {
+					logrus.Infof("exporting converted overlaybd layers to tar file: %s", exportTar)
+					if err := builder.ExportContentStoreToTar(ctx, exportResolver.OutputStore(), exportResolver.OutputImageStore(), exportTar); err != nil {
+						logrus.Errorf("failed to export tar file: %v", err)
+						os.Exit(1)
+					}
+					logrus.Info("tar export finished")
+				}
 			}
 			if tb != "" {
 				logrus.Info("building [Overlaybd - Turbo OCIv1] image...")
@@ -161,6 +300,16 @@ Version: ` + commitID,
 					os.Exit(1)
 				}
 				logrus.Info("TurboOCIv1 build finished")
+				
+				// Handle tar export if requested
+				if exportTar != "" && exportResolver != nil {
+					logrus.Infof("exporting converted turboOCI layers to tar file: %s", exportTar)
+					if err := builder.ExportContentStoreToTar(ctx, exportResolver.OutputStore(), exportResolver.OutputImageStore(), exportTar); err != nil {
+						logrus.Errorf("failed to export tar file: %v", err)
+						os.Exit(1)
+					}
+					logrus.Info("tar export finished")
+				}
 			}
 		},
 	}
@@ -189,6 +338,11 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableSparse, "disable-sparse", false, "disable sparse file for overlaybd")
 	rootCmd.Flags().BoolVar(&referrer, "referrer", false, "push converted manifests with subject, note '--oci' will be enabled automatically if '--referrer' is set, cause the referrer must be in OCI format.")
 
+	// tar import/export
+	rootCmd.Flags().StringVar(&importTar, "import-tar", "", "import image from tar file (OCI layout format)")
+	rootCmd.Flags().StringVar(&exportTar, "export-tar", "", "export converted image to tar file (OCI layout format)")
+	rootCmd.Flags().StringVar(&tarExportRepo, "tar-export-repo", "localhost/converted", "repository name used in exported tar file (only used with --export-tar)")
+
 	// certification
 	rootCmd.Flags().StringArrayVar(&certDirs, "cert-dir", nil, "In these directories, root CA should be named as *.crt and client cert should be named as *.cert, *.key")
 	rootCmd.Flags().StringArrayVar(&rootCAs, "root-ca", nil, "root CA certificates")
@@ -200,7 +354,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&noUpload, "no-upload", false, "don't upload layer and manifest")
 	rootCmd.Flags().BoolVar(&dumpManifest, "dump-manifest", false, "dump manifest")
 
-	rootCmd.MarkFlagRequired("repository")
+	// Repository is required except when using tar import/export mode
+	// We'll validate this in the Run function instead
 }
 
 func main() {

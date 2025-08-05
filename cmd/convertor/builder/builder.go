@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
+	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
@@ -73,6 +74,10 @@ type BuilderOptions struct {
 
 	// Push manifests with subject
 	Referrer bool
+
+	// CustomResolver allows using a custom resolver instead of the default docker resolver
+	// Used for tar import/export functionality
+	CustomResolver remotes.Resolver
 }
 
 type graphBuilder struct {
@@ -129,6 +134,16 @@ func (b *graphBuilder) Build(ctx context.Context) error {
 }
 
 func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool) (v1.Descriptor, error) {
+	// Skip provenance and attestation manifests (check by platform and content)
+	if src.Platform != nil && src.Platform.OS == "unknown" && src.Platform.Architecture == "unknown" {
+		// This might be a provenance manifest, check if it should be skipped
+		if utils.IsProvenanceDescriptor(src) {
+			log.G(ctx).Infof("skipping provenance manifest: %s (platform: %s/%s)", src.Digest, src.Platform.OS, src.Platform.Architecture)
+			// Return a special "skipped" descriptor instead of an error
+			return v1.Descriptor{}, nil
+		}
+	}
+
 	switch src.MediaType {
 	case v1.MediaTypeImageManifest, images.MediaTypeDockerSchema2Manifest:
 		return b.buildOne(ctx, src, tag)
@@ -147,17 +162,24 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 			return v1.Descriptor{}, fmt.Errorf("failed to unmarshal index: %w", err)
 		}
 		var wg sync.WaitGroup
-		for _i, _m := range index.Manifests {
-			i := _i
-			m := _m
+		var mu sync.Mutex
+		var filteredManifests []v1.Descriptor
+		
+		for _, m := range index.Manifests {
+			manifest := m
 			wg.Add(1)
 			b.group.Go(func() error {
 				defer wg.Done()
-				target, err := b.process(ctx, m, false)
+				target, err := b.process(ctx, manifest, false)
 				if err != nil {
-					return fmt.Errorf("failed to build %q: %w", m.Digest, err)
+					return fmt.Errorf("failed to build %q: %w", manifest.Digest, err)
 				}
-				index.Manifests[i] = target
+				// Only add non-empty descriptors (skip provenance manifests)
+				if target.Digest != "" {
+					mu.Lock()
+					filteredManifests = append(filteredManifests, target)
+					mu.Unlock()
+				}
 				return nil
 			})
 		}
@@ -165,6 +187,9 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		if ctx.Err() != nil {
 			return v1.Descriptor{}, ctx.Err()
 		}
+		
+		// Update index with only the non-provenance manifests
+		index.Manifests = filteredManifests
 
 		// upload index
 		if b.Referrer {
@@ -299,46 +324,55 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 }
 
 func Build(ctx context.Context, opt BuilderOptions) error {
-	tlsConfig, err := loadTLSConfig(opt.CertOption)
-	if err != nil {
-		return fmt.Errorf("failed to load certifications: %w", err)
-	}
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:       30 * time.Second,
-			KeepAlive:     30 * time.Second,
-			FallbackDelay: 300 * time.Millisecond,
-		}).DialContext,
-		MaxConnsPerHost:       32, // max http concurrency
-		MaxIdleConns:          32,
-		IdleConnTimeout:       30 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		TLSClientConfig:       tlsConfig,
-		ExpectContinueTimeout: 5 * time.Second,
-	}
-	client := &http.Client{Transport: transport}
-	resolver := docker.NewResolver(docker.ResolverOptions{
-		Hosts: docker.ConfigureDefaultRegistries(
-			docker.WithAuthorizer(docker.NewDockerAuthorizer(
-				docker.WithAuthClient(client),
-				docker.WithAuthHeader(make(http.Header)),
-				docker.WithAuthCreds(func(s string) (string, string, error) {
-					if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
-						return opt.Auth[0:i], opt.Auth[i+1:], nil
+	var resolver remotes.Resolver
+	
+	// Use custom resolver if provided, otherwise create default docker resolver
+	if opt.CustomResolver != nil {
+		log.G(ctx).Info("using custom resolver (tar import mode)")
+		resolver = opt.CustomResolver
+	} else {
+		log.G(ctx).Info("using docker registry resolver")
+		tlsConfig, err := loadTLSConfig(opt.CertOption)
+		if err != nil {
+			return fmt.Errorf("failed to load certifications: %w", err)
+		}
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:       30 * time.Second,
+				KeepAlive:     30 * time.Second,
+				FallbackDelay: 300 * time.Millisecond,
+			}).DialContext,
+			MaxConnsPerHost:       32, // max http concurrency
+			MaxIdleConns:          32,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			TLSClientConfig:       tlsConfig,
+			ExpectContinueTimeout: 5 * time.Second,
+		}
+		client := &http.Client{Transport: transport}
+		resolver = docker.NewResolver(docker.ResolverOptions{
+			Hosts: docker.ConfigureDefaultRegistries(
+				docker.WithAuthorizer(docker.NewDockerAuthorizer(
+					docker.WithAuthClient(client),
+					docker.WithAuthHeader(make(http.Header)),
+					docker.WithAuthCreds(func(s string) (string, string, error) {
+						if i := strings.IndexByte(opt.Auth, ':'); i > 0 {
+							return opt.Auth[0:i], opt.Auth[i+1:], nil
+						}
+						return "", "", nil
+					}),
+				)),
+				docker.WithClient(client),
+				docker.WithPlainHTTP(func(s string) (bool, error) {
+					if opt.PlainHTTP {
+						return docker.MatchAllHosts(s)
+					} else {
+						return false, nil
 					}
-					return "", "", nil
 				}),
-			)),
-			docker.WithClient(client),
-			docker.WithPlainHTTP(func(s string) (bool, error) {
-				if opt.PlainHTTP {
-					return docker.MatchAllHosts(s)
-				} else {
-					return false, nil
-				}
-			}),
-		),
-	})
+			),
+		})
+	}
 
 	return (&graphBuilder{
 		Resolver:       resolver,
