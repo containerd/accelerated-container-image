@@ -32,6 +32,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/utils"
 	"github.com/containerd/accelerated-container-image/pkg/version"
@@ -67,6 +71,8 @@ var (
 
 	convSnapshotNameFormat = "overlaybd-conv-%s"
 	ConvContentNameFormat  = convSnapshotNameFormat
+
+	tracer = otel.Tracer("accelerated-container-image/pkg/convertor")
 )
 
 type ZFileConfig struct {
@@ -108,6 +114,22 @@ type contentLoader struct {
 }
 
 func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Layer, err error) {
+	startTime := time.Now()
+	ctx, span := tracer.Start(ctx, "content_load",
+		trace.WithAttributes(
+			attribute.Bool("isAccelLayer", loader.isAccelLayer),
+			attribute.String("fsType", loader.fsType),
+			attribute.Int("fileCount", len(loader.files)),
+		))
+	defer func() {
+		if err != nil {
+			addErrorEvent(span, err, "content_load", l.Desc)
+		}
+		span.SetAttributes(
+			attribute.Int64("load_duration_ms", time.Since(startTime).Milliseconds()),
+		)
+		span.End()
+	}()
 	refName := fmt.Sprintf(ConvContentNameFormat, UniquePart())
 	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
 	if err != nil {
@@ -180,6 +202,9 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	if err = tarWriter.Close(); err != nil {
 		return emptyLayer, errors.Wrapf(err, "failed to close tar file")
 	}
+
+	// Add progress event before commit
+	addProgressEvent(span, countWriter.c, countWriter.c, len(loader.files))
 
 	labels := map[string]string{
 		labelBuildLayerFrom: strings.Join(srcPathList, ","),
@@ -261,10 +286,18 @@ func NewOverlaybdConvertor(ctx context.Context, cs content.Store, sn snapshots.S
 }
 
 func (c *overlaybdConvertor) Convert(ctx context.Context, srcManifest ocispec.Manifest, fsType string) (ocispec.Descriptor, error) {
+	ctx, span := tracer.Start(ctx, "Convert",
+		trace.WithAttributes(
+			attribute.String("fsType", fsType),
+			attribute.Int("layerCount", len(srcManifest.Layers)),
+		))
+	defer span.End()
+
 	fmt.Printf("Convert: Reading config blob\n")
 	configData, err := content.ReadBlob(ctx, c.cs, srcManifest.Config)
 	if err != nil {
 		fmt.Printf("Convert: ERROR reading config blob: %v\n", err)
+		span.RecordError(err)
 		return emptyDesc, err
 	}
 
@@ -466,6 +499,23 @@ func (c *overlaybdConvertor) sentToRemote(ctx context.Context, desc ocispec.Desc
 // convertLayers applys image layers on overlaybd with specified filesystem and
 // exports the layers based on zfile.
 func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]Layer, error) {
+	startTime := time.Now()
+	ctx, span := tracer.Start(ctx, "convertLayers",
+		trace.WithAttributes(
+			attribute.String("fsType", fsType),
+			attribute.Int("layerCount", len(srcDescs)),
+			attribute.Int64("total_size", calculateTotalSize(srcDescs)),
+		))
+	defer func() {
+		if root, ok := c.sn.(interface{ Root() string }); ok {
+			addResourceAttributes(span, root.Root())
+		}
+		span.SetAttributes(
+			attribute.Int64("conversion_duration_ms", time.Since(startTime).Milliseconds()),
+		)
+		span.End()
+	}()
+
 	fmt.Printf("convertLayers: Starting conversion of %d layers\n", len(srcDescs))
 	var (
 		lastParentID string = ""
@@ -493,6 +543,14 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			log.G(ctx).Infof("Skipping provenance layer: %s", desc.MediaType)
 			continue
 		}
+
+		addLayerAttributes(span, desc, idx)
+		span.AddEvent("processing_layer", trace.WithAttributes(
+			attribute.Int("layer_index", idx),
+			attribute.String("digest", desc.Digest.String()),
+			attribute.Int64("size", desc.Size),
+		))
+
 		fmt.Printf("convertLayers: Processing layer %d/%d (digest: %s)\n", idx+1, len(srcDescs), desc.Digest)
 		chain = append(chain, srcDiffIDs[idx])
 		chainID := identity.ChainID(chain).String()
@@ -500,19 +558,31 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 
 		var remoteDesc ocispec.Descriptor
 
-		if c.remote {
-			fmt.Printf("convertLayers: Looking for remote layer\n")
-			remoteDesc, err = c.findRemote(ctx, chainID)
-			if err != nil {
-				if !errdefs.IsNotFound(err) {
-					fmt.Printf("convertLayers: ERROR finding remote: %v\n", err)
-					return nil, err
-				}
-				fmt.Printf("convertLayers: Remote layer not found, will process locally\n")
-			} else {
-				fmt.Printf("convertLayers: Found remote layer\n")
+			if c.remote {
+		fmt.Printf("convertLayers: Looking for remote layer\n")
+		span.AddEvent("remote_check_start", trace.WithAttributes(
+			attribute.String("host", c.host),
+			attribute.String("repo", c.repo),
+			attribute.String("chainID", chainID),
+		))
+
+		remoteDesc, err = c.findRemote(ctx, chainID)
+		if err != nil {
+			if !errdefs.IsNotFound(err) {
+				fmt.Printf("convertLayers: ERROR finding remote: %v\n", err)
+				addErrorEvent(span, err, "remote_check", desc)
+				return nil, err
 			}
+			fmt.Printf("convertLayers: Remote layer not found, will process locally\n")
+		} else {
+			fmt.Printf("convertLayers: Found remote layer\n")
 		}
+
+		span.AddEvent("remote_check_complete", trace.WithAttributes(
+			attribute.Bool("found", err == nil),
+			attribute.String("chainID", chainID),
+		))
+	}
 
 		if c.remote && err == nil {
 			key := fmt.Sprintf(convSnapshotNameFormat, chainID)
@@ -607,6 +677,22 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	snOpts []snapshots.Opt, // apply for the commit snapshotter
 	afterApply func(root string) error, // do something after apply tar stream
 ) (string, error) {
+	startTime := time.Now()
+	ctx, span := tracer.Start(ctx, "applyOCIV1LayerInObd",
+		trace.WithAttributes(
+			attribute.String("parent_id", parentID),
+			attribute.String("digest", desc.Digest.String()),
+			attribute.Int64("size", desc.Size),
+			attribute.String("media_type", desc.MediaType),
+		))
+	defer func() {
+		addConfigAttributes(span, c.zfileCfg, c.vsize)
+		span.SetAttributes(
+			attribute.Int64("apply_duration_ms", time.Since(startTime).Milliseconds()),
+		)
+		span.End()
+	}()
+	// Start applying the layer
 	fmt.Printf("applyOCIV1LayerInObd: Starting layer application (digest: %s, size: %d)\n", desc.Digest, desc.Size)
 
 	fmt.Printf("applyOCIV1LayerInObd: Getting reader for layer content\n")
@@ -661,12 +747,50 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	}
 
 	if err = mount.WithTempMount(ctx, mounts, func(root string) error {
-		_, err := archive.Apply(ctx, root, rc)
-		if err == nil && afterApply != nil {
-			err = afterApply(root)
+		// Create a wrapper to track progress
+		var bytesProcessed int64
+		progressReader := &readCountWrapper{
+			r: rc,
+			c: 0,
 		}
-		return err
+
+		// Start a goroutine to report progress
+		done := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					addProgressEvent(span, bytesProcessed, desc.Size, 0)
+				case <-done:
+					return
+				}
+			}
+		}()
+
+		// Apply the layer and track progress
+		_, err := archive.Apply(ctx, root, progressReader)
+		close(done)
+		bytesProcessed = progressReader.c
+
+		if err != nil {
+			addErrorEvent(span, err, "layer_apply", desc)
+			return errors.Wrapf(err, "failed to extract layer into snapshot")
+		}
+
+		// Add final progress event
+		addProgressEvent(span, bytesProcessed, desc.Size, 0)
+
+		if afterApply != nil {
+			if err := afterApply(root); err != nil {
+				addErrorEvent(span, err, "after_apply", desc)
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
+		addErrorEvent(span, err, "mount_operation", desc)
 		return emptyString, errors.Wrapf(err, "failed to apply layer in snapshot %s", key)
 	}
 
@@ -693,6 +817,17 @@ func UniquePart() string {
 	// Ignore read failures, just decreases uniqueness
 	rand.Read(b[:])
 	return fmt.Sprintf("%d-%s", t.Nanosecond(), strings.Replace(base64.URLEncoding.EncodeToString(b[:]), "_", "-", -1))
+}
+
+type readCountWrapper struct {
+	r io.Reader
+	c int64
+}
+
+func (rc *readCountWrapper) Read(p []byte) (n int, err error) {
+	n, err = rc.r.Read(p)
+	rc.c += int64(n)
+	return
 }
 
 type writeCountWrapper struct {
