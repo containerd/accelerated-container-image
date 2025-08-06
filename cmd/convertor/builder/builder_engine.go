@@ -116,6 +116,7 @@ type builderEngineBase struct {
 	noUpload     bool
 	dumpManifest bool
 	referrer     bool
+	tarExport    bool
 }
 
 func (e *builderEngineBase) isGzipLayer(ctx context.Context, idx int) (bool, error) {
@@ -171,6 +172,7 @@ func (e *builderEngineBase) mediaTypeImageLayer() string {
 }
 
 func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.Descriptor, error) {
+	shouldUploadBlob := !e.noUpload || e.tarExport
 	cbuf, err := json.Marshal(e.config)
 	if err != nil {
 		return specs.Descriptor{}, err
@@ -180,7 +182,7 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.
 		Digest:    digest.FromBytes(cbuf),
 		Size:      (int64)(len(cbuf)),
 	}
-	if !e.noUpload {
+	if shouldUploadBlob {
 		if err = uploadBytes(ctx, e.pusher, e.manifest.Config, cbuf); err != nil {
 			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload config")
 		}
@@ -204,7 +206,7 @@ func (e *builderEngineBase) uploadManifestAndConfig(ctx context.Context) (specs.
 		Digest:    digest.FromBytes(cbuf),
 		Size:      (int64)(len(cbuf)),
 	}
-	if !e.noUpload {
+	if shouldUploadBlob {
 		if err = uploadBytes(ctx, e.pusher, manifestDesc, cbuf); err != nil {
 			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload manifest")
 		}
