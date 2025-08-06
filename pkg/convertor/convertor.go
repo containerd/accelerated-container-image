@@ -678,9 +678,16 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	afterApply func(root string) error, // do something after apply tar stream
 ) (string, error) {
 	startTime := time.Now()
+	var parentIDAttr attribute.KeyValue
+	if parentID != "" {
+		parentIDAttr = attribute.String("parent_id", parentID)
+	} else {
+		parentIDAttr = attribute.String("parent_id", "<root>")
+	}
+	
 	ctx, span := tracer.Start(ctx, "applyOCIV1LayerInObd",
 		trace.WithAttributes(
-			attribute.String("parent_id", parentID),
+			parentIDAttr,
 			attribute.String("digest", desc.Digest.String()),
 			attribute.Int64("size", desc.Size),
 			attribute.String("media_type", desc.MediaType),
