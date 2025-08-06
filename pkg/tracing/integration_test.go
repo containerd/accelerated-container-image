@@ -75,7 +75,7 @@ func newGRPCTestEnv(t *testing.T, snapshotter snapshotsapi.SnapshotsServer) (con
 	t.Helper()
 
 	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(tracing.WithServerTracing())
 	snapshotsapi.RegisterSnapshotsServer(srv, snapshotter)
 
 	go func() {
@@ -95,6 +95,7 @@ func newGRPCTestEnv(t *testing.T, snapshotter snapshotsapi.SnapshotsServer) (con
 	conn, err := grpc.DialContext(ctx, "bufnet",
 		grpc.WithContextDialer(dialer),
 		grpc.WithInsecure(),
+		tracing.WithClientTracing(),
 	)
 	if err != nil {
 		t.Fatalf("Failed to dial bufnet: %v", err)
