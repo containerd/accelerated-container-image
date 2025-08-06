@@ -144,7 +144,7 @@ func (s *TracingSnapshotter) List(sr *snapshotsapi.ListSnapshotsRequest, ss snap
 
 	err := s.server.List(sr, &tracingListServer{
 		Snapshots_ListServer: ss,
-		ctx:                 ctx,
+		ctx:                  ctx,
 	})
 	if err != nil {
 		span.RecordError(err)

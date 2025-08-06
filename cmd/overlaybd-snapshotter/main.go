@@ -48,10 +48,12 @@ var pconfig *overlaybd.BootConfig
 var commitID string = "unknown"
 
 func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	requestID := mylog.GenerateRequestID()
+	requestID := tracing.GetRequestID(ctx)
+	if requestID == "" {
+		requestID = mylog.GenerateRequestID()
+	}
+	
 	ctx = mylog.WithRequestID(ctx, requestID)
-
-	// Add to containerd's logger context
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
 
 	return handler(ctx, req)
@@ -136,8 +138,12 @@ func main() {
 	// Initialize random seed for request ID generation
 	rand.Seed(time.Now().UnixNano())
 
-	srv := grpc.NewServer(grpc.UnaryInterceptor(requestIDInterceptor))
-	snapshotsapi.RegisterSnapshotsServer(srv, tracing.WithTracing(snapshotservice.FromSnapshotter(sn)))
+	// Use simplified tracing with request ID interceptor
+	srv := grpc.NewServer(
+		tracing.WithServerTracing(),
+		grpc.UnaryInterceptor(requestIDInterceptor),
+	)
+	snapshotsapi.RegisterSnapshotsServer(srv, snapshotservice.FromSnapshotter(sn))
 
 	address := strings.TrimSpace(pconfig.Address)
 

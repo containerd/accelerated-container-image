@@ -70,11 +70,11 @@ func (m *mockSnapshotsServer) Mounts(ctx context.Context, req *snapshotsapi.Moun
 
 func TestTracingSnapshotter_Operations(t *testing.T) {
 	tests := []struct {
-		name        string
-		operation   string
-		runTest     func(context.Context, snapshotsapi.SnapshotsServer) error
-		withError   bool
-		attributes  map[string]string
+		name       string
+		operation  string
+		runTest    func(context.Context, snapshotsapi.SnapshotsServer) error
+		withError  bool
+		attributes map[string]string
 	}{
 		{
 			name:      "prepare success",
