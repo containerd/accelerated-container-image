@@ -33,7 +33,6 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes"
 	_ "github.com/containerd/containerd/v2/pkg/testutil" // Handle custom root flag
 	"github.com/opencontainers/go-digest"
-	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -157,35 +156,8 @@ func Test_fetchManifest(t *testing.T) {
 					t.Errorf("fetchManifest() = %v, want %v", manifest, tt.want)
 				}
 			} else {
-				// For manifest lists, the situation is more complex:
-				// - We provide a manifest list
-				// - The function selects a platform-specific manifest from that list
-				// - We get back the manifest for our current platform
-				// 
-				// We can't compare digests directly because the manifest we get
-				// depends on platform selection. Instead we verify:
-				// 1. The media type matches what we expect
-				// 2. The platform (OS/arch) matches what we expect
-				// Check the manifest's media type
-				if manifest.Config.MediaType != tt.wantSubDesc.MediaType {
-					t.Errorf("fetchManifest() got manifest with config media type %v, want %v", 
-						manifest.Config.MediaType, tt.wantSubDesc.MediaType)
-				}
-				
-				// For platform-specific manifests from a list, we should get a manifest
-				// that matches our target platform
-				if tt.wantSubDesc.Platform != nil {
-					config := &specs.Image{}
-					if err := fetch(ctx, tt.args.fetcher, manifest.Config, config); err != nil {
-						t.Errorf("failed to fetch config: %v", err)
-						return
-					}
-					if config.OS != tt.wantSubDesc.Platform.OS || 
-						config.Architecture != tt.wantSubDesc.Platform.Architecture {
-						t.Errorf("fetchManifest() got manifest for platform %v/%v, want %v/%v", 
-							config.OS, config.Architecture,
-							tt.wantSubDesc.Platform.OS, tt.wantSubDesc.Platform.Architecture)
-					}
+				if tt.wantSubDesc.Digest != contentDigest {
+					t.Errorf("fetchManifest() = %v, want %v", manifest, tt.want)
 				}
 			}
 		})
