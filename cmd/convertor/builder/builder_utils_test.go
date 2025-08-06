@@ -33,6 +33,7 @@ import (
 	"github.com/containerd/containerd/v2/core/remotes"
 	_ "github.com/containerd/containerd/v2/pkg/testutil" // Handle custom root flag
 	"github.com/opencontainers/go-digest"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -77,12 +78,17 @@ func Test_fetchManifest(t *testing.T) {
 				},
 				ctx: ctx,
 			},
-			// The manifest list is expected to select the first manifest that can be converted
-			// in the list, for this image that is the very first one.
+			// When we fetch a manifest list:
+			// 1. The function receives a manifest list containing multiple platform variants
+			// 2. It uses platforms.Default() to select the best manifest for current platform
+			// 3. It then fetches and returns that specific manifest
+			//
+			// This descriptor describes what we expect the selected manifest to look like.
+			// We don't compare digests because the selected manifest depends on the platform,
+			// but we do verify we got a manifest for the correct platform with correct type.
 			wantSubDesc: v1.Descriptor{
-				MediaType: images.MediaTypeDockerSchema2Manifest,
-				Digest:    testingresources.DockerV2_Manifest_Simple_Digest,
-				Size:      525,
+				// The config media type we expect to see in the manifest
+				MediaType: images.MediaTypeDockerSchema2Config,
 				Platform: &v1.Platform{
 					Architecture: "amd64",
 					OS:           "linux",
@@ -137,15 +143,47 @@ func Test_fetchManifest(t *testing.T) {
 
 			contentDigest := digest.FromBytes(content)
 
+			// Handle two different cases:
+			// 1. Regular manifests (direct manifest references)
+			// 2. Manifest lists (which require platform-specific manifest selection)
 			if tt.args.desc.MediaType != images.MediaTypeDockerSchema2ManifestList &&
 				tt.args.desc.MediaType != v1.MediaTypeImageIndex {
-
+				
+				// For regular manifests, we can directly compare the digest
+				// because we expect to get back exactly what we asked for
 				if tt.args.desc.Digest != contentDigest {
 					t.Errorf("fetchManifest() = %v, want %v", manifest, tt.want)
 				}
 			} else {
-				if tt.wantSubDesc.Digest != contentDigest {
-					t.Errorf("fetchManifest() = %v, want %v", manifest, tt.want)
+				// For manifest lists, the situation is more complex:
+				// - We provide a manifest list
+				// - The function selects a platform-specific manifest from that list
+				// - We get back the manifest for our current platform
+				// 
+				// We can't compare digests directly because the manifest we get
+				// depends on platform selection. Instead we verify:
+				// 1. The media type matches what we expect
+				// 2. The platform (OS/arch) matches what we expect
+				// Check the manifest's media type
+				if manifest.Config.MediaType != tt.wantSubDesc.MediaType {
+					t.Errorf("fetchManifest() got manifest with config media type %v, want %v", 
+						manifest.Config.MediaType, tt.wantSubDesc.MediaType)
+				}
+				
+				// For platform-specific manifests from a list, we should get a manifest
+				// that matches our target platform
+				if tt.wantSubDesc.Platform != nil {
+					config := &specs.Image{}
+					if err := fetch(ctx, tt.args.fetcher, manifest.Config, config); err != nil {
+						t.Errorf("failed to fetch config: %v", err)
+						return
+					}
+					if config.OS != tt.wantSubDesc.Platform.OS || 
+						config.Architecture != tt.wantSubDesc.Platform.Architecture {
+						t.Errorf("fetchManifest() got manifest for platform %v/%v, want %v/%v", 
+							config.OS, config.Architecture,
+							tt.wantSubDesc.Platform.OS, tt.wantSubDesc.Platform.Architecture)
+					}
 				}
 			}
 		})

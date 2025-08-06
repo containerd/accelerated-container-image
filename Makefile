@@ -33,8 +33,13 @@ install: ## install binaries from bin
 	@install -m 0644 script/overlaybd-snapshotter.service $(SN_DESTDIR)
 	@mkdir -p ${SN_CFGDIR}
 	@install -m 0644 script/config.json ${SN_CFGDIR}
-test: ## run tests that require root
-	@go test ${GO_TESTFLAGS} ${GO_PACKAGES} -test.root
+test: test-regular test-root ## run all tests (both regular and root-requiring tests)
+
+test-regular: ## run tests that don't require root
+	@go run gotest.tools/gotestsum --format standard-quiet -- ${GO_TESTFLAGS} $(shell go list ${GO_TAGS} ./... | grep -v /vendor/ | grep -v /pkg/snapshot)
+
+test-root: ## run tests that require root privileges
+	@sudo go run gotest.tools/gotestsum --format standard-quiet -- ${GO_TESTFLAGS} ./pkg/snapshot -test.root
 
 clean:
 	@rm -rf ./bin
