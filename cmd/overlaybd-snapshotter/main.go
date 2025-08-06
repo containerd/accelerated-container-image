@@ -48,19 +48,12 @@ var pconfig *overlaybd.BootConfig
 var commitID string = "unknown"
 
 func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	// Check if request ID is already in baggage (from upstream call)
 	requestID := tracing.GetRequestID(ctx)
 	if requestID == "" {
-		// Generate new request ID if not present
 		requestID = mylog.GenerateRequestID()
-		// Set it in baggage for downstream propagation
-		ctx = tracing.SetRequestID(ctx, requestID)
 	}
 	
-	// Set in local logger context
 	ctx = mylog.WithRequestID(ctx, requestID)
-
-	// Add to containerd's logger context
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
 
 	return handler(ctx, req)
