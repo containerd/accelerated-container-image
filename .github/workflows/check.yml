@@ -62,27 +62,6 @@ jobs:
           go install -v github.com/containerd/ltag@latest
           echo "::endgroup::"
 
-      - name: DCO checker
-        shell: bash
-        working-directory: src/github.com/containerd/accelerated-container-image
-        env:
-          GITHUB_COMMIT_URL: ${{ github.event.pull_request.commits_url }}
-          DCO_VERBOSITY: "-v"
-          DCO_RANGE: ""
-        run: |
-          echo "::group:: DCO checks"
-          set -eu -o pipefail
-          if [ -z "${GITHUB_COMMIT_URL}" ]; then
-          DCO_RANGE=$(jq -r '.after + "..HEAD"' ${GITHUB_EVENT_PATH})
-          else
-          DCO_RANGE=$(curl ${GITHUB_COMMIT_URL} | jq -r '.[0].parents[0].sha + "..HEAD"')
-          fi
-
-          range=
-          [ ! -z "${DCO_RANGE}" ] && range="-range ${DCO_RANGE}"
-          git-validation ${DCO_VERBOSITY} ${range} -run DCO,short-subject,dangling-whitespace
-          echo "::endgroup::"
-
       - name: validate file headers
         shell: bash
         working-directory: src/github.com/containerd/accelerated-container-image
