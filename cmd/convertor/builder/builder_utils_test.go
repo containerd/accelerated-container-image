@@ -88,6 +88,8 @@ func Test_fetchManifest(t *testing.T) {
 			// but we do verify we got a manifest for the correct platform with correct type.
 			wantSubDesc: v1.Descriptor{
 				// The config media type we expect to see in the manifest
+				Digest:    testingresources.DockerV2_Manifest_Simple_Digest,
+				Size:      525,
 				MediaType: images.MediaTypeDockerSchema2Config,
 				Platform: &v1.Platform{
 					Architecture: "amd64",
