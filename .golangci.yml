@@ -1,21 +1,38 @@
+version: "2"
+run:
+  go: "1.21"
 linters:
   enable:
     - depguard
-    - staticcheck
-    - unconvert
-    - gofmt
-    - goimports
-    - ineffassign
-    - govet
-    - unused
     - misspell
+    - unconvert
   disable:
     - errcheck
-
-linters-settings:
-  depguard:
-    rules:
-      main:
-        deny:
-          - pkg: io/ioutil
-            desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

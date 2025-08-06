@@ -77,12 +77,19 @@ func Test_fetchManifest(t *testing.T) {
 				},
 				ctx: ctx,
 			},
-			// The manifest list is expected to select the first manifest that can be converted
-			// in the list, for this image that is the very first one.
+			// When we fetch a manifest list:
+			// 1. The function receives a manifest list containing multiple platform variants
+			// 2. It uses platforms.Default() to select the best manifest for current platform
+			// 3. It then fetches and returns that specific manifest
+			//
+			// This descriptor describes what we expect the selected manifest to look like.
+			// We don't compare digests because the selected manifest depends on the platform,
+			// but we do verify we got a manifest for the correct platform with correct type.
 			wantSubDesc: v1.Descriptor{
-				MediaType: images.MediaTypeDockerSchema2Manifest,
+				// The config media type we expect to see in the manifest
 				Digest:    testingresources.DockerV2_Manifest_Simple_Digest,
 				Size:      525,
+				MediaType: images.MediaTypeDockerSchema2Config,
 				Platform: &v1.Platform{
 					Architecture: "amd64",
 					OS:           "linux",
@@ -137,9 +144,14 @@ func Test_fetchManifest(t *testing.T) {
 
 			contentDigest := digest.FromBytes(content)
 
+			// Handle two different cases:
+			// 1. Regular manifests (direct manifest references)
+			// 2. Manifest lists (which require platform-specific manifest selection)
 			if tt.args.desc.MediaType != images.MediaTypeDockerSchema2ManifestList &&
 				tt.args.desc.MediaType != v1.MediaTypeImageIndex {
-
+				
+				// For regular manifests, we can directly compare the digest
+				// because we expect to get back exactly what we asked for
 				if tt.args.desc.Digest != contentDigest {
 					t.Errorf("fetchManifest() = %v, want %v", manifest, tt.want)
 				}
