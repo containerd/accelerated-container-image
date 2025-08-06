@@ -296,6 +296,9 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 	engineBase.reserve = b.Reserve
 	engineBase.noUpload = b.NoUpload
 	engineBase.dumpManifest = b.DumpManifest
+	if _, ok := b.Resolver.(*FileBasedResolver); ok {
+		engineBase.tarExport = true
+	}
 
 	var engine builderEngine
 	switch b.Engine {
