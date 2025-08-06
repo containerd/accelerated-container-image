@@ -51,6 +51,7 @@ func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.Unary
 	requestID := tracing.GetRequestID(ctx)
 	if requestID == "" {
 		requestID = mylog.GenerateRequestID()
+		ctx = tracing.SetRequestID(ctx, requestID)
 	}
 	
 	ctx = mylog.WithRequestID(ctx, requestID)
@@ -143,7 +144,7 @@ func main() {
 		tracing.WithServerTracing(),
 		grpc.UnaryInterceptor(requestIDInterceptor),
 	)
-	snapshotsapi.RegisterSnapshotsServer(srv, snapshotservice.FromSnapshotter(sn))
+	snapshotsapi.RegisterSnapshotsServer(srv, tracing.WithTracing(snapshotservice.FromSnapshotter(sn)))
 
 	address := strings.TrimSpace(pconfig.Address)
 
