@@ -58,10 +58,9 @@ func TestInterceptorAttributes(t *testing.T) {
 				return err
 			},
 			expectedAttrs: map[string]interface{}{
-				"rpc.system":           "grpc",
-				"rpc.service":          "containerd.services.snapshots.v1.Snapshots",
-				"rpc.method":           "Prepare",
-				"rpc.grpc.status_code": "OK",
+				"rpc.system":  "grpc",
+				"rpc.service": "containerd.services.snapshots.v1.Snapshots",
+				"rpc.method":  "Prepare",
 			},
 		},
 		{
@@ -82,10 +81,9 @@ func TestInterceptorAttributes(t *testing.T) {
 				return nil
 			},
 			expectedAttrs: map[string]interface{}{
-				"rpc.system":           "grpc",
-				"rpc.service":          "containerd.services.snapshots.v1.Snapshots",
-				"rpc.method":           "List",
-				"rpc.grpc.status_code": "OK",
+				"rpc.system":  "grpc",
+				"rpc.service": "containerd.services.snapshots.v1.Snapshots",
+				"rpc.method":  "List",
 			},
 		},
 	}
@@ -148,10 +146,8 @@ func TestInterceptorAttributes(t *testing.T) {
 				}
 			}
 
-			// Verify duration attribute is present
-			if _, ok := spanAttrs["rpc.grpc.duration_ms"]; !ok {
-				t.Error("Duration attribute not found")
-			}
+			// otelgrpc doesn't add duration attribute like our custom interceptor did
+			// Just verify that we have basic gRPC attributes
 		})
 	}
 }

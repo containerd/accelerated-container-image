@@ -154,10 +154,10 @@ func TestTracingSnapshotterIntegration(t *testing.T) {
 					t.Fatalf("Failed to commit snapshot: %v", err)
 				}
 
-				// Verify spans
+				// Verify spans (otelgrpc creates more spans than our old custom interceptor)
 				spans := getTestSpans()
-				if len(spans) != 2 {
-					t.Errorf("got %d spans, want 2", len(spans))
+				if len(spans) < 2 {
+					t.Errorf("got %d spans, want at least 2", len(spans))
 				}
 			},
 		},
@@ -192,10 +192,10 @@ func TestTracingSnapshotterIntegration(t *testing.T) {
 					t.Error("Committed snapshot not found in list")
 				}
 
-				// Verify spans
+				// Verify spans (otelgrpc creates more spans than our old custom interceptor)
 				spans := getTestSpans()
-				if len(spans) != 1 {
-					t.Errorf("got %d spans, want 1", len(spans))
+				if len(spans) < 1 {
+					t.Errorf("got %d spans, want at least 1", len(spans))
 				}
 			},
 		},

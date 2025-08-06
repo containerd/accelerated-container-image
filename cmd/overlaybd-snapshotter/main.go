@@ -145,13 +145,12 @@ func main() {
 	// Initialize random seed for request ID generation
 	rand.Seed(time.Now().UnixNano())
 
-	// Chain interceptors: tracing first, then request ID
-	interceptors := grpc.ChainUnaryInterceptor(
-		tracing.UnaryServerInterceptor(),
-		requestIDInterceptor,
+	// Use simplified tracing with request ID interceptor
+	srv := grpc.NewServer(
+		tracing.WithServerTracing(),
+		grpc.UnaryInterceptor(requestIDInterceptor),
 	)
-	srv := grpc.NewServer(interceptors)
-	snapshotsapi.RegisterSnapshotsServer(srv, tracing.WithTracing(snapshotservice.FromSnapshotter(sn)))
+	snapshotsapi.RegisterSnapshotsServer(srv, snapshotservice.FromSnapshotter(sn))
 
 	address := strings.TrimSpace(pconfig.Address)
 
