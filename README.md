@@ -98,7 +98,49 @@ docker run overlaybd-convertor -r registry.hub.docker.com/library/redis -i 6.2.1
 
 * See how to use TurboOCIv1 at [TurboOCIv1](docs/TURBO_OCI.md).
 
-* Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
+* See how to use OpenTelemetry tracing at [TRACING](docs/TRACING.md).
+
+## Testing
+
+The project uses Go's standard testing framework. To run the tests:
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests for a specific package
+go test ./pkg/tracing/...
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run tests and show code coverage
+go test -cover ./...
+
+# Run tests and generate coverage report
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out  # View coverage in browser
+```
+
+### Test Requirements
+
+Some tests require specific setup:
+
+- **Tracing Tests**: No external setup needed. Tests use in-memory tracing.
+- **Integration Tests**: Uses in-memory gRPC server, no external setup needed.
+- **Snapshotter Tests**: Requires root privileges for some tests. Run with `sudo` if needed.
+
+### Writing Tests
+
+When contributing new code:
+
+1. Add unit tests for new packages in `*_test.go` files
+2. Add integration tests for new features
+3. Follow existing test patterns in the codebase
+4. Use table-driven tests where appropriate
+5. Ensure tests are deterministic and don't depend on external services
+
+For more details on contributing, see [CONTRIBUTING](docs/CONTRIBUTING.md).
 
 ## Release Version Support
 
