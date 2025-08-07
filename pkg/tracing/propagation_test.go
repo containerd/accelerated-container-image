@@ -115,7 +115,7 @@ func TestTraceIDPropagation(t *testing.T) {
 			validSpans++
 		}
 	}
-	
+
 	if validSpans == 0 {
 		t.Error("No valid spans found")
 	}

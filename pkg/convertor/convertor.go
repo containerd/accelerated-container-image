@@ -558,31 +558,31 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 
 		var remoteDesc ocispec.Descriptor
 
-			if c.remote {
-		fmt.Printf("convertLayers: Looking for remote layer\n")
-		span.AddEvent("remote_check_start", trace.WithAttributes(
-			attribute.String("host", c.host),
-			attribute.String("repo", c.repo),
-			attribute.String("chainID", chainID),
-		))
+		if c.remote {
+			fmt.Printf("convertLayers: Looking for remote layer\n")
+			span.AddEvent("remote_check_start", trace.WithAttributes(
+				attribute.String("host", c.host),
+				attribute.String("repo", c.repo),
+				attribute.String("chainID", chainID),
+			))
 
-		remoteDesc, err = c.findRemote(ctx, chainID)
-		if err != nil {
-			if !errdefs.IsNotFound(err) {
-				fmt.Printf("convertLayers: ERROR finding remote: %v\n", err)
-				addErrorEvent(span, err, "remote_check", desc)
-				return nil, err
+			remoteDesc, err = c.findRemote(ctx, chainID)
+			if err != nil {
+				if !errdefs.IsNotFound(err) {
+					fmt.Printf("convertLayers: ERROR finding remote: %v\n", err)
+					addErrorEvent(span, err, "remote_check", desc)
+					return nil, err
+				}
+				fmt.Printf("convertLayers: Remote layer not found, will process locally\n")
+			} else {
+				fmt.Printf("convertLayers: Found remote layer\n")
 			}
-			fmt.Printf("convertLayers: Remote layer not found, will process locally\n")
-		} else {
-			fmt.Printf("convertLayers: Found remote layer\n")
-		}
 
-		span.AddEvent("remote_check_complete", trace.WithAttributes(
-			attribute.Bool("found", err == nil),
-			attribute.String("chainID", chainID),
-		))
-	}
+			span.AddEvent("remote_check_complete", trace.WithAttributes(
+				attribute.Bool("found", err == nil),
+				attribute.String("chainID", chainID),
+			))
+		}
 
 		if c.remote && err == nil {
 			key := fmt.Sprintf(convSnapshotNameFormat, chainID)
@@ -678,7 +678,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	afterApply func(root string) error, // do something after apply tar stream
 ) (string, error) {
 	startTime := time.Now()
-	
+
 	ctx, span := tracer.Start(ctx, "applyOCIV1LayerInObd",
 		trace.WithAttributes(
 			attribute.String("parent_id", parentID),
