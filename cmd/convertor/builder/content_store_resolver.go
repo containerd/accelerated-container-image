@@ -92,7 +92,7 @@ func NewContentStoreResolverFromTar(ctx context.Context, tarPath string) (*Conte
 	}
 	defer tarFile.Close()
 
-	// Import tar into content store  
+	// Import tar into content store
 	log.G(ctx).Infof("importing tar file: %s", tarPath)
 	indexDesc, err := archive.ImportIndex(ctx, store, tarFile,
 		archive.WithImportCompression(),
@@ -119,18 +119,18 @@ func NewContentStoreResolverFromTar(ctx context.Context, tarPath string) (*Conte
 		log.G(ctx).Infof("  MediaType: %s", manifest.MediaType)
 		log.G(ctx).Infof("  Digest: %s", manifest.Digest)
 		log.G(ctx).Infof("  Size: %d bytes", manifest.Size)
-		
+
 		if manifest.Platform != nil {
 			log.G(ctx).Infof("  Platform: %s/%s", manifest.Platform.OS, manifest.Platform.Architecture)
 			if manifest.Platform.Variant != "" {
 				log.G(ctx).Infof("  Platform Variant: %s", manifest.Platform.Variant)
 			}
 		}
-		
+
 		if manifest.ArtifactType != "" {
 			log.G(ctx).Infof("  ArtifactType: %s", manifest.ArtifactType)
 		}
-		
+
 		if manifest.Annotations != nil && len(manifest.Annotations) > 0 {
 			log.G(ctx).Infof("  Annotations:")
 			for key, value := range manifest.Annotations {
@@ -144,10 +144,10 @@ func NewContentStoreResolverFromTar(ctx context.Context, tarPath string) (*Conte
 			continue
 		}
 
-		// Check if this is an image index (multi-arch) 
+		// Check if this is an image index (multi-arch)
 		if manifest.MediaType == v1.MediaTypeImageIndex || manifest.MediaType == "application/vnd.docker.distribution.manifest.list.v2+json" {
 			log.G(ctx).Infof("  📁 FOUND IMAGE INDEX: Importing as-is for multi-arch conversion")
-			
+
 			// Import the index itself - let the builder handle platform traversal
 			ref := fmt.Sprintf("imported:%s", manifest.Digest.Encoded()[:12])
 			if manifest.Annotations != nil {
@@ -194,7 +194,7 @@ func (r *ContentStoreResolver) Resolve(ctx context.Context, ref string) (string,
 
 	// Parse reference
 	name, tag := parseRef(ref)
-	
+
 	// Look up in image store
 	image, err := r.imageStore.Get(ctx, name)
 	if err != nil {
@@ -455,7 +455,7 @@ func isProvenanceManifest(desc v1.Descriptor) bool {
 // by examining both the descriptor metadata and the actual manifest content
 func isProvenanceManifestWithContent(ctx context.Context, store content.Store, desc v1.Descriptor) bool {
 	log.G(ctx).Debugf("    🔍 Checking if manifest is provenance: %s", desc.Digest)
-	
+
 	// First check descriptor metadata
 	if isProvenanceManifest(desc) {
 		log.G(ctx).Debugf("    🔍 Detected provenance via descriptor metadata")
@@ -465,9 +465,9 @@ func isProvenanceManifestWithContent(ctx context.Context, store content.Store, d
 	// For generic manifest media types, we need to check the content
 	if desc.MediaType == "application/vnd.docker.distribution.manifest.v2+json" ||
 		desc.MediaType == "application/vnd.oci.image.manifest.v1+json" {
-		
+
 		log.G(ctx).Debugf("    🔍 Generic manifest media type, reading content to inspect...")
-		
+
 		// Read the manifest content
 		manifestContent, err := content.ReadBlob(ctx, store, desc)
 		if err != nil {
@@ -492,7 +492,7 @@ func isProvenanceManifestWithContent(ctx context.Context, store content.Store, d
 			log.G(ctx).Debugf("    🔍 FOUND provenance markers in content!")
 			return true
 		}
-		
+
 		log.G(ctx).Debugf("    🔍 No provenance markers found in content")
 	} else {
 		log.G(ctx).Debugf("    🔍 Non-generic media type, skipping content inspection")

@@ -36,11 +36,11 @@ import (
 // FileBasedResolver implements remotes.Resolver that captures pushed content locally
 // for later export to tar files
 type FileBasedResolver struct {
-	store       content.Store
-	imageStore  images.Store
-	outputStore content.Store  // Where converted layers are stored
+	store            content.Store
+	imageStore       images.Store
+	outputStore      content.Store // Where converted layers are stored
 	outputImageStore images.Store
-	tempDir     string        // Path to temporary directory for cleanup
+	tempDir          string // Path to temporary directory for cleanup
 }
 
 // NewFileBasedResolver creates a resolver that captures converted content locally
@@ -94,7 +94,7 @@ func (r *FileBasedResolver) OutputImageStore() images.Store {
 // Resolve resolves a reference from the import store
 func (r *FileBasedResolver) Resolve(ctx context.Context, ref string) (string, v1.Descriptor, error) {
 	log.G(ctx).Debugf("file-based resolver: resolving reference: %s", ref)
-	
+
 	// Look up in import image store
 	image, err := r.imageStore.Get(ctx, ref)
 	if err != nil {
@@ -114,7 +114,7 @@ func (r *FileBasedResolver) Fetcher(ctx context.Context, ref string) (remotes.Fe
 // Pusher returns a file-based pusher that captures converted content locally
 func (r *FileBasedResolver) Pusher(ctx context.Context, ref string) (remotes.Pusher, error) {
 	log.G(ctx).Debugf("file-based resolver: creating pusher for ref: %s", ref)
-	
+
 	return &FilePusher{
 		ref:        ref,
 		store:      r.outputStore,
@@ -167,7 +167,7 @@ type fileWriter struct {
 
 func (w *fileWriter) Commit(ctx context.Context, size int64, expected digest.Digest, opts ...content.Opt) error {
 	log.G(ctx).Debugf("file pusher: committing blob: %s", w.desc.Digest)
-	
+
 	err := w.Writer.Commit(ctx, size, expected, opts...)
 	if err != nil {
 		return err
@@ -176,7 +176,7 @@ func (w *fileWriter) Commit(ctx context.Context, size int64, expected digest.Dig
 	// If this is a manifest, store it in the image store as well
 	if isManifestMediaType(w.desc.MediaType) {
 		log.G(ctx).Debugf("file pusher: storing manifest in image store: %s", w.desc.Digest)
-		
+
 		// Generate image name based on the pusher's reference
 		imageName := fmt.Sprintf("converted:%s", w.desc.Digest.Encoded()[:12])
 		if w.pusher.ref != "" {
@@ -195,7 +195,7 @@ func (w *fileWriter) Commit(ctx context.Context, size int64, expected digest.Dig
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
-		
+
 		_, err = w.pusher.imageStore.Create(ctx, image)
 		if err != nil && !errdefs.IsAlreadyExists(err) {
 			log.G(ctx).Warnf("failed to store image in image store: %v", err)
@@ -215,7 +215,7 @@ func isManifestMediaType(mediaType string) bool {
 		v1.MediaTypeImageIndex,
 		"application/vnd.docker.distribution.manifest.list.v2+json",
 	}
-	
+
 	for _, mt := range manifestTypes {
 		if mediaType == mt {
 			return true
@@ -233,7 +233,7 @@ func (r *FileBasedResolver) CleanupTempDir() error {
 	return nil
 }
 
-// GetTempDir returns the temporary directory path for debugging  
+// GetTempDir returns the temporary directory path for debugging
 func (r *FileBasedResolver) GetTempDir() string {
 	return r.tempDir
 }

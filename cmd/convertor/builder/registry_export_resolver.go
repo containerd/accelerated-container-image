@@ -27,11 +27,11 @@ import (
 )
 
 // RegistryExportResolver implements remotes.Resolver that:
-// - Fetches from import content store (tar) 
+// - Fetches from import content store (tar)
 // - Pushes to registry using a registry resolver
 type RegistryExportResolver struct {
 	store            content.Store
-	imageStore       images.Store  
+	imageStore       images.Store
 	registryResolver remotes.Resolver // For creating registry pushers
 }
 
@@ -47,13 +47,13 @@ func NewRegistryExportResolver(importStore content.Store, importImageStore image
 // Resolve resolves a reference from the import store
 func (r *RegistryExportResolver) Resolve(ctx context.Context, ref string) (string, v1.Descriptor, error) {
 	log.G(ctx).Debugf("registry export resolver: resolving reference: %s", ref)
-	
+
 	// Look up in import image store
 	image, err := r.imageStore.Get(ctx, ref)
 	if err != nil {
 		return "", v1.Descriptor{}, err
 	}
-	
+
 	return ref, image.Target, nil
 }
 

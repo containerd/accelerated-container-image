@@ -149,7 +149,7 @@ func Test_fetchManifest(t *testing.T) {
 			// 2. Manifest lists (which require platform-specific manifest selection)
 			if tt.args.desc.MediaType != images.MediaTypeDockerSchema2ManifestList &&
 				tt.args.desc.MediaType != v1.MediaTypeImageIndex {
-				
+
 				// For regular manifests, we can directly compare the digest
 				// because we expect to get back exactly what we asked for
 				if tt.args.desc.Digest != contentDigest {

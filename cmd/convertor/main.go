@@ -61,9 +61,9 @@ var (
 	referrer         bool
 
 	// tar import/export
-	importTar        string
-	exportTar        string
-	tarExportRepo    string
+	importTar     string
+	exportTar     string
+	tarExportRepo string
 
 	// certification
 	certDirs    []string
@@ -118,12 +118,12 @@ Version: ` + commitID,
 			}
 
 			ctx := context.Background()
-			
+
 			// Handle tar import/export mode
 			var opt builder.BuilderOptions
 			var importResolver *builder.ContentStoreResolver
 			var exportResolver *builder.FileBasedResolver
-			
+
 			if importTar != "" {
 				// Import mode - create content store resolver from tar
 				logrus.Infof("importing from tar file: %s", importTar)
@@ -133,14 +133,14 @@ Version: ` + commitID,
 					logrus.Errorf("failed to import tar file: %v", err)
 					os.Exit(1)
 				}
-				
+
 				// Find the multi-arch index to build all architectures
 				images, err := importResolver.ImageStore().List(ctx)
 				if err != nil || len(images) == 0 {
 					logrus.Error("no images found in tar file")
 					os.Exit(1)
 				}
-				
+
 				// Look for the main index (should have the original reference name)
 				var ref string
 				var isMultiArch bool
@@ -153,7 +153,7 @@ Version: ` + commitID,
 						break
 					}
 				}
-				
+
 				// Fallback: if no main index found, use first image
 				if ref == "" {
 					ref = images[0].Name
@@ -162,14 +162,14 @@ Version: ` + commitID,
 				} else {
 					logrus.Infof("found main image reference: %s", ref)
 				}
-				
+
 				// Log what we're building
 				if isMultiArch {
 					logrus.Infof("building multi-arch image with %d total imported images", len(images))
 				} else {
 					logrus.Infof("building single-arch image: %s", ref)
 				}
-				
+
 				// Choose resolver based on export mode
 				var customResolver remotes.Resolver
 				if exportTar != "" {
@@ -183,7 +183,7 @@ Version: ` + commitID,
 					}
 					repo = tarExportRepo
 					customResolver = exportResolver
-					
+
 					// Setup cleanup for export resolver temporary directory
 					defer func() {
 						if !reserve && exportResolver != nil {
@@ -199,12 +199,12 @@ Version: ` + commitID,
 						os.Exit(1)
 					}
 					logrus.Infof("registry export mode: creating hybrid resolver for tar import -> registry push")
-					
+
 					// Create registry resolver for pushing (simplified TLS config)
 					tlsConfig := &tls.Config{
 						InsecureSkipVerify: insecure,
 					}
-					
+
 					// Create registry resolver (same logic as in builder.go)
 					transport := &http.Transport{
 						TLSClientConfig:       tlsConfig,
@@ -253,20 +253,20 @@ Version: ` + commitID,
 							),
 						})
 					}
-					
+
 					customResolver = builder.NewRegistryExportResolver(importResolver.Store(), importResolver.ImageStore(), registryResolver)
 				}
-				
+
 				opt = builder.BuilderOptions{
-					Ref:              ref,
-					Auth:             user,
-					PlainHTTP:        plain,
-					WorkDir:          dir,
-					OCI:              oci,
-					FsType:           fsType,
-					Mkfs:             mkfs,
-					Vsize:            vsize,
-					CustomResolver:   customResolver,
+					Ref:            ref,
+					Auth:           user,
+					PlainHTTP:      plain,
+					WorkDir:        dir,
+					OCI:            oci,
+					FsType:         fsType,
+					Mkfs:           mkfs,
+					Vsize:          vsize,
+					CustomResolver: customResolver,
 					CertOption: builder.CertOption{
 						CertDirs:    certDirs,
 						RootCAs:     rootCAs,
@@ -336,7 +336,7 @@ Version: ` + commitID,
 					os.Exit(1)
 				}
 				logrus.Info("overlaybd build finished")
-				
+
 				// Handle tar export if requested
 				if exportTar != "" && exportResolver != nil {
 					logrus.Infof("exporting converted overlaybd layers to tar file: %s", exportTar)
@@ -356,7 +356,7 @@ Version: ` + commitID,
 					os.Exit(1)
 				}
 				logrus.Info("TurboOCIv1 build finished")
-				
+
 				// Handle tar export if requested
 				if exportTar != "" && exportResolver != nil {
 					logrus.Infof("exporting converted turboOCI layers to tar file: %s", exportTar)

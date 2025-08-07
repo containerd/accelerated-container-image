@@ -164,7 +164,7 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		var filteredManifests []v1.Descriptor
-		
+
 		for _, m := range index.Manifests {
 			manifest := m
 			wg.Add(1)
@@ -187,7 +187,7 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		if ctx.Err() != nil {
 			return v1.Descriptor{}, ctx.Err()
 		}
-		
+
 		// Update index with only the non-provenance manifests
 		index.Manifests = filteredManifests
 
@@ -328,7 +328,7 @@ func (b *graphBuilder) buildOne(ctx context.Context, src v1.Descriptor, tag bool
 
 func Build(ctx context.Context, opt BuilderOptions) error {
 	var resolver remotes.Resolver
-	
+
 	// Use custom resolver if provided, otherwise create default docker resolver
 	if opt.CustomResolver != nil {
 		log.G(ctx).Info("using custom resolver (tar import mode)")
