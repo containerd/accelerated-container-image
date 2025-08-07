@@ -28,16 +28,14 @@ import (
 	"strings"
 	"time"
 
-	mylog "github.com/containerd/accelerated-container-image/internal/log"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	overlaybd "github.com/containerd/accelerated-container-image/pkg/snapshot"
 	"github.com/containerd/accelerated-container-image/pkg/tracing"
-
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/v2/contrib/snapshotservice"
-	"github.com/containerd/log"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 )
@@ -47,18 +45,18 @@ const defaultConfigPath = "/etc/overlaybd-snapshotter/config.json"
 var pconfig *overlaybd.BootConfig
 var commitID string = "unknown"
 
-func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	requestID := tracing.GetRequestID(ctx)
-	if requestID == "" {
-		requestID = mylog.GenerateRequestID()
-		ctx = tracing.SetRequestID(ctx, requestID)
-	}
+// func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+// 	requestID := tracing.GetRequestID(ctx)
+// 	if requestID == "" {
+// 		requestID = mylog.GenerateRequestID()
+// 		ctx = tracing.SetRequestID(ctx, requestID)
+// 	}
 
-	ctx = mylog.WithRequestID(ctx, requestID)
-	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
+// 	ctx = mylog.WithRequestID(ctx, requestID)
+// 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
 
-	return handler(ctx, req)
-}
+// 	return handler(ctx, req)
+// }
 
 func parseConfig(fpath string) error {
 	logrus.Info("parse config file: ", fpath)
@@ -79,13 +77,13 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize OpenTelemetry
-	shutdown, err := tracing.InitTracer(ctx)
+	tracerShutdown, err := tracing.InitTracer(ctx)
 	if err != nil {
 		logrus.Errorf("Failed to initialize tracer: %v", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := shutdown(ctx); err != nil {
+		if err := tracerShutdown(ctx); err != nil {
 			logrus.Errorf("Failed to shutdown tracer: %v", err)
 		}
 	}()
@@ -139,10 +137,9 @@ func main() {
 	// Initialize random seed for request ID generation
 	rand.Seed(time.Now().UnixNano())
 
-	// Use simplified tracing with request ID interceptor
+	// Chain both OpenTelemetry and request ID interceptors
 	srv := grpc.NewServer(
-		tracing.WithServerTracing(),
-		grpc.UnaryInterceptor(requestIDInterceptor),
+		grpc.UnaryInterceptor(otelgrpc.WithUnaryServerInterceptor()),
 	)
 	snapshotsapi.RegisterSnapshotsServer(srv, tracing.WithTracing(snapshotservice.FromSnapshotter(sn)))
 

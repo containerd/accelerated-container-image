@@ -23,10 +23,10 @@ import (
 
 // WithClientTracing returns gRPC dial options that include the tracing client interceptor
 func WithClientTracing() grpc.DialOption {
-	return grpc.WithStatsHandler(otelgrpc.NewClientHandler())
+	return grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor())
 }
 
 // WithServerTracing returns gRPC server options that include the tracing server interceptor
 func WithServerTracing() grpc.ServerOption {
-	return grpc.StatsHandler(otelgrpc.NewServerHandler())
+	return grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor())
 }
