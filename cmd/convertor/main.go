@@ -194,12 +194,14 @@ Version: ` + commitID,
 					}
 				}
 				
-				// Type assert to remotes.Resolver interface
-				var resolver remotes.Resolver
+				// Set CustomResolver based on export mode
+				var customResolver remotes.Resolver
 				if exportResolver != nil {
-					resolver = exportResolver
+					// For tar export, use the file-based resolver
+					customResolver = exportResolver
 				} else {
-					resolver = importResolver
+					// For registry push, let builder create registry resolver (set to nil)
+					customResolver = nil
 				}
 				
 				opt = builder.BuilderOptions{
@@ -211,7 +213,7 @@ Version: ` + commitID,
 					FsType:           fsType,
 					Mkfs:             mkfs,
 					Vsize:            vsize,
-					CustomResolver:   resolver,
+					CustomResolver:   customResolver,
 					CertOption: builder.CertOption{
 						CertDirs:    certDirs,
 						RootCAs:     rootCAs,
