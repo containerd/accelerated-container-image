@@ -18,15 +18,19 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 
 	"github.com/containerd/accelerated-container-image/cmd/convertor/builder"
 	"github.com/containerd/accelerated-container-image/cmd/convertor/database"
-	"github.com/containerd/accelerated-container-image/pkg/tracing"
 	"github.com/containerd/containerd/v2/core/remotes"
+	"github.com/containerd/containerd/v2/core/remotes/docker"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"
 
@@ -167,6 +171,7 @@ Version: ` + commitID,
 				}
 				
 				// Choose resolver based on export mode
+				var customResolver remotes.Resolver
 				if exportTar != "" {
 					// For tar export, use FileBasedResolver to capture converted layers locally
 					logrus.Infof("tar export mode: using file-based resolver to capture converted layers")
@@ -177,6 +182,7 @@ Version: ` + commitID,
 						os.Exit(1)
 					}
 					repo = tarExportRepo
+					customResolver = exportResolver
 					
 					// Setup cleanup for export resolver temporary directory
 					defer func() {
@@ -187,21 +193,68 @@ Version: ` + commitID,
 						}
 					}()
 				} else {
-					// For registry push, use import resolver directly
+					// For registry push, create a registry resolver and hybrid resolver
 					if repo == "" {
 						logrus.Error("repository is required when not using export-tar")
 						os.Exit(1)
 					}
-				}
-				
-				// Set CustomResolver based on export mode
-				var customResolver remotes.Resolver
-				if exportResolver != nil {
-					// For tar export, use the file-based resolver
-					customResolver = exportResolver
-				} else {
-					// For registry push, let builder create registry resolver (set to nil)
-					customResolver = nil
+					logrus.Infof("registry export mode: creating hybrid resolver for tar import -> registry push")
+					
+					// Create registry resolver for pushing (simplified TLS config)
+					tlsConfig := &tls.Config{
+						InsecureSkipVerify: insecure,
+					}
+					
+					// Create registry resolver (same logic as in builder.go)
+					transport := &http.Transport{
+						TLSClientConfig:       tlsConfig,
+						Proxy:                 http.ProxyFromEnvironment,
+						DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+						MaxIdleConns:          10,
+						IdleConnTimeout:       30 * time.Second,
+						ResponseHeaderTimeout: 5 * time.Second,
+						TLSHandshakeTimeout:   5 * time.Second,
+						ExpectContinueTimeout: 5 * time.Second,
+					}
+					client := &http.Client{Transport: transport}
+					registryResolver := docker.NewResolver(docker.ResolverOptions{
+						Hosts: docker.ConfigureDefaultRegistries(
+							docker.WithAuthorizer(docker.NewDockerAuthorizer(
+								docker.WithAuthClient(client),
+								docker.WithAuthHeader(make(http.Header)),
+								docker.WithAuthCreds(func(s string) (string, string, error) {
+									if i := strings.IndexByte(user, ':'); i > 0 {
+										return user[0:i], user[i+1:], nil
+									}
+									return "", "", nil
+								}),
+							)),
+							docker.WithClient(client),
+							docker.WithPlainHTTP(func(s string) (bool, error) {
+								return false, nil
+							}),
+						),
+					})
+					if plain {
+						registryResolver = docker.NewResolver(docker.ResolverOptions{
+							Hosts: docker.ConfigureDefaultRegistries(
+								docker.WithAuthorizer(docker.NewDockerAuthorizer(
+									docker.WithAuthClient(client),
+									docker.WithAuthHeader(make(http.Header)),
+									docker.WithAuthCreds(func(s string) (string, string, error) {
+										if i := strings.IndexByte(user, ':'); i > 0 {
+											return user[0:i], user[i+1:], nil
+										}
+										return "", "", nil
+									}),
+								)),
+								docker.WithClient(client),
+								docker.WithPlainHTTP(docker.MatchAllHosts),
+							),
+						})
+					}
+					
+					customResolver = builder.NewRegistryExportResolver(importResolver.Store(), importResolver.ImageStore(), registryResolver)
 				}
 				
 				opt = builder.BuilderOptions{
@@ -362,28 +415,11 @@ func init() {
 }
 
 func main() {
-	ctx := context.Background()
-
-	// Initialize OpenTelemetry
-	shutdown, err := tracing.InitTracer(ctx)
-	if err != nil {
-		logrus.Errorf("Failed to initialize tracer: %v", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if err := shutdown(ctx); err != nil {
-			logrus.Errorf("Failed to shutdown tracer: %v", err)
-		}
-	}()
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
 
 	go func() {
 		<-sigChan
-		if err := shutdown(context.Background()); err != nil {
-			logrus.Errorf("Failed to shutdown tracer: %v", err)
-		}
 		os.Exit(0)
 	}()
 
