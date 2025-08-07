@@ -53,7 +53,7 @@ func requestIDInterceptor(ctx context.Context, req interface{}, info *grpc.Unary
 		requestID = mylog.GenerateRequestID()
 		ctx = tracing.SetRequestID(ctx, requestID)
 	}
-	
+
 	ctx = mylog.WithRequestID(ctx, requestID)
 	ctx = log.WithLogger(ctx, log.G(ctx).WithField("req_id", requestID))
 
