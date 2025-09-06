@@ -46,7 +46,6 @@ import (
 	"github.com/containerd/log"
 	"github.com/moby/sys/mountinfo"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
@@ -135,7 +134,7 @@ func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, mat
 		numFields := len(fields)
 		if numFields < 10 {
 			// should be at least 10 fields
-			logrus.Warnf("Parsing '%s' failed: not enough fields (%d)", text, numFields)
+			log.G(ctx).Warnf("Parsing '%s' failed: not enough fields (%d)", text, numFields)
 			continue
 		}
 
