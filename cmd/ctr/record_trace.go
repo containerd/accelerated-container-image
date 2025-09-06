@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -52,7 +53,6 @@ import (
 	"github.com/opencontainers/image-spec/identity"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sys/unix"
 )
@@ -179,15 +179,15 @@ var recordTraceCommand = &cli.Command{
 			return errors.New("new image ref must be provided")
 		}
 		if _, err = client.ImageService().Get(ctx, newRef); err == nil {
-			return errors.Errorf("few image %s exists", newRef)
+			return fmt.Errorf("few image %s exists", newRef)
 		} else if !errdefs.IsNotFound(err) {
-			return errors.Errorf("fail to lookup image %s", newRef)
+			return fmt.Errorf("fail to lookup image %s", newRef)
 		}
 
 		// Get image instance
 		imgModel, err := client.ImageService().Get(ctx, ref)
 		if err != nil {
-			return errors.Errorf("fail to get image %s", ref)
+			return fmt.Errorf("fail to get image %s", ref)
 		}
 		image := containerd.NewImage(client, imgModel)
 		imageManifest, err := images.Manifest(ctx, cs, image.Target(), platforms.Default())
@@ -210,7 +210,7 @@ var recordTraceCommand = &cli.Command{
 
 		// Create trace file
 		if err := os.Mkdir(cliCtx.String("working-dir"), 0644); err != nil && !os.IsExist(err) {
-			return errors.Wrapf(err, "failed to create working dir")
+			return fmt.Errorf("failed to create working dir: %w", err)
 		}
 		traceFile := filepath.Join(cliCtx.String("working-dir"), uniqueObjectString())
 		var traceFd *os.File
@@ -227,7 +227,7 @@ var recordTraceCommand = &cli.Command{
 				leases.WithExpiration(maxLeaseTime),
 			)
 			if err != nil {
-				return errors.Wrap(err, "failed to create lease")
+				return fmt.Errorf("failed to create lease: %w", err)
 			}
 			defer deleteLease(ctx)
 
@@ -236,11 +236,11 @@ var recordTraceCommand = &cli.Command{
 				networkNamespace = uniqueObjectString()
 				namespacePath = "/var/run/netns/" + networkNamespace
 				if err = exec.Command("ip", "netns", "add", networkNamespace).Run(); err != nil {
-					return errors.Wrapf(err, "failed to add netns")
+					return fmt.Errorf("failed to add netns: %w", err)
 				}
 				defer func() {
 					if nextErr := exec.Command("ip", "netns", "delete", networkNamespace).Run(); err == nil && nextErr != nil {
-						err = errors.Wrapf(err, "failed to delete netns")
+						err = fmt.Errorf("failed to delete netns: %w", nextErr)
 					}
 				}()
 				cniObj, err := createIsolatedNetwork(cliCtx)
@@ -249,11 +249,11 @@ var recordTraceCommand = &cli.Command{
 				}
 				defer func() {
 					if nextErr := cniObj.Remove(ctx, networkNamespace, namespacePath); err == nil && nextErr != nil {
-						err = errors.Wrapf(nextErr, "failed to teardown network")
+						err = fmt.Errorf("failed to teardown network: %w", nextErr)
 					}
 				}()
 				if _, err = cniObj.Setup(ctx, networkNamespace, namespacePath); err != nil {
-					return errors.Wrapf(err, "failed to setup network for namespace")
+					return fmt.Errorf("failed to setup network for namespace: %w", err)
 				}
 			}
 
@@ -290,7 +290,7 @@ var recordTraceCommand = &cli.Command{
 			// Wait task stopped
 			status := <-statusC
 			if _, _, err := status.Result(); err != nil {
-				return errors.Wrapf(err, "failed to get exit status")
+				return fmt.Errorf("failed to get exit status: %w", err)
 			}
 
 			if timer.Stop() {
@@ -464,7 +464,7 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 
 	newConfigData, err := json.MarshalIndent(oldConfig, "", "   ")
 	if err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to marshal image")
+		return emptyDesc, fmt.Errorf("failed to marshal image: %w", err)
 	}
 
 	newConfigDesc := ocispec.Descriptor{
@@ -474,7 +474,7 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 	}
 	ref := remotes.MakeRefKey(ctx, newConfigDesc)
 	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newConfigData), newConfigDesc); err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to write image config")
+		return emptyDesc, fmt.Errorf("failed to write image config: %w", err)
 	}
 
 	newManifest := ocispec.Manifest{}
@@ -490,7 +490,7 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 		MediaType string `json:"mediaType"`
 	}{
 		Manifest:  newManifest,
-		MediaType: imageMediaType, //images.MediaTypeDockerSchema2Manifest,
+		MediaType: imageMediaType, // images.MediaTypeDockerSchema2Manifest,
 	}
 
 	newManifestData, err := json.MarshalIndent(newManifestV2, "", "   ")
@@ -511,7 +511,7 @@ func createImageWithAccelLayer(ctx context.Context, cs content.Store, oldManifes
 
 	ref = remotes.MakeRefKey(ctx, newManifestDesc)
 	if err := content.WriteBlob(ctx, cs, ref, bytes.NewReader(newManifestData), newManifestDesc, content.WithLabels(labels)); err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to write image manifest")
+		return emptyDesc, fmt.Errorf("failed to write image manifest: %w", err)
 	}
 	return newManifestDesc, nil
 }
@@ -581,10 +581,10 @@ func createIsolatedNetwork(cliCtx *cli.Context) (cni.CNI, error) {
 		cni.WithPluginDir([]string{cliCtx.String("cni-plugin-dir")}),
 	)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to initialize cni library")
+		return nil, fmt.Errorf("failed to initialize cni library: %w", err)
 	}
 	if err = cniObj.Load(cni.WithConfListBytes([]byte(cniConf)), cni.WithLoNetwork); err != nil {
-		return nil, errors.Wrapf(err, "failed to load cni conf")
+		return nil, fmt.Errorf("failed to load cni conf: %w", err)
 	}
 	return cniObj, nil
 }
@@ -599,7 +599,7 @@ func withNewSnapshot(key string, img containerd.Image, snapshotter, traceFile st
 
 		s := client.SnapshotService(snapshotter)
 		if s == nil {
-			return errors.Wrapf(errdefs.ErrNotFound, "snapshotter %s was not found", snapshotter)
+			return fmt.Errorf("snapshotter %s was not found: %w", snapshotter, errdefs.ErrNotFound)
 		}
 		opt := snapshots.WithLabels(map[string]string{
 			label.RecordTrace:     "yes",

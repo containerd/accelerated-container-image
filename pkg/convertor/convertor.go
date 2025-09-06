@@ -51,7 +51,6 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -111,7 +110,7 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 	refName := fmt.Sprintf(ConvContentNameFormat, UniquePart())
 	contentWriter, err := content.OpenWriter(ctx, cs, content.WithRef(refName))
 	if err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to open content writer")
+		return emptyLayer, fmt.Errorf("failed to open content writer: %w", err)
 	}
 	defer contentWriter.Close()
 
@@ -135,12 +134,12 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 
 			err := utils.Commit(ctx, commitPath, commitPath, true, "-z", "-t")
 			if err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to overlaybd-commit for sealed file")
+				return emptyLayer, fmt.Errorf("failed to overlaybd-commit for sealed file: %w", err)
 			}
 
 			srcFile, err := os.Open(commitFile)
 			if err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
+				return emptyLayer, fmt.Errorf("failed to open src file of %s: %w", loader.SrcFilePath, err)
 			}
 			openedSrcFile = append(openedSrcFile, srcFile)
 			_, err = io.Copy(countWriter, bufio.NewReader(srcFile))
@@ -153,13 +152,13 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 			srcPathList = append(srcPathList, loader.SrcFilePath)
 			srcFile, err := os.Open(loader.SrcFilePath)
 			if err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to open src file of %s", loader.SrcFilePath)
+				return emptyLayer, fmt.Errorf("failed to open src file of %s: %w", loader.SrcFilePath, err)
 			}
 			openedSrcFile = append(openedSrcFile, srcFile)
 
 			fi, err := srcFile.Stat()
 			if err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to get info of %s", loader.SrcFilePath)
+				return emptyLayer, fmt.Errorf("failed to get info of %s: %w", loader.SrcFilePath, err)
 			}
 
 			if err := tarWriter.WriteHeader(&tar.Header{
@@ -168,17 +167,17 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 				Size:     fi.Size(),
 				Typeflag: tar.TypeReg,
 			}); err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to write tar header")
+				return emptyLayer, fmt.Errorf("failed to write tar header: %w", err)
 			}
 
 			if _, err := io.Copy(tarWriter, bufio.NewReader(srcFile)); err != nil {
-				return emptyLayer, errors.Wrapf(err, "failed to copy IO")
+				return emptyLayer, fmt.Errorf("failed to copy IO: %w", err)
 			}
 		}
 	}
 
 	if err = tarWriter.Close(); err != nil {
-		return emptyLayer, errors.Wrapf(err, "failed to close tar file")
+		return emptyLayer, fmt.Errorf("failed to close tar file: %w", err)
 	}
 
 	labels := map[string]string{
@@ -187,7 +186,7 @@ func (loader *contentLoader) Load(ctx context.Context, cs content.Store) (l Laye
 
 	if err := contentWriter.Commit(ctx, countWriter.c, digester.Digest(), content.WithLabels(labels)); err != nil {
 		if !errdefs.IsAlreadyExists(err) {
-			return emptyLayer, errors.Wrapf(err, "failed to commit content")
+			return emptyLayer, fmt.Errorf("failed to commit content: %w", err)
 		}
 	}
 
@@ -299,7 +298,7 @@ func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispe
 
 	configData, err := json.MarshalIndent(imgCfg, "", "   ")
 	if err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to marshal image")
+		return emptyDesc, fmt.Errorf("failed to marshal image: %w", err)
 	}
 
 	config := ocispec.Descriptor{
@@ -310,11 +309,11 @@ func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispe
 
 	ref := remotes.MakeRefKey(ctx, config)
 	if err := content.WriteBlob(ctx, c.cs, ref, bytes.NewReader(configData), config); err != nil {
-		return ocispec.Descriptor{}, errors.Wrap(err, "failed to write image config")
+		return ocispec.Descriptor{}, fmt.Errorf("failed to write image config: %w", err)
 	}
 	if c.remote {
 		if err := c.pushObject(ctx, config); err != nil {
-			return ocispec.Descriptor{}, errors.Wrap(err, "failed to push image config")
+			return ocispec.Descriptor{}, fmt.Errorf("failed to push image config: %w", err)
 		}
 		log.G(ctx).Infof("config pushed")
 	}
@@ -339,11 +338,11 @@ func (c *overlaybdConvertor) commitImage(ctx context.Context, srcManifest ocispe
 
 	ref = remotes.MakeRefKey(ctx, desc)
 	if err := content.WriteBlob(ctx, c.cs, ref, bytes.NewReader(mb), desc, content.WithLabels(labels)); err != nil {
-		return emptyDesc, errors.Wrap(err, "failed to write image manifest")
+		return emptyDesc, fmt.Errorf("failed to write image manifest: %w", err)
 	}
 	if c.remote {
 		if err := c.pushObject(ctx, desc); err != nil {
-			return ocispec.Descriptor{}, errors.Wrap(err, "failed to push image manifest")
+			return ocispec.Descriptor{}, fmt.Errorf("failed to push image manifest: %w", err)
 		}
 		log.G(ctx).Infof("image pushed")
 	}
@@ -378,7 +377,7 @@ func (c *overlaybdConvertor) findRemote(ctx context.Context, chainID string) (oc
 			// invalid record in db, which is not found in registry, remove it
 			_, err := c.db.Exec("delete from overlaybd_layers where host=? and repo=? and chain_id=?", c.host, c.repo, chainID)
 			if err != nil {
-				return emptyDesc, errors.Wrapf(err, "failed to remove invalid record in db")
+				return emptyDesc, fmt.Errorf("failed to remove invalid record in db: %w", err)
 			}
 		}
 	}
@@ -510,10 +509,10 @@ func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocisp
 			if !errdefs.IsAlreadyExists(err) {
 				// failed to prepare remote snapshot
 				if err == nil {
-					//rollback
+					// rollback
 					c.sn.Remove(ctx, "prepare-"+key)
 				}
-				return nil, errors.Wrapf(err, "failed to prepare remote snapshot")
+				return nil, fmt.Errorf("failed to prepare remote snapshot: %w", err)
 			}
 			lastParentID = key
 			commitLayers[idx] = Layer{
@@ -588,7 +587,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 
 	ra, err := c.cs.ReaderAt(ctx, desc)
 	if err != nil {
-		return emptyString, errors.Wrapf(err, "failed to get reader %s from content store", desc.Digest)
+		return emptyString, fmt.Errorf("failed to get reader %s from content store: %w", desc.Digest, err)
 	}
 	defer ra.Close()
 
@@ -605,7 +604,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 			if errdefs.IsAlreadyExists(err) {
 				continue
 			}
-			return emptyString, errors.Wrapf(err, "failed to preprare snapshot %q", key)
+			return emptyString, fmt.Errorf("failed to preprare snapshot %q: %w", key, err)
 		}
 
 		break
@@ -627,7 +626,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 
 	rc, err = compression.DecompressStream(rc)
 	if err != nil {
-		return emptyString, errors.Wrap(err, "failed to detect layer mediatype")
+		return emptyString, fmt.Errorf("failed to detect layer mediatype: %w", err)
 	}
 
 	if err = mount.WithTempMount(ctx, mounts, func(root string) error {
@@ -637,7 +636,7 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 		}
 		return err
 	}); err != nil {
-		return emptyString, errors.Wrapf(err, "failed to apply layer in snapshot %s", key)
+		return emptyString, fmt.Errorf("failed to apply layer in snapshot %s: %w", key, err)
 	}
 
 	// Read any trailing data
@@ -765,7 +764,7 @@ func IndexConvertFunc(opts ...Option) converter.ConvertFunc {
 
 		srcManifest, err := images.Manifest(ctx, cs, srcImg.Target(), platforms.Default())
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to read manifest")
+			return nil, fmt.Errorf("failed to read manifest: %w", err)
 		}
 		zfileCfg := ZFileConfig{
 			Algorithm: copts.algorithm,

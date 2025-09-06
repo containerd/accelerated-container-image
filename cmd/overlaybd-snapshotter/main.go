@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -31,7 +32,6 @@ import (
 
 	snapshotsapi "github.com/containerd/containerd/api/services/snapshots/v1"
 	"github.com/containerd/containerd/v2/contrib/snapshotservice"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
@@ -46,10 +46,10 @@ func parseConfig(fpath string) error {
 	logrus.Info("parse config file: ", fpath)
 	data, err := os.ReadFile(fpath)
 	if err != nil {
-		return errors.Wrapf(err, "failed to read plugin config from %s", fpath)
+		return fmt.Errorf("failed to read plugin config from %s: %w", fpath, err)
 	}
 	if err := json.Unmarshal(data, pconfig); err != nil {
-		return errors.Wrapf(err, "failed to parse plugin config from %s", string(data))
+		return fmt.Errorf("failed to parse plugin config from %s: %w", string(data), err)
 	}
 	logrus.Infof("snapshotter commitID: %s, rwMode: %s, autoRemove: %v, writableLayerType: %s, asyncRemoveSnapshot: %v",
 		commitID, pconfig.RwMode, pconfig.AutoRemoveDev, pconfig.WritableLayerType, pconfig.AsyncRemove)

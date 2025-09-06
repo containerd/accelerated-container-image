@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -42,7 +43,6 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
@@ -468,7 +468,7 @@ func (b *overlaybdBuilder) Build(ctx context.Context) (v1.Descriptor, error) {
 
 	targetDesc, err := b.engine.UploadImage(ctx)
 	if err != nil {
-		return v1.Descriptor{}, errors.Wrap(err, "failed to upload manifest or config")
+		return v1.Descriptor{}, fmt.Errorf("failed to upload manifest or config: %w", err)
 	}
 	b.engine.StoreConvertedManifestDetails(ctx)
 	logrus.Info("convert finished")

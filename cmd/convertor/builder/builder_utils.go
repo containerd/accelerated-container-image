@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +38,6 @@ import (
 	"github.com/containerd/platforms"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	t "github.com/containerd/accelerated-container-image/pkg/types"
@@ -252,19 +252,19 @@ func tagPreviouslyConvertedManifest(ctx context.Context, pusher remotes.Pusher, 
 func buildArchiveFromFiles(ctx context.Context, target string, compress compression.Compression, files ...string) error {
 	archive, err := os.Create(target)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create tgz file: %q", target)
+		return fmt.Errorf("failed to create tgz file: %q: %w", target, err)
 	}
 	defer archive.Close()
 	fzip, err := compression.CompressStream(archive, compress)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create compression %v", compress)
+		return fmt.Errorf("failed to create compression %v: %w", compress, err)
 	}
 	defer fzip.Close()
 	ftar := tar.NewWriter(fzip)
 	defer ftar.Close()
 	for _, file := range files {
 		if err := addFileToArchive(ctx, ftar, file); err != nil {
-			return errors.Wrapf(err, "failed to add file %q to archive %q", file, target)
+			return fmt.Errorf("failed to add file %q to archive %q: %w", file, target, err)
 		}
 	}
 	return nil
@@ -276,7 +276,7 @@ func addFileToArchive(ctx context.Context, ftar *tar.Writer, filepath string) er
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return errors.Wrapf(err, "failed to open file: %q", filepath)
+		return fmt.Errorf("failed to open file: %q: %w", filepath, err)
 	}
 	defer file.Close()
 	info, err := file.Stat()
