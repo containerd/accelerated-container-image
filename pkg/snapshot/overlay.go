@@ -19,6 +19,7 @@ package snapshot
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,7 +28,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/containerd/accelerated-container-image/pkg/label"
 	"github.com/containerd/accelerated-container-image/pkg/snapshot/diskquota"
@@ -1585,9 +1585,12 @@ func (o *snapshotter) identifyLocalStorageType(filePath string) (storageType, er
 }
 
 func isOverlaybdFileHeader(header []byte) bool {
-	magic0 := *(*uint64)(unsafe.Pointer(&header[0]))
-	magic1 := *(*uint64)(unsafe.Pointer(&header[8]))
-	magic2 := *(*uint64)(unsafe.Pointer(&header[16]))
-	return (magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632) ||
-		(magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426)
+	if len(header) < 24 {
+		return false
+	}
+	magic0 := binary.LittleEndian.Uint64(header[0:8])
+	magic1 := binary.LittleEndian.Uint64(header[8:16])
+	magic2 := binary.LittleEndian.Uint64(header[16:24])
+	return (magic0 == 281910587246170 && magic1 == 7384066304294679924 && magic2 == 7017278244700045632) || // "ZFile\x00\x01\x00", "tuji.yyf", "@Alibaba"
+		(magic0 == 564050879402828 && magic1 == 5478704352671792741 && magic2 == 9993152565363659426) // "LSMT\x00\x01\x02\x00", …, …
 }
