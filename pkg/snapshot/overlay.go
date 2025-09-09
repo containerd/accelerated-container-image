@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,7 +45,6 @@ import (
 	"github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/moby/locker"
-	"github.com/pkg/errors"
 )
 
 // storageType is used to indicate that what kind of the snapshot it is.
@@ -462,7 +462,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	if parent != "" {
 		parentID, parentInfo, _, err = storage.GetInfo(ctx, parent)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", parent)
+			return nil, fmt.Errorf("failed to get info of parent snapshot %s: %w", parent, err)
 		}
 	}
 
@@ -477,7 +477,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		log.G(ctx).Debugf("Prepare (targetRefLabel: %s, accelLayerLabel: %s)", targetRef, isAccelLayer)
 		if isAccelLayer == "yes" {
 			if err := o.constructSpecForAccelLayer(id, parentID); err != nil {
-				return nil, errors.Wrapf(err, "constructSpecForAccelLayer failed: id %s", id)
+				return nil, fmt.Errorf("constructSpecForAccelLayer failed: id %s: %w", id, err)
 			}
 			rollback = false
 			if err := t.Commit(); err != nil {
@@ -540,7 +540,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			if err := t.Commit(); err != nil {
 				return nil, err
 			}
-			return nil, errors.Wrapf(errdefs.ErrAlreadyExists, "target snapshot %q", targetRef)
+			return nil, fmt.Errorf("target snapshot %q: %w", targetRef, errdefs.ErrAlreadyExists)
 		}
 	}
 
@@ -590,7 +590,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 					err = o.updateSpec(parentID, false, "")
 				}
 				if err != nil {
-					return nil, errors.Wrapf(err, "updateSpec failed for snapshot %s", parentID)
+					return nil, fmt.Errorf("updateSpec failed for snapshot %s: %w", parentID, err)
 				}
 			}
 
@@ -616,7 +616,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
 			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, parent == ""); err != nil {
 				log.G(ctx).Errorf("%v", err)
-				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", obdID)
+				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", obdID, err)
 			}
 
 			defer func() {
@@ -661,7 +661,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
 		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
 		if err != nil {
-			return nil, errors.Wrapf(err, "%s", err.Error())
+			return nil, err
 		}
 	default:
 		panic("unreachable")
@@ -732,7 +732,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 	s, err := storage.GetSnapshot(ctx, key)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get active mount")
+		return nil, fmt.Errorf("failed to get active mount: %w", err)
 	}
 
 	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
@@ -747,7 +747,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 		_, info, _, err := storage.GetInfo(ctx, key)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to get info")
+			return nil, fmt.Errorf("failed to get info: %w", err)
 		}
 
 		writeType := o.getWritableType(ctx, s.ID, info)
@@ -757,12 +757,12 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to get info of parent snapshot %s", info.Parent)
+			return nil, fmt.Errorf("failed to get info of parent snapshot %s: %w", info.Parent, err)
 		}
 
 		parentStype, err := o.identifySnapshotStorageType(ctx, parentID, parentInfo)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to identify storage of parent snapshot %s", parentInfo.Name)
+			return nil, fmt.Errorf("failed to identify storage of parent snapshot %s: %w", parentInfo.Name, err)
 		}
 
 		if parentStype == storageTypeRemoteBlock || parentStype == storageTypeLocalBlock {
@@ -775,7 +775,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 				}
 			}
 			if err := o.attachAndMountBlockDevice(ctx, parentID, RoDir, fsType, false); err != nil {
-				return nil, errors.Wrapf(err, "failed to attach and mount for snapshot %v", key)
+				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", key, err)
 			}
 			return o.basedOnBlockDeviceMount(ctx, s, RoDir)
 		}
@@ -818,7 +818,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 
 	id, oinfo, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get info of snapshot %s", key)
+		return fmt.Errorf("failed to get info of snapshot %s: %w", key, err)
 	}
 
 	// if writable, should commit the data and make it immutable.
@@ -830,7 +830,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 			log.G(ctx).Info("not an overlaybd writable layer")
 		} else {
 			if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
-				return errors.Wrapf(err, "failed to destroy target device for snapshot %s", key)
+				return fmt.Errorf("failed to destroy target device for snapshot %s: %w", key, err)
 			}
 
 			if err := o.sealWritableOverlaybd(ctx, id); err != nil {
@@ -865,7 +865,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	if isTurboOCI, digest, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
 		log.G(ctx).Infof("commit turboOCI.v1 layer: (%s, %s)", id, digest)
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
-			return errors.Wrapf(err, "failed to construct overlaybd config")
+			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 		stype = storageTypeNormal
 	}
@@ -875,14 +875,14 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	if stype == storageTypeLocalLayer {
 		log.G(ctx).Infof("convet a local blob to turboOCI layer (sn: %s)", id)
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
-			return errors.Wrapf(err, "failed to construct overlaybd config")
+			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 		stype = storageTypeLocalBlock
 	}
 
 	if stype == storageTypeLocalBlock {
 		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
-			return errors.Wrapf(err, "failed to construct overlaybd config")
+			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 
 		if info.Labels == nil {
@@ -915,7 +915,7 @@ func (o *snapshotter) commit(ctx context.Context, name, key string, opts ...snap
 	}
 
 	if _, err := storage.CommitActive(ctx, key, name, snapshots.Usage(usage), opts...); err != nil {
-		return "", snapshots.Info{}, errors.Wrap(err, "failed to commit snapshot")
+		return "", snapshots.Info{}, fmt.Errorf("failed to commit snapshot: %w", err)
 	}
 
 	id, info, _, err := storage.GetInfo(ctx, name)
@@ -1058,13 +1058,13 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 	_, _, err = storage.Remove(ctx, key)
 	if err != nil {
-		return errors.Wrap(err, "failed to remove")
+		return fmt.Errorf("failed to remove: %w", err)
 	}
 	if !o.asyncRemove {
 		var removals []string
 		removals, err = o.getCleanupDirectories(ctx, t)
 		if err != nil {
-			return errors.Wrap(err, "unable to get directories for removal")
+			return fmt.Errorf("unable to get directories for removal: %w", err)
 		}
 		defer func() {
 			if err == nil {
@@ -1105,7 +1105,7 @@ func (o *snapshotter) Walk(ctx context.Context, fn snapshots.WalkFunc, fs ...str
 func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, kind snapshots.Kind) (string, error) {
 	td, err := os.MkdirTemp(snapshotDir, "new-")
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create temp dir")
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
 	if err := os.Mkdir(filepath.Join(td, "fs"), 0755); err != nil {
@@ -1301,7 +1301,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			if path != "" {
 				if err1 := os.RemoveAll(path); err1 != nil {
 					log.G(ctx).WithError(err1).WithField("path", path).Error("failed to reclaim snapshot directory, directory may need removal")
-					err = errors.Wrapf(err, "failed to remove path: %v", err1)
+					err = fmt.Errorf("failed to remove path: %v: %w", err1, err)
 				}
 			}
 		}
@@ -1311,23 +1311,23 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 
 	td, err = o.prepareDirectory(ctx, snapshotDir, kind)
 	if err != nil {
-		return "", snapshots.Info{}, errors.Wrap(err, "failed to create prepare snapshot dir")
+		return "", snapshots.Info{}, fmt.Errorf("failed to create prepare snapshot dir: %w", err)
 	}
 
 	s, err := storage.CreateSnapshot(ctx, kind, key, parent, opts...)
 	if err != nil {
-		return "", snapshots.Info{}, errors.Wrap(err, "failed to create snapshot")
+		return "", snapshots.Info{}, fmt.Errorf("failed to create snapshot: %w", err)
 	}
 
 	if len(s.ParentIDs) > 0 {
 		st, err := os.Stat(o.upperPath(s.ParentIDs[0]))
 		if err != nil {
-			return "", snapshots.Info{}, errors.Wrap(err, "failed to stat parent")
+			return "", snapshots.Info{}, fmt.Errorf("failed to stat parent: %w", err)
 		}
 
 		stat := st.Sys().(*syscall.Stat_t)
 		if err := os.Lchown(filepath.Join(td, "fs"), int(stat.Uid), int(stat.Gid)); err != nil {
-			return "", snapshots.Info{}, errors.Wrap(err, "failed to chown")
+			return "", snapshots.Info{}, fmt.Errorf("failed to chown: %w", err)
 		}
 	}
 	// _, tmpinfo, _, err := storage.GetInfo(ctx, key)
@@ -1337,26 +1337,26 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 			log.G(ctx).Infof("set usage quota %s for rootfs(sn: %s)", diskQuotaSize, s.ID)
 			upperPath := filepath.Join(td, "fs")
 			if err := o.setDiskQuota(ctx, upperPath, diskQuotaSize, diskquota.QuotaMinID); err != nil {
-				return "", snapshots.Info{}, errors.Wrapf(err, "failed to set diskquota on upperpath, snapshot id: %s", s.ID)
+				return "", snapshots.Info{}, fmt.Errorf("failed to set diskquota on upperpath, snapshot id: %s: %w", s.ID, err)
 			}
 			// if there's no parent, we just return a bind mount, so no need to set quota on workerpath
 			if len(s.ParentIDs) > 0 {
 				workpath := filepath.Join(td, "work")
 				if err := o.setDiskQuota(ctx, workpath, diskQuotaSize, diskquota.QuotaMinID); err != nil {
-					return "", snapshots.Info{}, errors.Wrapf(err, "failed to set diskquota on workpath, snapshot id: %s", s.ID)
+					return "", snapshots.Info{}, fmt.Errorf("failed to set diskquota on workpath, snapshot id: %s: %w", s.ID, err)
 				}
 			}
 		}
 	}
 	path = filepath.Join(snapshotDir, s.ID)
 	if err = os.Rename(td, path); err != nil {
-		return "", snapshots.Info{}, errors.Wrap(err, "failed to rename")
+		return "", snapshots.Info{}, fmt.Errorf("failed to rename: %w", err)
 	}
 	td = ""
 	// id, info, _, err := storage.GetInfo(ctx, key)
 
 	if err != nil {
-		return "", snapshots.Info{}, errors.Wrap(err, "failed to get snapshot info")
+		return "", snapshots.Info{}, fmt.Errorf("failed to get snapshot info: %w", err)
 	}
 	img, ok := info.Labels[label.CRIImageRef]
 	if !ok {
@@ -1448,7 +1448,7 @@ func (o *snapshotter) setDiskQuota(ctx context.Context, dir string, size string,
 	log.G(ctx).Infof("try to set disk quota, dir(%s), size(%s), quotaID(%d)", dir, size, quotaID)
 
 	if err := o.quotaDriver.SetDiskQuota(dir, size, quotaID); err != nil {
-		return errors.Wrapf(err, "failed to set dir(%s) disk quota", dir)
+		return fmt.Errorf("failed to set dir(%s) disk quota: %w", dir, err)
 	}
 	return nil
 }
@@ -1575,7 +1575,7 @@ func (o *snapshotter) identifyLocalStorageType(filePath string) (storageType, er
 	_, err = f.Read(data)
 	f.Close()
 	if err != nil {
-		return storageTypeUnknown, errors.Wrapf(err, "failed to read %s", filePath)
+		return storageTypeUnknown, fmt.Errorf("failed to read %s: %w", filePath, err)
 	}
 
 	if isOverlaybdFileHeader(data) {

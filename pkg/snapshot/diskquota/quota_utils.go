@@ -26,8 +26,6 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
-
-	"github.com/pkg/errors"
 )
 
 // CheckRegularFile is used to check the file is regular file or directory.
@@ -60,8 +58,8 @@ func loadQuotaIDs(repquotaOpt string) (map[uint32]struct{}, uint32, error) {
 	minID := QuotaMinID
 	output, stderr, err := ExecSync("repquota", repquotaOpt)
 	if err != nil {
-		return nil, 0, errors.Wrapf(err, "failed to execute [repquota %s], stdout: (%s), stderr: (%s)",
-			repquotaOpt, output, stderr)
+		return nil, 0, fmt.Errorf("failed to execute [repquota %s], stdout: (%s), stderr: (%s): %w",
+			repquotaOpt, output, stderr, err)
 	}
 
 	lines := strings.Split(output, "\n")
@@ -92,7 +90,7 @@ func getDevLimit(mountPoint string) (uint64, error) {
 	// get storage upper limit of the device which the dir is on.
 	var stfs syscall.Statfs_t
 	if err := syscall.Statfs(mountPoint, &stfs); err != nil {
-		return 0, errors.Wrapf(err, "failed to get path(%s) limit", mountPoint)
+		return 0, fmt.Errorf("failed to get path(%s) limit: %w", mountPoint, err)
 	}
 	return stfs.Blocks * uint64(stfs.Bsize), nil
 }
@@ -101,7 +99,7 @@ func getDevLimit(mountPoint string) (uint64, error) {
 func checkDevLimit(mountPoint string, size uint64) error {
 	limit, err := getDevLimit(mountPoint)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get device(%s) limit", mountPoint)
+		return fmt.Errorf("failed to get device(%s) limit: %w", mountPoint, err)
 	}
 
 	if limit < size {

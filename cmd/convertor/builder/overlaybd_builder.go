@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,7 +35,6 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/identity"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -162,7 +162,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	layerDir := e.getLayerDir(idx)
 	desc, err := getFileDesc(path.Join(layerDir, commitFile), false)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get descriptor for layer %d", idx)
+		return fmt.Errorf("failed to get descriptor for layer %d: %w", idx, err)
 	}
 	if e.overlaybdLayers[idx].fromDedup {
 		// validate that the layer digests match if the layer is from dedup
@@ -178,7 +178,7 @@ func (e *overlaybdBuilderEngine) UploadLayer(ctx context.Context, idx int) error
 	}
 	if !e.noUpload {
 		if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, commitFile), desc); err != nil {
-			return errors.Wrapf(err, "failed to upload layer %d", idx)
+			return fmt.Errorf("failed to upload layer %d: %w", idx, err)
 		}
 	}
 	e.overlaybdLayers[idx].desc = desc
@@ -406,7 +406,7 @@ func (e *overlaybdBuilderEngine) DownloadConvertedLayer(ctx context.Context, idx
 	if err != nil {
 		// We should remove the commit file if the download failed to allow for fallback conversion
 		os.Remove(targetFile) // Remove any file that may have failed to download
-		return errors.Wrapf(err, "failed to download layer %d", idx)
+		return fmt.Errorf("failed to download layer %d: %w", idx, err)
 	}
 	// Mark that this layer is from dedup
 	e.overlaybdLayers[idx].fromDedup = true
@@ -425,7 +425,7 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 	tarFile := path.Join(e.workDir, "ext4_64.tar")
 	fdes, err := os.Create(tarFile)
 	if err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to create file %s", tarFile)
+		return specs.Descriptor{}, fmt.Errorf("failed to create file %s: %w", tarFile, err)
 	}
 	digester := digest.Canonical.Digester()
 	countWriter := &writeCountWrapper{w: io.MultiWriter(fdes, digester.Hash())}
@@ -433,11 +433,11 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 
 	fsrc, err := os.Open(overlaybdBaseLayer)
 	if err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to open %s", overlaybdBaseLayer)
+		return specs.Descriptor{}, fmt.Errorf("failed to open %s: %w", overlaybdBaseLayer, err)
 	}
 	fstat, err := os.Stat(overlaybdBaseLayer)
 	if err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to get info of %s", overlaybdBaseLayer)
+		return specs.Descriptor{}, fmt.Errorf("failed to get info of %s: %w", overlaybdBaseLayer, err)
 	}
 
 	if err := tarWriter.WriteHeader(&tar.Header{
@@ -446,13 +446,13 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 		Size:     fstat.Size(),
 		Typeflag: tar.TypeReg,
 	}); err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to write tar header")
+		return specs.Descriptor{}, fmt.Errorf("failed to write tar header: %w", err)
 	}
 	if _, err := io.Copy(tarWriter, bufio.NewReader(fsrc)); err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to copy IO")
+		return specs.Descriptor{}, fmt.Errorf("failed to copy IO: %w", err)
 	}
 	if err = tarWriter.Close(); err != nil {
-		return specs.Descriptor{}, errors.Wrapf(err, "failed to close tar file")
+		return specs.Descriptor{}, fmt.Errorf("failed to close tar file: %w", err)
 	}
 
 	baseDesc := specs.Descriptor{
@@ -467,7 +467,7 @@ func (e *overlaybdBuilderEngine) uploadBaseLayer(ctx context.Context) (specs.Des
 	}
 	if !e.noUpload {
 		if err = uploadBlob(ctx, e.pusher, tarFile, baseDesc); err != nil {
-			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload baselayer")
+			return specs.Descriptor{}, fmt.Errorf("failed to upload baselayer: %w", err)
 		}
 		logrus.Infof("baselayer uploaded")
 	}

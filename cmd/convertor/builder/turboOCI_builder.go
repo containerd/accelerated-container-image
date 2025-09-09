@@ -32,7 +32,6 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -115,7 +114,7 @@ func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 		return err
 	}
 	if err := e.createIdentifier(idx); err != nil {
-		return errors.Wrapf(err, "failed to create identifier %q", tociIdentifier)
+		return fmt.Errorf("failed to create identifier %q: %w", tociIdentifier, err)
 	}
 	files := []string{
 		path.Join(layerDir, fsMetaFile),
@@ -127,7 +126,7 @@ func (e *turboOCIBuilderEngine) BuildLayer(ctx context.Context, idx int) error {
 		files = append(files, gzipIndexPath)
 	}
 	if err := buildArchiveFromFiles(ctx, path.Join(layerDir, tociLayerTar), compression.Gzip, files...); err != nil {
-		return errors.Wrapf(err, "failed to create turboOCIv1 archive for layer %d", idx)
+		return fmt.Errorf("failed to create turboOCIv1 archive for layer %d: %w", idx, err)
 	}
 	e.overlaybdConfig.Lowers = append(e.overlaybdConfig.Lowers, sn.OverlayBDBSConfigLower{
 		TargetFile:   path.Join(layerDir, "layer.tar"),
@@ -144,7 +143,7 @@ func (e *turboOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error 
 	layerDir := e.getLayerDir(idx)
 	desc, err := getFileDesc(path.Join(layerDir, tociLayerTar), false)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get descriptor for layer %d", idx)
+		return fmt.Errorf("failed to get descriptor for layer %d: %w", idx, err)
 	}
 	desc.MediaType = e.mediaTypeImageLayerGzip()
 	desc.Annotations = map[string]string{
@@ -169,7 +168,7 @@ func (e *turboOCIBuilderEngine) UploadLayer(ctx context.Context, idx int) error 
 	}
 	desc.Annotations[label.TurboOCIMediaType] = targetMediaType
 	if err := uploadBlob(ctx, e.pusher, path.Join(layerDir, tociLayerTar), desc); err != nil {
-		return errors.Wrapf(err, "failed to upload layer %d", idx)
+		return fmt.Errorf("failed to upload layer %d: %w", idx, err)
 	}
 	e.tociLayers[idx] = desc
 	return nil
@@ -180,7 +179,7 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) (specs.Descript
 		layerDir := e.getLayerDir(idx)
 		uncompress, err := getFileDesc(path.Join(layerDir, tociLayerTar), true)
 		if err != nil {
-			return specs.Descriptor{}, errors.Wrapf(err, "failed to get uncompressed descriptor for layer %d", idx)
+			return specs.Descriptor{}, fmt.Errorf("failed to get uncompressed descriptor for layer %d: %w", idx, err)
 		}
 		e.manifest.Layers[idx] = e.tociLayers[idx]
 		e.config.RootFS.DiffIDs[idx] = uncompress.Digest
@@ -197,7 +196,7 @@ func (e *turboOCIBuilderEngine) UploadImage(ctx context.Context) (specs.Descript
 	}
 	if !e.mkfs {
 		if err := uploadBlob(ctx, e.pusher, overlaybdBaseLayer, baseDesc); err != nil {
-			return specs.Descriptor{}, errors.Wrapf(err, "failed to upload baselayer %q", overlaybdBaseLayer)
+			return specs.Descriptor{}, fmt.Errorf("failed to upload baselayer %q: %w", overlaybdBaseLayer, err)
 		}
 		e.manifest.Layers = append([]specs.Descriptor{baseDesc}, e.manifest.Layers...)
 		e.config.RootFS.DiffIDs = append([]digest.Digest{baseDesc.Digest}, e.config.RootFS.DiffIDs...)
@@ -260,7 +259,7 @@ func (e *turboOCIBuilderEngine) createIdentifier(idx int) error {
 	targetFile := path.Join(e.getLayerDir(idx), tociIdentifier)
 	file, err := os.Create(targetFile)
 	if err != nil {
-		return errors.Wrapf(err, "failed to create identifier file %q", tociIdentifier)
+		return fmt.Errorf("failed to create identifier file %q: %w", tociIdentifier, err)
 	}
 	defer file.Close()
 	return nil

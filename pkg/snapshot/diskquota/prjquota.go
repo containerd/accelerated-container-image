@@ -27,7 +27,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd/v2/core/mount"
@@ -70,12 +69,12 @@ func SetDiskQuotaBytes(dir string, limit int64, quotaID uint32) error {
 	}
 
 	if err := checkDevLimit(mountPoint, uint64(limit)); err != nil {
-		return errors.Wrapf(err, "failed to check device limit, dir: (%s), limit: (%d)kb", dir, limit)
+		return fmt.Errorf("failed to check device limit, dir: (%s), limit: (%d)kb: %w", dir, limit, err)
 	}
 
 	err = driver.SetFileAttr(dir, quotaID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to set subtree, dir: (%s), quota id: (%d)", dir, quotaID)
+		return fmt.Errorf("failed to set subtree, dir: (%s), quota id: (%d): %w", dir, quotaID, err)
 	}
 
 	return driver.setQuota(quotaID, uint64(limit/1024), mountPoint)
@@ -110,16 +109,16 @@ func (quota *PrjQuotaDriver) SetDiskQuota(dir string, size string, quotaID uint3
 
 	limit, err := units.RAMInBytes(size)
 	if err != nil {
-		return errors.Wrapf(err, "failed to change size: (%s) to kilobytes", size)
+		return fmt.Errorf("failed to change size: (%s) to kilobytes: %w", size, err)
 	}
 
 	if err := checkDevLimit(mountPoint, uint64(limit)); err != nil {
-		return errors.Wrapf(err, "failed to check device limit, dir: (%s), limit: (%d)kb", dir, limit)
+		return fmt.Errorf("failed to check device limit, dir: (%s), limit: (%d)kb: %w", dir, limit, err)
 	}
 
 	err = quota.SetFileAttr(dir, quotaID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to set subtree, dir: (%s), quota id: (%d)", dir, quotaID)
+		return fmt.Errorf("failed to set subtree, dir: (%s), quota id: (%d): %w", dir, quotaID, err)
 	}
 
 	return quota.setQuota(quotaID, uint64(limit/1024), mountPoint)
@@ -128,7 +127,7 @@ func (quota *PrjQuotaDriver) SetDiskQuota(dir string, size string, quotaID uint3
 func (quota *PrjQuotaDriver) CheckMountpoint(dir string) (string, bool, error) {
 	mountInfo, err := mount.Lookup(dir)
 	if err != nil {
-		return "", false, errors.Wrapf(err, "failed to get mount info, dir(%s)", dir)
+		return "", false, fmt.Errorf("failed to get mount info, dir(%s): %w", dir, err)
 	}
 	if strings.Contains(mountInfo.VFSOptions, "prjquota") {
 		return mountInfo.Mountpoint, true, nil
@@ -149,8 +148,8 @@ func (quota *PrjQuotaDriver) setQuota(quotaID uint32, blockLimit uint64, mountPo
 	// logrus.Infof("setquota -P %s 0 %s 0 0 %s", quotaIDStr, blockLimitStr, mountPoint)
 	stdout, stderr, err := ExecSync("setquota", "-P", quotaIDStr, "0", blockLimitStr, "0", "0", mountPoint)
 	if err != nil {
-		return errors.Wrapf(err, "failed to set quota, mountpoint: (%s), quota id: (%d), quota: (%d kbytes), stdout: (%s), stderr: (%s)",
-			mountPoint, quotaID, blockLimit, stdout, stderr)
+		return fmt.Errorf("failed to set quota, mountpoint: (%s), quota id: (%d), quota: (%d kbytes), stdout: (%s), stderr: (%s): %w",
+			mountPoint, quotaID, blockLimit, stdout, stderr, err)
 	}
 	return nil
 }
@@ -191,7 +190,7 @@ func (quota *PrjQuotaDriver) GetNextQuotaID() (quotaID uint32, err error) {
 	if quota.LastID == 0 {
 		quota.QuotaIDs, quota.LastID, err = loadQuotaIDs("-Pan")
 		if err != nil {
-			return 0, errors.Wrap(err, "failed to load quota list")
+			return 0, fmt.Errorf("failed to load quota list: %w", err)
 		}
 	}
 	id := quota.LastID
@@ -207,7 +206,7 @@ func (quota *PrjQuotaDriver) GetNextQuotaID() (quotaID uint32, err error) {
 			logrus.Infof("reach the maximum, try to reuse quotaID")
 			quota.QuotaIDs, quota.LastID, err = loadQuotaIDs("-Pan")
 			if err != nil {
-				return 0, errors.Wrap(err, "failed to load quota list")
+				return 0, fmt.Errorf("failed to load quota list: %w", err)
 			}
 			id = quota.LastID
 		}
@@ -226,8 +225,7 @@ func (quota *PrjQuotaDriver) SetFileAttr(dir string, quotaID uint32) error {
 	// ext4 use chattr to change project id
 	stdout, stderr, err := ExecSync("chattr", "-p", strID, "+P", dir)
 	if err != nil {
-		return errors.Wrapf(err, "failed to set file(%s) quota id(%s), stdout: (%s), stderr: (%s)",
-			dir, strID, stdout, stderr)
+		return fmt.Errorf("failed to set file(%s) quota id(%s), stdout: (%s), stderr: (%s): %w", dir, strID, stdout, stderr, err)
 	}
 	logrus.Debugf("set quota id (%s) to file (%s) attr", strID, dir)
 

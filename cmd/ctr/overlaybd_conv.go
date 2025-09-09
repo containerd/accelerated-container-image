@@ -17,6 +17,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/containerd/containerd/v2/core/images/converter"
 	"github.com/containerd/containerd/v2/core/leases"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/pkg/errors"
 	"github.com/urfave/cli/v2"
 )
 
@@ -83,7 +83,7 @@ var convertCommand = &cli.Command{
 			leases.WithExpiration(1*time.Hour),
 		)
 		if err != nil {
-			return errors.Wrap(err, "failed to create lease")
+			return fmt.Errorf("failed to create lease: %w", err)
 		}
 		defer done(ctx)
 
