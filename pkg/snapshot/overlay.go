@@ -36,7 +36,6 @@ import (
 	mylog "github.com/containerd/accelerated-container-image/internal/log"
 	"github.com/containerd/accelerated-container-image/pkg/metrics"
 	"github.com/data-accelerator/zdfs"
-	"github.com/sirupsen/logrus"
 
 	"github.com/containerd/containerd/v2/core/mount"
 	"github.com/containerd/containerd/v2/core/snapshots"
@@ -249,7 +248,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 	}
 
 	if bootConfig.MirrorRegistry != nil {
-		logrus.Infof("mirror Registry: %+v", bootConfig.MirrorRegistry)
+		log.L.Infof("mirror Registry: %+v", bootConfig.MirrorRegistry)
 	}
 
 	return &snapshotter{
@@ -679,7 +678,7 @@ func (o *snapshotter) Prepare(ctx context.Context, key, parent string, opts ...s
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Prepare").Inc()
 		} else {
-			log.G(ctx).WithFields(logrus.Fields{
+			log.G(ctx).WithFields(log.Fields{
 				"d":      time.Since(start),
 				"key":    key,
 				"parent": parent,
@@ -717,7 +716,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Mounts").Inc()
 		} else {
-			log.G(ctx).WithFields(logrus.Fields{
+			log.G(ctx).WithFields(log.Fields{
 				"d":   time.Since(start),
 				"key": key,
 			}).Infof("Mounts")
@@ -792,7 +791,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		if retErr != nil {
 			metrics.GRPCErrCount.WithLabelValues("Commit").Inc()
 		} else {
-			log.G(ctx).WithFields(logrus.Fields{
+			log.G(ctx).WithFields(log.Fields{
 				"d":    time.Since(start),
 				"name": name,
 				"key":  key,

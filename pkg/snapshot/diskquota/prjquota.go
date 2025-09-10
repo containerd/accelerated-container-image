@@ -27,9 +27,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sirupsen/logrus"
-
 	"github.com/containerd/containerd/v2/core/mount"
+	"github.com/containerd/log"
 	"github.com/docker/go-units"
 )
 
@@ -145,7 +144,7 @@ func (quota *PrjQuotaDriver) setQuota(quotaID uint32, blockLimit uint64, mountPo
 	blockLimitStr := strconv.FormatUint(blockLimit, 10)
 
 	// ext4 set project quota limit
-	// logrus.Infof("setquota -P %s 0 %s 0 0 %s", quotaIDStr, blockLimitStr, mountPoint)
+	// log.L.Infof("setquota -P %s 0 %s 0 0 %s", quotaIDStr, blockLimitStr, mountPoint)
 	stdout, stderr, err := ExecSync("setquota", "-P", quotaIDStr, "0", blockLimitStr, "0", "0", mountPoint)
 	if err != nil {
 		return fmt.Errorf("failed to set quota, mountpoint: (%s), quota id: (%d), quota: (%d kbytes), stdout: (%s), stderr: (%s): %w",
@@ -203,7 +202,7 @@ func (quota *PrjQuotaDriver) GetNextQuotaID() (quotaID uint32, err error) {
 			if id <= QuotaMaxID {
 				break
 			}
-			logrus.Infof("reach the maximum, try to reuse quotaID")
+			log.L.Infof("reach the maximum, try to reuse quotaID")
 			quota.QuotaIDs, quota.LastID, err = loadQuotaIDs("-Pan")
 			if err != nil {
 				return 0, fmt.Errorf("failed to load quota list: %w", err)
@@ -227,7 +226,7 @@ func (quota *PrjQuotaDriver) SetFileAttr(dir string, quotaID uint32) error {
 	if err != nil {
 		return fmt.Errorf("failed to set file(%s) quota id(%s), stdout: (%s), stderr: (%s): %w", dir, strID, stdout, stderr, err)
 	}
-	logrus.Debugf("set quota id (%s) to file (%s) attr", strID, dir)
+	log.L.Debugf("set quota id (%s) to file (%s) attr", strID, dir)
 
 	return nil
 }
