@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	sn "github.com/containerd/accelerated-container-image/pkg/types"
@@ -285,7 +286,24 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 		return fmt.Errorf("failed to write target max_data_area_mb for %s: max_data_area_mb=%d: %w", targetPath, obdMaxDataAreaMB, err)
 	}
 
-	err = os.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
+	// enable target may fails with EAGAIN, so we need to retry
+	for retry := 0; retry < 100; retry++ {
+		err = os.WriteFile(path.Join(targetPath, "enable"), ([]byte)("1"), 0666)
+		if err != nil {
+			perror, ok := err.(*os.PathError)
+			if ok {
+				if perror.Err == syscall.EAGAIN {
+					log.G(ctx).Infof("write %s returned EAGAIN, retry", targetPath)
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
+			}
+			return fmt.Errorf(err, "failed to write enable for %s", targetPath)
+		} else {
+			break
+		}
+	}
+
 	if err != nil {
 		// read the init-debug.log for readable
 		debugLogPath := o.overlaybdInitDebuglogPath(snID)
