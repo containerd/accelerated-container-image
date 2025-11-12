@@ -656,6 +656,7 @@ func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, wr
 		configJSON.Upper = sn.OverlayBDBSConfigUpper{
 			Index: o.overlaybdWritableIndexPath(id),
 			Data:  o.overlaybdWritableDataPath(id),
+			Vsize: vsizeGB,
 		}
 	}
 
