@@ -56,11 +56,11 @@ const (
 	// hba number used to create tcmu devices in configfs
 	// all overlaybd devices are configured in /sys/kernel/config/target/core/user_999999999/
 	// devices ares identified by their snID /sys/kernel/config/target/core/user_999999999/dev_$snID
-	obdHbaNum = 999999999
+	obdHbaNumDefault = 999999999
 
 	// Naa prefix for loopback devices in configfs
 	// for example snID 128, the loopback device config in /sys/kernel/config/target/loopback/naa.1990000000000128
-	obdLoopNaaPrefix = 199
+	obdLoopNaaPrefixDefault = 199
 
 	// param used to restrict tcmu data area size
 	// it is worked by setting max_data_area_mb for devices in configfs.
@@ -71,6 +71,23 @@ const (
 )
 
 type mountMatcherFunc func(fields []string, separatorIndex int) bool
+
+type AttachDeviceParams struct {
+	id     string
+	tenant int // default -1
+
+	configPath string // config.v1.json
+	resultFile string // init-debug.log
+}
+
+func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string) *AttachDeviceParams {
+	return &AttachDeviceParams{
+		id:         id,
+		tenant:     tenant,
+		configPath: configPath,
+		resultFile: resultFile,
+	}
+}
 
 func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
 	matcher := func(fields []string, separatorIndex int) bool {
@@ -173,8 +190,46 @@ func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, mat
 	return false, nil
 }
 
-// unmountAndDetachBlockDevice will do nothing if the device is already destroyed
-func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID string, snKey string) (err error) {
+func DetachDevice(ctx context.Context, snID string, tenant int) (err error) {
+
+	loopDevID := overlaybdLoopbackDeviceID(tenant, snID)
+	lunPath := overlaybdLoopbackDeviceLunPath(loopDevID)
+	linkPath := path.Join(lunPath, "dev_"+snID)
+
+	err = os.RemoveAll(linkPath)
+	if err != nil {
+		return fmt.Errorf("failed to remove loopback link %s: %w", linkPath, err)
+	}
+
+	err = os.RemoveAll(lunPath)
+	if err != nil {
+		return fmt.Errorf("failed to remove loopback lun %s: %w", lunPath, err)
+	}
+
+	loopDevPath := overlaybdLoopbackDevicePath(loopDevID)
+	tpgtPath := path.Join(loopDevPath, "tpgt_1")
+
+	err = os.RemoveAll(tpgtPath)
+	if err != nil {
+		return fmt.Errorf("failed to remove loopback tgpt %s: %w", tpgtPath, err)
+	}
+
+	err = os.RemoveAll(loopDevPath)
+	if err != nil {
+		return fmt.Errorf("failed to remove loopback dir %s: %w", loopDevPath, err)
+	}
+
+	targetPath := overlaybdTargetPath(obdHbaNum(tenant), snID)
+
+	err = os.RemoveAll(targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to remove target dir %s: %w", targetPath, err)
+	}
+	return nil
+}
+
+// UnmountAndDetachBlockDevice will do nothing if the device is already destroyed
+func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID string) (err error) {
 	devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
 	if err != nil {
 		log.G(ctx).Errorf("read device name failed: %s, err: %v", o.overlaybdBackstoreMarkFile(snID), err)
@@ -194,42 +249,13 @@ func (o *snapshotter) unmountAndDetachBlockDevice(ctx context.Context, snID stri
 	if err := mount.UnmountAll(mountPoint, 0); err != nil {
 		return fmt.Errorf("failed to umount %s: %w", mountPoint, err)
 	}
-
-	loopDevID := o.overlaybdLoopbackDeviceID(snID)
-	lunPath := o.overlaybdLoopbackDeviceLunPath(loopDevID)
-	linkPath := path.Join(lunPath, "dev_"+snID)
-
-	err = os.RemoveAll(linkPath)
+	err = DetachDevice(ctx, snID, o.tenant)
 	if err != nil {
-		return fmt.Errorf("failed to remove loopback link %s: %w", linkPath, err)
-	}
-
-	err = os.RemoveAll(lunPath)
-	if err != nil {
-		return fmt.Errorf("failed to remove loopback lun %s: %w", lunPath, err)
-	}
-
-	loopDevPath := o.overlaybdLoopbackDevicePath(loopDevID)
-	tpgtPath := path.Join(loopDevPath, "tpgt_1")
-
-	err = os.RemoveAll(tpgtPath)
-	if err != nil {
-		return fmt.Errorf("failed to remove loopback tgpt %s: %w", tpgtPath, err)
-	}
-
-	err = os.RemoveAll(loopDevPath)
-	if err != nil {
-		return fmt.Errorf("failed to remove loopback dir %s: %w", loopDevPath, err)
-	}
-
-	targetPath := o.overlaybdTargetPath(snID)
-
-	err = os.RemoveAll(targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to remove target dir %s: %w", targetPath, err)
+		return err
 	}
 	log.G(ctx).Infof("destroy overlaybd device success(sn: %s): %s", snID, devName)
 	return nil
+
 }
 
 // determine whether the block device represented
@@ -249,27 +275,23 @@ func IsErofsFilesystem(path string) bool {
 	return binary.LittleEndian.Uint32(byte4) == 0xe0f5e1e2
 }
 
-// attachAndMountBlockDevice
-//
-// TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
+func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName string, e error) {
 
-	log.G(ctx).Debugf("lookup device mountpoint(%s) if exists before attach.", snID)
-	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
-		return nil
-	} else {
-		log.G(ctx).Infof(err.Error())
-	}
+	devName = ""
 
-	targetPath := o.overlaybdTargetPath(snID)
+	snID := params.id
+	tenant := params.tenant
+	configPath := params.configPath
+
+	targetPath := overlaybdTargetPath(obdHbaNum(tenant), snID)
 	err := os.MkdirAll(targetPath, 0700)
 	if err != nil {
-		return fmt.Errorf("failed to create target dir for %s: %w", targetPath, err)
+		return devName, fmt.Errorf("failed to create target dir for %s: %w", targetPath, err)
 	}
 
 	defer func() {
-		if retErr != nil {
-			log.G(ctx).Error(retErr.Error())
+		if e != nil {
+			log.G(ctx).Error(e.Error())
 			rerr := os.RemoveAll(targetPath)
 			if rerr != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean target dir %s", targetPath)
@@ -277,13 +299,13 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 		}
 	}()
 
-	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", o.overlaybdConfPath(snID))), 0666); err != nil {
-		return fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, o.overlaybdConfPath(snID), err)
+	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", configPath)), 0666); err != nil {
+		return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, configPath, err)
 	}
 
 	err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
 	if err != nil {
-		return fmt.Errorf("failed to write target max_data_area_mb for %s: max_data_area_mb=%d: %w", targetPath, obdMaxDataAreaMB, err)
+		return devName, fmt.Errorf("failed to write target max_data_area_mb for %s: max_data_area_mb=%d: %w", targetPath, obdMaxDataAreaMB, err)
 	}
 
 	// enable target may fails with EAGAIN, so we need to retry
@@ -298,7 +320,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 					continue
 				}
 			}
-			return fmt.Errorf("failed to write enable for %s: %w", targetPath, err)
+			return devName, fmt.Errorf("failed to write enable for %s: %w", targetPath, err)
 		} else {
 			break
 		}
@@ -306,11 +328,11 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 
 	if err != nil {
 		// read the init-debug.log for readable
-		debugLogPath := o.overlaybdInitDebuglogPath(snID)
+		debugLogPath := params.resultFile
 		if data, derr := os.ReadFile(debugLogPath); derr == nil {
-			return fmt.Errorf("failed to enable target for %s, %s", targetPath, data)
+			return devName, fmt.Errorf("failed to enable target for %s, %s", targetPath, data)
 		}
-		return fmt.Errorf("failed to enable target for %s: %w", targetPath, err)
+		return devName, fmt.Errorf("failed to enable target for %s: %w", targetPath, err)
 	}
 
 	// fixed by fuweid
@@ -318,26 +340,26 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 		path.Join(targetPath, "attrib", "cmd_time_out"),
 		([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666)
 	if err != nil {
-		return fmt.Errorf("failed to update cmd_time_out: %w", err)
+		return devName, fmt.Errorf("failed to update cmd_time_out: %w", err)
 	}
 
-	loopDevID := o.overlaybdLoopbackDeviceID(snID)
-	loopDevPath := o.overlaybdLoopbackDevicePath(loopDevID)
+	loopDevID := overlaybdLoopbackDeviceID(tenant, snID)
+	loopDevPath := overlaybdLoopbackDevicePath(loopDevID)
 
 	err = os.MkdirAll(loopDevPath, 0700)
 	if err != nil {
-		return fmt.Errorf("failed to create loopback dir %s: %w", loopDevPath, err)
+		return devName, fmt.Errorf("failed to create loopback dir %s: %w", loopDevPath, err)
 	}
 
 	tpgtPath := path.Join(loopDevPath, "tpgt_1")
-	lunPath := o.overlaybdLoopbackDeviceLunPath(loopDevID)
+	lunPath := overlaybdLoopbackDeviceLunPath(loopDevID)
 	err = os.MkdirAll(lunPath, 0700)
 	if err != nil {
-		return fmt.Errorf("failed to create loopback lun dir %s: %w", lunPath, err)
+		return devName, fmt.Errorf("failed to create loopback lun dir %s: %w", lunPath, err)
 	}
 
 	defer func() {
-		if retErr != nil {
+		if e != nil {
 			rerr := os.RemoveAll(lunPath)
 			if rerr != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback lun %s", lunPath)
@@ -358,17 +380,17 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	nexusPath := path.Join(tpgtPath, "nexus")
 	err = os.WriteFile(nexusPath, ([]byte)(loopDevID), 0666)
 	if err != nil {
-		return fmt.Errorf("failed to write loopback nexus %s: %w", nexusPath, err)
+		return devName, fmt.Errorf("failed to write loopback nexus %s: %w", nexusPath, err)
 	}
 
 	linkPath := path.Join(lunPath, "dev_"+snID)
 	err = os.Symlink(targetPath, linkPath)
 	if err != nil {
-		return fmt.Errorf("failed to create loopback link %s: %w", linkPath, err)
+		return devName, fmt.Errorf("failed to create loopback link %s: %w", linkPath, err)
 	}
 
 	defer func() {
-		if retErr != nil {
+		if e != nil {
 			rerr := os.RemoveAll(linkPath)
 			if err != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback link %s", linkPath)
@@ -379,128 +401,164 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	devAddressPath := path.Join(tpgtPath, "address")
 	bytes, err := os.ReadFile(devAddressPath)
 	if err != nil {
-		return fmt.Errorf("failed to read loopback address for %s: %w", devAddressPath, err)
+		return devName, fmt.Errorf("failed to read loopback address for %s: %w", devAddressPath, err)
 	}
 	deviceNumber := strings.TrimSuffix(string(bytes), "\n")
 
 	// The device doesn't show up instantly. Need retry here.
-	var lastErr error = nil
 	for retry := 0; retry < maxAttachAttempts; retry++ {
-		devDirs, err := os.ReadDir(o.scsiBlockDevicePath(deviceNumber))
+		devDirs, err := os.ReadDir(scsiBlockDevicePath(deviceNumber))
 		if err != nil {
-			lastErr = err
+			e = err
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		if len(devDirs) == 0 {
-			lastErr = fmt.Errorf("empty device found")
+			e = fmt.Errorf("empty device found")
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 
 		for _, dev := range devDirs {
-			device := fmt.Sprintf("/dev/%s", dev.Name())
-
+			device := fmt.Sprintf("/dev/%s", dev.Name()) // /dev/sdX
 			if err := os.WriteFile(path.Join("/sys/block", dev.Name(), "device", "timeout"),
 				([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
-				lastErr = fmt.Errorf("failed to set timeout for %s: %w", device, err)
+				e = fmt.Errorf("failed to set timeout for %s: %w", device, err)
 				time.Sleep(10 * time.Millisecond)
 				break // retry
 			}
-			devSavedPath := o.overlaybdBackstoreMarkFile(snID)
-			if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
-				return fmt.Errorf("failed to create backstore mark file of snapshot %s: %w", snID, err)
-			}
-			log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
-
-			options := strings.Split(fsType, ";")
-			fstype := options[0]
-
-			if IsErofsFilesystem(device) {
-				fstype = "erofs"
-			}
-
-			if mkfs {
-				args := []string{"-t", fstype}
-				if len(options) > 2 {
-					if options[2] != "" {
-						mkfsOpts := strings.Split(options[2], " ")
-						args = append(args, mkfsOpts...)
-					}
-				} else {
-					switch fstype {
-					case "ext4":
-						args = append(args, "-O", "^has_journal,sparse_super,flex_bg", "-G", "1", "-E", "discard", "-F")
-					case "xfs":
-						args = append(args, "-f", "-l", "size=4m", "-m", "crc=0")
-					case "f2fs":
-						args = append(args, "-S", "-w", "4096")
-					case "ntfs":
-						args = append(args, "-F", "-f")
-					default:
-					}
-				}
-				args = append(args, device)
-				log.G(ctx).Infof("fs type: %s, mkfs options: %v", fstype, args)
-				out, err := exec.CommandContext(ctx, "mkfs", args...).CombinedOutput()
-				if err != nil {
-					return fmt.Errorf("failed to mkfs for dev %s: %s: %w", device, out, err)
-				}
-			}
-
-			// mount device
-			if writable != RwDev {
-				var mountPoint = o.overlaybdMountpoint(snID)
-				mountOpts := ""
-				if len(options) > 1 {
-					mountOpts = options[1]
-				} else {
-					switch fstype {
-					case "ext4":
-						mountOpts = "discard"
-					case "xfs":
-						mountOpts = "nouuid,discard"
-					default:
-					}
-				}
-				if fstype != "ntfs" {
-					var mountFlag uintptr = unix.MS_RDONLY
-					if writable != RoDir {
-						mountFlag = 0
-					}
-					log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s, mountpoint: %s",
-						fstype, mountOpts, writable, mountPoint)
-					if err := unix.Mount(device, mountPoint, fstype, mountFlag, mountOpts); err != nil {
-						lastErr = fmt.Errorf("failed to mount %s to %s: %w", device, mountPoint, err)
-						time.Sleep(10 * time.Millisecond)
-						break // retry
-					}
-				} else {
-					args := []string{"-t", fstype}
-					if writable == RoDir {
-						args = append(args, "-r")
-					}
-					if mountOpts != "" {
-						args = append(args, "-o", mountOpts)
-					}
-					args = append(args, device, mountPoint)
-					log.G(ctx).Infof("fs type: %s, mount options: %v", fstype, args)
-					out, err := exec.CommandContext(ctx, "mount", args...).CombinedOutput()
-					if err != nil {
-						lastErr = fmt.Errorf("failed to mount for dev %s: %s: %w", device, out, err)
-						time.Sleep(10 * time.Millisecond)
-						break // retry
-					}
-				}
-			}
-			return nil
+			devName = device
+			break
 		}
 	}
-	return lastErr
+	log.G(ctx).Infof("Device has been created. {id: %s: dev: %s}", snID, devName)
+	return devName, nil
 }
 
-// constructOverlayBDSpec generates the config spec for overlaybd target.
-func (o *snapshotter) constructOverlayBDSpec(ctx context.Context, key string, writable bool) error {
+// attachAndMountBlockDevice
+//
+// TODO(fuweid): need to track the middle state if the process has been killed.
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
+
+	configPath := o.overlaybdConfPath(snID)
+
+	log.G(ctx).Infof("attach block device. {id: %s, config: %s}", snID, configPath)
+	log.G(ctx).Debugf("lookup device mountpoint(%s) if exists before attach.", snID)
+	if err := lookup(o.overlaybdMountpoint(snID)); err == nil {
+		return nil
+	} else {
+		log.G(ctx).Infof(err.Error())
+	}
+	device, err := AttachDevice(ctx,
+		NewAttachDeviceParams(
+			snID,
+			o.tenant,
+			configPath,
+			o.overlaybdInitDebuglogPath(snID),
+		),
+	)
+	if err != nil {
+		return err
+	}
+	devSavedPath := o.overlaybdBackstoreMarkFile(snID)
+	if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
+		// o.DetachDevice(ctx, snID)
+		return fmt.Errorf("failed to create backstore mark file of snapshot %s: %w", snID, err)
+	}
+	log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
+	options := strings.Split(fsType, ";")
+	fstype := options[0]
+
+	if IsErofsFilesystem(device) {
+		fstype = "erofs"
+	}
+
+	if mkfs {
+		args := []string{"-t", fstype}
+		if len(options) > 2 {
+			if options[2] != "" {
+				mkfsOpts := strings.Split(options[2], " ")
+				args = append(args, mkfsOpts...)
+			}
+		} else {
+			switch fstype {
+			case "ext4":
+				args = append(args, "-O", "^has_journal,sparse_super,flex_bg", "-G", "1", "-E", "discard", "-F")
+			case "xfs":
+				args = append(args, "-f", "-l", "size=4m", "-m", "crc=0")
+			case "f2fs":
+				args = append(args, "-S", "-w", "4096")
+			case "ntfs":
+				args = append(args, "-F", "-f")
+			default:
+			}
+		}
+		args = append(args, device)
+		log.G(ctx).Infof("fs type: %s, mkfs options: %v", fstype, args)
+		out, err := exec.CommandContext(ctx, "mkfs", args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to mkfs for dev %s: %s: %w", device, out, err)
+		}
+	}
+	retErr = nil
+	// mount device
+	if writable != RwDev {
+		var mountPoint = o.overlaybdMountpoint(snID)
+		mountOpts := ""
+		if len(options) > 1 {
+			mountOpts = options[1]
+		} else {
+			switch fstype {
+			case "ext4":
+				mountOpts = "discard"
+			case "xfs":
+				mountOpts = "nouuid,discard"
+			default:
+			}
+		}
+		if fstype != "ntfs" {
+			var mountFlag uintptr = unix.MS_RDONLY
+			if writable != RoDir {
+				mountFlag = 0
+			}
+			log.G(ctx).Infof("fs type: %s, mount options: %s, rw: %s, mountpoint: %s",
+				fstype, mountOpts, writable, mountPoint)
+			for retry := 0; retry < maxAttachAttempts; retry++ {
+				if err := unix.Mount(device, mountPoint, fstype, mountFlag, mountOpts); err != nil {
+					retErr = fmt.Errorf("failed to mount %s to %s: %w", device, mountPoint, err)
+					time.Sleep(10 * time.Millisecond)
+					continue // retry
+				}
+				retErr = nil
+				break
+			}
+		} else {
+			args := []string{"-t", fstype}
+			if writable == RoDir {
+				args = append(args, "-r")
+			}
+			if mountOpts != "" {
+				args = append(args, "-o", mountOpts)
+			}
+			args = append(args, device, mountPoint)
+			log.G(ctx).Infof("fs type: %s, mount options: %v", fstype, args)
+			for retry := 0; retry < maxAttachAttempts; retry++ {
+				out, err := exec.CommandContext(ctx, "mount", args...).CombinedOutput()
+				if err != nil {
+					retErr = fmt.Errorf("failed to mount for dev %s: %s: %w", device, out, err)
+					time.Sleep(10 * time.Millisecond)
+					continue // retry
+				}
+				retErr = nil
+				break
+			}
+		}
+	}
+	return retErr
+}
+
+// ConstructOverlayBDSpec generates the config spec for overlaybd target.
+func (o *snapshotter) ConstructOverlayBDSpec(ctx context.Context, key string, writable bool) error {
 	id, info, _, err := storage.GetInfo(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to get info for snapshot %s: %w", key, err)
@@ -792,38 +850,38 @@ func (o *snapshotter) sealWritableOverlaybd(ctx context.Context, snID string) (r
 	return utils.Seal(ctx, o.blockPath(snID), o.upperPath(snID))
 }
 
-func (o *snapshotter) obdHbaNum() int {
-	if o.tenant == -1 {
-		return obdHbaNum
+func obdHbaNum(tenant int) int {
+	if tenant == -1 {
+		return obdHbaNumDefault
 	}
-	return o.tenant
+	return tenant
 }
 
-func (o *snapshotter) obdLoopNaaPrefix() int {
-	if o.tenant == -1 {
-		return obdLoopNaaPrefix
+func obdLoopNaaPrefix(tenant int) int {
+	if tenant == -1 {
+		return obdLoopNaaPrefixDefault
 	}
-	return o.tenant%100 + 100 // keep first num is '1'
+	return tenant%100 + 100 // keep first num is '1'
 }
 
-func (o *snapshotter) overlaybdTargetPath(id string) string {
-	return fmt.Sprintf("/sys/kernel/config/target/core/user_%d/dev_%s", o.obdHbaNum(), id)
+func overlaybdTargetPath(tenant int, id string) string {
+	return fmt.Sprintf("/sys/kernel/config/target/core/user_%d/dev_%s", tenant, id)
 }
 
-func (o *snapshotter) overlaybdLoopbackDeviceID(id string) string {
+func overlaybdLoopbackDeviceID(tenant int, id string) string {
 	paddings := strings.Repeat("0", 13-len(id))
-	return fmt.Sprintf("naa.%03d%s%s", o.obdLoopNaaPrefix(), paddings, id)
+	return fmt.Sprintf("naa.%03d%s%s", obdLoopNaaPrefix(tenant), paddings, id)
 }
 
-func (o *snapshotter) overlaybdLoopbackDevicePath(id string) string {
+func overlaybdLoopbackDevicePath(id string) string {
 	return fmt.Sprintf("/sys/kernel/config/target/loopback/%s", id)
 }
 
-func (o *snapshotter) overlaybdLoopbackDeviceLunPath(id string) string {
-	return fmt.Sprintf("%s/tpgt_1/lun/lun_0", o.overlaybdLoopbackDevicePath(id))
+func overlaybdLoopbackDeviceLunPath(id string) string {
+	return fmt.Sprintf("%s/tpgt_1/lun/lun_0", overlaybdLoopbackDevicePath(id))
 }
 
-func (o *snapshotter) scsiBlockDevicePath(deviceNumber string) string {
+func scsiBlockDevicePath(deviceNumber string) string {
 	return fmt.Sprintf("/sys/class/scsi_device/%s:0/device/block", deviceNumber)
 }
 
