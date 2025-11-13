@@ -42,4 +42,5 @@ type OverlayBDBSConfigUpper struct {
 	Data      string `json:"data,omitempty"`
 	Target    string `json:"target,omitempty"`
 	GzipIndex string `json:"gzipIndex,omitempty"`
+	Vsize     int    `json:"vsize,omitempty"`
 }
