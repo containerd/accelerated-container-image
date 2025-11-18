@@ -502,7 +502,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		downloadBlob := info.Labels[label.DownloadRemoteBlob]
 		if downloadBlob == "download" && stype == storageTypeRemoteBlock {
 			log.G(ctx).Infof("download blob %s", targetRef)
-			if err := o.constructOverlayBDSpec(ctx, key, false); err != nil {
+			if err := o.ConstructOverlayBDSpec(ctx, key, false); err != nil {
 				return nil, err
 			}
 			rollback = false
@@ -531,7 +531,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				return nil, err
 			}
 
-			if err := o.constructOverlayBDSpec(ctx, targetRef, false); err != nil {
+			if err := o.ConstructOverlayBDSpec(ctx, targetRef, false); err != nil {
 				return nil, err
 			}
 
@@ -552,7 +552,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 		log.G(ctx).Infof("Preparing rootfs(%s). writeType: %s", s.ID, writeType)
 		if writeType != RoDir {
 			stype = storageTypeLocalBlock
-			if err := o.constructOverlayBDSpec(ctx, key, true); err != nil {
+			if err := o.ConstructOverlayBDSpec(ctx, key, true); err != nil {
 				log.G(ctx).Errorln(err.Error())
 				return nil, err
 			}
@@ -612,7 +612,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				}
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
-				obdID, writeType, fsType, o.overlaybdTargetPath(obdID))
+				obdID, writeType, fsType, overlaybdTargetPath(obdHbaNum(o.tenant), obdID))
 			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, parent == ""); err != nil {
 				log.G(ctx).Errorf("%v", err)
 				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", obdID, err)
@@ -828,7 +828,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		} else if _, err := o.loadBackingStoreConfig(id); err != nil {
 			log.G(ctx).Info("not an overlaybd writable layer")
 		} else {
-			if err := o.unmountAndDetachBlockDevice(ctx, id, key); err != nil {
+			if err := o.UnmountAndDetachBlockDevice(ctx, id); err != nil {
 				return fmt.Errorf("failed to destroy target device for snapshot %s: %w", key, err)
 			}
 
@@ -863,7 +863,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	// since there could be multiple fs metadata in a turboOCI layer
 	if isTurboOCI, digest, _ := o.checkTurboOCI(info.Labels); isTurboOCI {
 		log.G(ctx).Infof("commit turboOCI.v1 layer: (%s, %s)", id, digest)
-		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
+		if err := o.ConstructOverlayBDSpec(ctx, name, false); err != nil {
 			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 		stype = storageTypeNormal
@@ -873,14 +873,14 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	// then change stype to 'storageTypeLocalBlock' which can make it attach a overlaybd block
 	if stype == storageTypeLocalLayer {
 		log.G(ctx).Infof("convet a local blob to turboOCI layer (sn: %s)", id)
-		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
+		if err := o.ConstructOverlayBDSpec(ctx, name, false); err != nil {
 			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 		stype = storageTypeLocalBlock
 	}
 
 	if stype == storageTypeLocalBlock {
-		if err := o.constructOverlayBDSpec(ctx, name, false); err != nil {
+		if err := o.ConstructOverlayBDSpec(ctx, name, false); err != nil {
 			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
 
@@ -1022,7 +1022,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	if stype != storageTypeNormal {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
-			err = o.unmountAndDetachBlockDevice(ctx, id, key)
+			err = o.UnmountAndDetachBlockDevice(ctx, id)
 			if err != nil {
 				return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 			}
@@ -1039,7 +1039,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 			log.G(ctx).Debugf("try to verify parent snapshots format.")
 			if st, err := o.identifySnapshotStorageType(ctx, s.ParentIDs[0], info); err == nil && st != storageTypeNormal {
-				err = o.unmountAndDetachBlockDevice(ctx, s.ParentIDs[0], "")
+				err = o.UnmountAndDetachBlockDevice(ctx, s.ParentIDs[0])
 				if err != nil {
 					return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 				}
