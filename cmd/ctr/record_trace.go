@@ -198,10 +198,10 @@ var recordTraceCommand = &cli.Command{
 		// Validate top layer. Get fs type
 		topLayer := imageManifest.Layers[len(imageManifest.Layers)-1]
 		if _, ok := topLayer.Annotations[label.OverlayBDBlobDigest]; !ok {
-			return errors.New("Must be an overlaybd image")
+			return errors.New("must be an overlaybd image")
 		}
 		if topLayer.Annotations[label.AccelerationLayer] == "yes" {
-			return errors.New("Acceleration layer already exists")
+			return errors.New("acceleration layer already exists")
 		}
 		fsType, ok := topLayer.Annotations[label.OverlayBDBlobFsType]
 		if !ok {

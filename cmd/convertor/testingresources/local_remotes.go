@@ -35,7 +35,6 @@ const (
 	labelDistributionSource = "containerd.io/distribution.source"
 )
 
-// RESOLVER
 type MockLocalResolver struct {
 	testReg *TestRegistry
 }
@@ -96,7 +95,6 @@ func (r *MockLocalResolver) Pusher(ctx context.Context, ref string) (remotes.Pus
 	}, nil
 }
 
-// FETCHER
 type MockLocalFetcher struct {
 	testReg    *TestRegistry
 	repository string
@@ -106,7 +104,6 @@ func (f *MockLocalFetcher) Fetch(ctx context.Context, desc v1.Descriptor) (io.Re
 	return f.testReg.Fetch(ctx, f.repository, desc)
 }
 
-// PUSHER
 type MockLocalPusher struct {
 	testReg    *TestRegistry
 	repository string
@@ -115,9 +112,9 @@ type MockLocalPusher struct {
 	tracker    docker.StatusTracker
 }
 
-// Not used by overlaybd conversion
+// Writer is not used by overlaybd conversion.
 func (p MockLocalPusher) Writer(ctx context.Context, opts ...content.WriterOpt) (content.Writer, error) {
-	return nil, errors.New("Not implemented")
+	return nil, errors.New("not implemented")
 }
 
 func (p MockLocalPusher) Push(ctx context.Context, desc v1.Descriptor) (content.Writer, error) {

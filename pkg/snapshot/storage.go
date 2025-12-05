@@ -126,6 +126,7 @@ func (o *snapshotter) matchMounts(ctx context.Context, matcher mountMatcherFunc)
 }
 
 func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, matcher mountMatcherFunc) (bool, error) {
+	// FIXME(thaJeztah): replace this with github.com/moby/sys/mountinfo.GetMountsFromReader or GetMounts
 	s := bufio.NewScanner(r)
 	for s.Scan() {
 		if err := s.Err(); err != nil {
@@ -169,7 +170,6 @@ func (o *snapshotter) parseAndCheckMounted(ctx context.Context, r io.Reader, mat
 				   mount propagation flags in fields[6]. The correct
 				   behavior is to ignore any unknown optional fields.
 				*/
-				break
 			}
 		}
 		if i == numFields {
@@ -258,8 +258,8 @@ func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID stri
 
 }
 
-// determine whether the block device represented
-// by @path is eorfs filesystem
+// IsErofsFilesystem determines whether the block device represented
+// by @path is eorfs filesystem.
 func IsErofsFilesystem(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {

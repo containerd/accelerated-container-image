@@ -28,7 +28,6 @@ import (
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// REGISTRY
 // TestRegistry is a mock registry that can be used for testing purposes.
 // The implementation is a combination of in memory and local storage, where
 // the in memory storage is used for pushes and overrides. The local storage
@@ -85,7 +84,7 @@ func (r *TestRegistry) Resolve(ctx context.Context, ref string) (v1.Descriptor, 
 	if repo, ok := r.internalRegistry[repository]; ok {
 		return repo.Resolve(ctx, tag)
 	}
-	return v1.Descriptor{}, errors.New("Repository not found")
+	return v1.Descriptor{}, errors.New("repository not found")
 }
 
 func (r *TestRegistry) Fetch(ctx context.Context, repository string, descriptor v1.Descriptor) (io.ReadCloser, error) {

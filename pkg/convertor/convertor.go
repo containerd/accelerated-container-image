@@ -86,6 +86,8 @@ func (l *Layer) GetInfo() (ocispec.Descriptor, digest.Digest) {
 	return l.Desc, l.DiffID
 }
 
+// NewContentLoaderWithFsType constructs a new contentLoader.
+//
 // contentLoader can load multiple files into content.Store service, and return an oci.v1.tar layer.
 func NewContentLoaderWithFsType(isAccelLayer bool, fsType string, files ...ContentFile) *contentLoader {
 	return &contentLoader{
@@ -461,7 +463,7 @@ func (c *overlaybdConvertor) sentToRemote(ctx context.Context, desc ocispec.Desc
 // exports the layers based on zfile.
 func (c *overlaybdConvertor) convertLayers(ctx context.Context, srcDescs []ocispec.Descriptor, srcDiffIDs []digest.Digest, fsType string) ([]Layer, error) {
 	var (
-		lastParentID string = ""
+		lastParentID string
 		err          error
 		commitLayers = make([]Layer, len(srcDescs))
 		chain        []digest.Digest
@@ -655,13 +657,13 @@ func (c *overlaybdConvertor) applyOCIV1LayerInObd(
 	return commitID, nil
 }
 
-// NOTE: based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
+// UniquePart is based on https://github.com/containerd/containerd/blob/v1.4.3/rootfs/apply.go#L181-L187
 func UniquePart() string {
 	t := time.Now()
 	var b [3]byte
 	// Ignore read failures, just decreases uniqueness
-	rand.Read(b[:])
-	return fmt.Sprintf("%d-%s", t.Nanosecond(), strings.Replace(base64.URLEncoding.EncodeToString(b[:]), "_", "-", -1))
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%d-%s", t.Nanosecond(), strings.ReplaceAll(base64.URLEncoding.EncodeToString(b[:]), "_", "-"))
 }
 
 type writeCountWrapper struct {

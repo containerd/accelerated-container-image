@@ -1475,7 +1475,7 @@ func (o *snapshotter) blockPath(id string) string {
 var erofsSupported = false
 var erofsSupportedOnce sync.Once
 
-// If EROFS fsmeta exists and is prioritized, check and modprobe erofs
+// IsErofsSupported checks if EROFS fsmeta exists and is prioritized, check and modprobe erofs.
 func IsErofsSupported() bool {
 	erofsSupportedOnce.Do(func() {
 		fs, err := os.ReadFile("/proc/filesystems")

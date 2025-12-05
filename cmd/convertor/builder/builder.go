@@ -492,6 +492,7 @@ func waitForChannel(ctx context.Context, ch <-chan error) {
 }
 
 // -------------------- certification --------------------
+
 type CertOption struct {
 	CertDirs    []string
 	RootCAs     []string
