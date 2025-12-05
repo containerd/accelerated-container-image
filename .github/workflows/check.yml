@@ -23,7 +23,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: golangci/golangci-lint-action@v6
         with:
           version: v1.59
@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
