@@ -11,9 +11,9 @@ This doc includes:
 
 ## Requirements
 
-* Install Go >= 1.22.x
+* Install Go >= 1.23.x
 * Install runc >= 1.0
-* Install containerd >= 1.4.x (1.6.x is preferred)
+* Install containerd >= 2.0.x
   * See [Downloads at containerd.io](https://containerd.io/downloads/).
 
 ### Build from source
