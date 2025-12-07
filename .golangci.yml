@@ -1,21 +1,20 @@
+version: "2"
 linters:
   enable:
-    - depguard
-    - staticcheck
-    - unconvert
-    - gofmt
-    - goimports
-    - ineffassign
-    - govet
-    - unused
     - misspell
+    - unconvert
   disable:
     - errcheck
-
-linters-settings:
-  depguard:
-    rules:
-      main:
-        deny:
-          - pkg: io/ioutil
-            desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil
+  settings:
+    staticcheck:
+      # Enable all options, with some exceptions.
+      # For defaults, see https://golangci-lint.run/usage/linters/#staticcheck
+      checks:
+        - all
+        - -QF1008     # Omit embedded fields from selector expression; https://staticcheck.dev/docs/checks/#QF1008
+        - -ST1000     # TODO: Incorrect or missing package comment; https://staticcheck.dev/docs/checks/#ST1000
+        - -ST1003     # Poorly chosen identifier; https://staticcheck.dev/docs/checks/#ST1003
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -354,7 +354,7 @@ func (e *overlaybdBuilderEngine) mountImage(ctx context.Context, manifest specs.
 	if errdefs.IsAlreadyExists(err) {
 		logrus.Infof("config blob mount from %s was successful", mountRepository)
 	} else if err != nil {
-		return fmt.Errorf("Failed to mount config blob from %s repository : %w", mountRepository, err)
+		return fmt.Errorf("failed to mount config blob from %s repository : %w", mountRepository, err)
 	}
 
 	// Mount Layer Blobs

@@ -32,7 +32,6 @@ import (
 	"oras.land/oras-go/v2/content/oci"
 )
 
-// REPOSITORY
 type RepoStore struct {
 	path             string
 	inmemoryRepoOnly bool
