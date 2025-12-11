@@ -9,6 +9,8 @@ BINARIES=$(addprefix bin/,$(COMMANDS))
 # go packages
 GO_PACKAGES=$(shell go list ${GO_TAGS} ./... | grep -v /vendor/)
 
+CGO_ENABLED ?= 0
+
 all: binaries
 
 binaries: $(BINARIES) ## build binaries into bin
@@ -19,7 +21,7 @@ force:
 # build a binary from cmd
 bin/%: cmd/% force
 	@echo "$@"
-	@GOOS=linux CGO_ENABLED=0 go build -ldflags "-X 'main.commitID=$$COMMIT_ID'" -o $@ ./$<
+	@GOOS=linux CGO_ENABLED="$(CGO_ENABLED)" go build -ldflags "-X 'main.commitID=$$COMMIT_ID'" -o $@ ./$<
 
 install: ## install binaries from bin
 	@mkdir -p $(SN_DESTDIR)
