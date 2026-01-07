@@ -52,13 +52,17 @@ jobs:
         fi
         echo "RELEASE_VERSION=${RELEASE_VERSION}"
         RELEASE_NUM="$(date +%Y%m%d%H%M%S).$(git rev-parse --short HEAD)"
+        docker run --rm -v "${PWD}":/src --workdir /src "golang:${{ env.GO_VERSION }}" sh -c "go mod vendor -o /tmp/vendor && tar -C /tmp -c vendor/" | tar -x
         docker buildx build --build-arg RELEASE_NUM=${RELEASE_NUM} --build-arg RELEASE_VERSION=${RELEASE_VERSION} --build-arg GO_VERSION=${{ env.GO_VERSION }} -f .github/workflows/release/Dockerfile --platform=linux/amd64,linux/arm64 -o releases/ .
-        ls -l releases/*/
+        XZ_OPT="-T0 -9" tar --create --auto-compress --file "releases/accelerated-container-image-${GITHUB_REF_NAME#v}-vendor.tar.xz" --transform="s:^:accelerated-container-image-${GITHUB_REF_NAME#v}/:" --owner=root --group=root vendor/
+        ls -l releases/*
     - name: Upload
       uses: actions/upload-artifact@v5
       with:
         name: releases
-        path: releases/*/overlaybd-snapshotter*
+        path: |
+          releases/*/overlaybd-snapshotter*
+          releases/accelerated-container-image-*-vendor.tar.xz
 
   dev-release:
     name: Development Release
@@ -70,7 +74,7 @@ jobs:
         uses: actions/download-artifact@v6
       - name: Display downloaded files
         shell: bash
-        run: ls -l releases/*/
+        run: ls -l releases/*
       - name: Create Release
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
@@ -91,7 +95,7 @@ jobs:
         uses: actions/download-artifact@v6
       - name: Display downloaded files
         shell: bash
-        run: ls -l releases/*/
+        run: ls -l releases/*
       - name: Create Release
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
@@ -99,3 +103,4 @@ jobs:
           prerelease: false
           files: |
             releases/*/overlaybd-snapshotter*
+            releases/accelerated-container-image-*-vendor.tar.xz
