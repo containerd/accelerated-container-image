@@ -51,7 +51,9 @@ import (
 )
 
 const (
-	maxAttachAttempts = 50
+	// maxAttachAttempts is the number of 10ms-spaced polls waiting for a
+	// device node or a target to show up, i.e. a 5s timeout.
+	maxAttachAttempts = 500
 
 	// hba number used to create tcmu devices in configfs
 	// all overlaybd devices are configured in /sys/kernel/config/target/core/user_999999999/
