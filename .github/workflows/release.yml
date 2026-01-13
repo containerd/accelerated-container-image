@@ -45,7 +45,7 @@ jobs:
           minor_version=${version_parts[1]}
           patch_version=${version_parts[2]}
 
-          ((patch_version++))
+          : $((patch_version++))
 
           new_version="$major_version.$minor_version.$patch_version"
           RELEASE_VERSION="${new_version}rc" #1.1.4rc
