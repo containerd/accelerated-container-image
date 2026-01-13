@@ -109,3 +109,4 @@ jobs:
           prerelease: false
           files: |
             releases/*/overlaybd-snapshotter*
+            releases/accelerated-container-image-*-vendor.tar.xz
