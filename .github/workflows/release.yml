@@ -72,9 +72,12 @@ jobs:
     steps:
       - name: Download builds and release notes
         uses: actions/download-artifact@v6
+        with:
+          name: releases
+          path: releases
       - name: Display downloaded files
         shell: bash
-        run: ls -l releases/*
+        run: ls -lR releases/
       - name: Create Release
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
@@ -93,9 +96,12 @@ jobs:
     steps:
       - name: Download builds and release notes
         uses: actions/download-artifact@v6
+        with:
+          name: releases
+          path: releases
       - name: Display downloaded files
         shell: bash
-        run: ls -l releases/*
+        run: ls -lR releases/
       - name: Create Release
         uses: "marvinpinto/action-automatic-releases@latest"
         with:
@@ -103,4 +109,3 @@ jobs:
           prerelease: false
           files: |
             releases/*/overlaybd-snapshotter*
-            releases/accelerated-container-image-*-vendor.tar.xz
