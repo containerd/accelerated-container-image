@@ -3,7 +3,7 @@ SN_DESTDIR=/opt/overlaybd/snapshotter
 SN_CFGDIR=/etc/overlaybd-snapshotter
 
 # command
-COMMANDS=overlaybd-snapshotter ctr convertor
+COMMANDS=overlaybd-snapshotter ctr convertor overlaybd-attacher
 BINARIES=$(addprefix bin/,$(COMMANDS))
 
 # go packages
