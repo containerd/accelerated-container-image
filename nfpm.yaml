@@ -17,6 +17,8 @@ vendor: "overlaybd"
 homepage: "https://github.com/containerd/accelerated-container-image"
 license: "Apache-2.0"
 contents:
+- src: ./bin/overlaybd-attacher
+  dst: /opt/overlaybd/snapshotter/overlaybd-attacher
 - src: ./bin/ctr
   dst: /opt/overlaybd/snapshotter/ctr
 - src: ./bin/overlaybd-snapshotter
