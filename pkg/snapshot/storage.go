@@ -78,14 +78,16 @@ type AttachDeviceParams struct {
 
 	configPath string // config.v1.json
 	resultFile string // init-debug.log
+	withDevID  bool
 }
 
-func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string) *AttachDeviceParams {
+func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string, withDevID bool) *AttachDeviceParams {
 	return &AttachDeviceParams{
 		id:         id,
 		tenant:     tenant,
 		configPath: configPath,
 		resultFile: resultFile,
+		withDevID:  withDevID,
 	}
 }
 
@@ -299,8 +301,14 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 		}
 	}()
 
-	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", configPath)), 0666); err != nil {
-		return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, configPath, err)
+	if params.withDevID {
+		if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s;%s", configPath, snID)), 0666); err != nil {
+			return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s;%s: %w", targetPath, configPath, snID, err)
+		}
+	} else {
+		if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", configPath)), 0666); err != nil {
+			return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, configPath, err)
+		}
 	}
 
 	err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
@@ -455,6 +463,7 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 			o.tenant,
 			configPath,
 			o.overlaybdInitDebuglogPath(snID),
+			false,
 		),
 	)
 	if err != nil {

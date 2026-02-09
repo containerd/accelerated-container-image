@@ -59,6 +59,11 @@ func main() {
 						Usage:   "Enable verbose logging",
 						Aliases: []string{"v"},
 					},
+					&cli.BoolFlag{
+						Name:  "with-devid",
+						Usage: "Include devid in dev_config",
+						Value: true,
+					},
 				},
 				Action: attachAction,
 			},
@@ -96,6 +101,7 @@ func attachAction(c *cli.Context) error {
 	tenant := -1
 	configPath := c.String("config")
 	retryCount := 5
+	withDevID := c.Bool("with-devid")
 
 	if _, err := os.Stat(configPath); err != nil {
 		return fmt.Errorf("config file does not exist: %s: %w", configPath, err)
@@ -128,9 +134,9 @@ func attachAction(c *cli.Context) error {
 	}
 
 	ctx := context.Background()
-	params := snapshot.NewAttachDeviceParams(id, tenant, absConfigPath, resultFile)
+	params := snapshot.NewAttachDeviceParams(id, tenant, absConfigPath, resultFile, withDevID)
 
-	logrus.Infof("attaching device: id=%s, tenant=%d, config=%s, resultFile=%s", id, tenant, absConfigPath, resultFile)
+	logrus.Infof("attaching device: id=%s, tenant=%d, config=%s, resultFile=%s, withDevID=%t", id, tenant, absConfigPath, resultFile, withDevID)
 
 	var devName string
 	var lastErr error
