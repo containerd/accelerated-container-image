@@ -19,9 +19,9 @@ RUN apt update && \
     apt install -y pkg-config
 
 # Download and install Golang version 1.21
-RUN wget https://go.dev/dl/go1.23.2.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.23.2.linux-amd64.tar.gz && \
-    rm go1.23.2.linux-amd64.tar.gz
+RUN wget https://go.dev/dl/go1.26.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.26.0.linux-amd64.tar.gz && \
+    rm go1.26.0.linux-amd64.tar.gz
 
 # Set environment variables
 ENV PATH="/usr/local/go/bin:${PATH}"

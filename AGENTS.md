@@ -121,7 +121,7 @@ Add to /etc/containerd/config.toml:
 
 ## Dependencies
 
-- Go >= 1.23.x
+- Go >= 1.26.x
 - containerd >= 2.0.x
 - runc >= 1.0
 - overlaybd backstore (https://github.com/containerd/overlaybd)

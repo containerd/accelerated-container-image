@@ -1,6 +1,6 @@
 module github.com/containerd/accelerated-container-image
 
-go 1.23.0
+go 1.26.0
 
 require (
 	github.com/containerd/containerd/api v1.8.0
