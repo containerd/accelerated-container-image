@@ -98,6 +98,8 @@ docker run overlaybd-convertor -r registry.hub.docker.com/library/redis -i 6.2.1
 
 * See how to use TurboOCIv1 at [TurboOCIv1](docs/TURBO_OCI.md).
 
+* See how to use Docker runtime with overlaybd at [DOCKER](docs/DOCKER.md).
+
 * Welcome to contribute! [CONTRIBUTING](docs/CONTRIBUTING.md)
 
 ## Release Version Support

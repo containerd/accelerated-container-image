@@ -85,6 +85,7 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 | ----- | ----------- |
 | `root` | the root directory to store snapshots. **Suggestion: This path should be a subpath of containerd's root** |
 | `address` | the socket address used to connect withcontainerd. |
+| `runtimeType` | runtime type, `"containerd"` (default) or `"docker"`. See [Docker Runtime Support](./DOCKER.md) for detail. |
 | `verbose` | log level, `info` or `debug` |
 | `rwMode` | rootfs mode about wether to use native writable layer. See [Native Support for Writable](./WRITABLE.md) for detail. |
 | `logReportCaller` | enable/disable the calling method |
@@ -219,6 +220,14 @@ There are several methods.
 
     # run by ctr run
     sudo ctr run --net-host --snapshotter=overlaybd --rm -t registry.hub.docker.com/overlaybd/redis:6.2.1_obd demo
+    ```
+
+- use Docker
+
+    See [Docker Runtime Support](https://github.com/containerd/accelerated-container-image/blob/main/docs/DOCKER.md) for details about using Docker with overlaybd.
+
+    ```bash
+    sudo docker run --net host -it --rm --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:7.2.3_obd
     ```
 
 - use k8s/cri

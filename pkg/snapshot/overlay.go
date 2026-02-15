@@ -74,8 +74,8 @@ const (
 
 const (
 	RoDir = "overlayfs" // overlayfs as rootfs. upper + lower (overlaybd)
-	RwDir = "dir"       // mount overlaybd as rootfs
-	RwDev = "dev"       // use overlaybd directly
+	RwDir = "dir"       // mount overlaybd as rootfs, return overlaybd mountpoint
+	RwDev = "dev"       // use overlaybd directly, return overlaybd devName
 
 	LayerBlob = "layer" // decompressed tgz layer (maybe compressed by ZFile)
 )
@@ -100,6 +100,7 @@ type BootConfig struct {
 	RootfsQuota       string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
 	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
 	TurboFsType       []string               `json:"turboFsType"`
+	RuntimeType       string                 `json:"runtimeType"` // "containerd" (default) or "docker"
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -123,6 +124,7 @@ func DefaultBootConfig() *BootConfig {
 			"erofs",
 			"ext4",
 		},
+		RuntimeType: "containerd",
 	}
 }
 
@@ -202,6 +204,7 @@ type snapshotter struct {
 	locker            *locker.Locker
 	turboFsType       []string
 	asyncRemove       bool
+	runtimeType       string
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -270,6 +273,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 			QuotaIDs: make(map[uint32]struct{}),
 		},
 		asyncRemove: bootConfig.AsyncRemove,
+		runtimeType: bootConfig.RuntimeType,
 	}, nil
 }
 
@@ -546,6 +550,19 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 	stype := storageTypeNormal
 	writeType := o.getWritableType(ctx, parentID, info)
 
+	// Docker runtime: handle init and container layers
+	if o.isDockerInitLayer(key) || o.isDockerContainerLayer(parent) {
+		m, _, err := o.PrepareDockerLayer(ctx, key, parent, s, parentID, parentInfo)
+		if err != nil {
+			return nil, err
+		}
+		rollback = false
+		if err := t.Commit(); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}
+
 	// If Preparing for rootfs, find metadata from its parent (top layer), launch and mount backstore device.
 	if o.isPrepareRootfs(info) {
 
@@ -777,6 +794,13 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", key, err)
 			}
 			return o.basedOnBlockDeviceMount(ctx, s, RoDir)
+		}
+
+		// Docker runtime: handle container layer mounts
+		// The container layer's parent is the init layer, which has init layer's parent as the image top layer
+		if o.runtimeType == "docker" && o.isDockerContainerLayer(info.Parent) {
+			log.G(ctx).Infof("Mounts: Docker container layer detected (key: %s, parent: %s)", key, info.Parent)
+			return o.dockerContainerLayerMount(ctx, parentInfo, s, parentID)
 		}
 
 	}
@@ -1026,6 +1050,13 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 			if err != nil {
 				return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 			}
+		}
+	}
+
+	// Docker init layer: check if parent's overlaybd device should be destroyed
+	if o.isDockerInitLayer(key) {
+		if err := o.RemoveDockerLayer(ctx, key, id, info); err != nil {
+			log.G(ctx).Warnf("failed to handle docker init layer removal: %v", err)
 		}
 	}
 
