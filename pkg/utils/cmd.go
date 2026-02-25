@@ -84,8 +84,19 @@ var defaultServiceTemplate = `
 func Create(ctx context.Context, dir string, opts ...string) error {
 	dataPath := path.Join(dir, dataFile)
 	indexPath := path.Join(dir, idxFile)
-	os.RemoveAll(dataPath)
-	os.RemoveAll(indexPath)
+	exists := true
+	for _, f := range []string{dataPath, indexPath} {
+		if _, err := os.Stat(f); os.IsNotExist(err) {
+			exists = false
+			break
+		}
+	}
+	if exists {
+		log.G(ctx).Infof("writable layer already exists")
+		return nil
+	}
+	// os.RemoveAll(dataPath)
+	// os.RemoveAll(indexPath)
 	args := append([]string{dataPath, indexPath}, opts...)
 	log.G(ctx).Debugf("%s %s", obdBinCreate, strings.Join(args, " "))
 	out, err := exec.CommandContext(ctx, obdBinCreate, args...).CombinedOutput()

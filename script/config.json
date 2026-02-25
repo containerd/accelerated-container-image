@@ -3,6 +3,7 @@
     "address": "/run/overlaybd-snapshotter/overlaybd.sock",
     "verbose": "info",
     "rwMode": "overlayfs",
+    "runtimeType": "containerd",
     "logReportCaller": false,
     "autoRemoveDev": false,
     "mirrorRegistry": []

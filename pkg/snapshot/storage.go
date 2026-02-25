@@ -724,14 +724,19 @@ func (o *snapshotter) ConstructOverlayBDSpec(ctx context.Context, key string, wr
 				vsizeGB = 64
 			}
 		}
-		log.G(ctx).Infof("prepare writable layer. (sn: %s, vsize: %d GB)", id, vsizeGB)
-		if err := o.prepareWritableOverlaybd(ctx, id, vsizeGB); err != nil {
+		rwdir := o.blockPath(id)
+		if info.Labels[label.ActiveLayerDir] != "" {
+			rwdir = info.Labels[label.ActiveLayerDir]
+		}
+		log.G(ctx).Infof("prepare writable layer. (sn: %s, vsize: %d GB, activeDir: %s)", id, vsizeGB, rwdir)
+
+		if err := o.prepareWritableOverlaybd(ctx, rwdir, vsizeGB); err != nil {
 			return err
 		}
 
 		configJSON.Upper = sn.OverlayBDBSConfigUpper{
-			Index: o.overlaybdWritableIndexPath(id),
-			Data:  o.overlaybdWritableDataPath(id),
+			Index: path.Join(rwdir, "writable_index"),
+			Data:  path.Join(rwdir, "writable_data"),
 			Vsize: vsizeGB,
 		}
 	}
@@ -838,12 +843,15 @@ func (o *snapshotter) atomicWriteOverlaybdTargetConfig(snID string, configJSON *
 }
 
 // prepareWritableOverlaybd
-func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, snID string, vsizeGB int) error {
+func (o *snapshotter) prepareWritableOverlaybd(ctx context.Context, rwdir string, vsizeGB int) error {
 	args := []string{fmt.Sprintf("%d", vsizeGB)}
 	if o.writableLayerType == "sparse" {
 		args = append(args, "-s")
 	}
-	return utils.Create(ctx, o.blockPath(snID), args...)
+	if err := os.MkdirAll(rwdir, 0700); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", rwdir, err)
+	}
+	return utils.Create(ctx, rwdir, args...)
 }
 
 func (o *snapshotter) sealWritableOverlaybd(ctx context.Context, snID string) (retErr error) {
