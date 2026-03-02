@@ -3,18 +3,6 @@ on:
   push:
     branches:
       - main
-  pull_request_target:
-    branches:
-      - 'main'
-    types:
-      # Adding 'labeled' to the list of activity types that trigger this event
-      # (default: opened, synchronize, reopened) so that we can run this
-      # workflow when the 'ok-to-test' label is added.
-      # Reference: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
-      - opened
-      - synchronize
-      - reopened
-      - labeled
 
 jobs:
   lowercase-repo:
