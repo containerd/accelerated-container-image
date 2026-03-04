@@ -299,7 +299,7 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 		}
 	}()
 
-	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", configPath)), 0666); err != nil {
+	if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s;%s", configPath, snID)), 0666); err != nil {
 		return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, configPath, err)
 	}
 
