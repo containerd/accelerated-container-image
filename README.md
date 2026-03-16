@@ -52,9 +52,8 @@ Accelerated Container Image is a __non-core__ sub-project of containerd.
 
     What's more, standalone userspace image-convertor is faster than embedded image-convertor when used with our [customized libext2fs](https://github.com/data-accelerator/e2fsprogs). See [USERSPACE_CONVERTOR](https://github.com/containerd/accelerated-container-image/blob/main/docs/USERSPACE_CONVERTOR.md) for more details.
 
-* [buildkit for overlaybd](https://github.com/data-accelerator/buildkit) (Experimental)
-
-    It is a customized buildkit for overlaybd images. It fetches the data of base images on demand without pulling whole data and uses overlaybd writable layer to build new layers.
+* buildkit
+    BuildKit officially supports overlaybd image building since v0.22. Benefiting from the on-demand loading of the base image and the high-performance writable layer, image build speeds can be significantly improved. Compared to the image conversion approach, this method saves the time previously required for conversion. See more at [Overlaybd](https://github.com/moby/buildkit/blob/master/docs/overlaybd.md).
 
 * [overlaybd - turboOCIv1](docs/TURBO_OCI.md)
 

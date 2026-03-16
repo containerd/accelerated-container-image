@@ -263,7 +263,7 @@ sudo /opt/overlaybd/snapshotter/convertor -r registry.hub.docker.com/library/red
 
 ## Image build
 
-Overlaybd images can be efficiently built from overlaybd images by using the [customized buildkit](https://github.com/data-accelerator/buildkit).
+Overlaybd images can be efficiently built from overlaybd images by using the [buildkit](https://github.com/moby/buildkit) v0.22+.
 
 ### Install
 
@@ -280,12 +280,12 @@ sudo make install
 First, make sure the overlaybd-snapshotter and overlaybd-tcmu running.
 
 ```bash
-# use containerd worker with overlaybd snapshotter
-buildkitd --containerd-worker-snapshotter=overlaybd --oci-worker=false --containerd-worker=true
+# use oci worker with overlaybd snapshotter
+buildkitd --oci-worker-snapshotter=overlaybd --oci-worker-proxy-snapshotter-path=/run/overlaybd-snapshotter/overlaybd.sock
 ```
 
 Then, write your Dockerfile and run buildctl to build images.
-The `FROM` if Dockerfile must be an overlaybd image.
+The `FROM` image in Dockerfile must be an overlaybd image.
 
 ```bash
 buildctl build \
