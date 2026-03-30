@@ -231,14 +231,13 @@ func DetachDevice(ctx context.Context, snID string, tenant int) (err error) {
 }
 
 // UnmountAndDetachBlockDevice will do nothing if the device is already destroyed
-func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID string) (err error) {
+func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID string, key string, upperDirKey string) (err error) {
 	devName, err := os.ReadFile(o.overlaybdBackstoreMarkFile(snID))
 	if err != nil {
 		log.G(ctx).Errorf("read device name failed: %s, err: %v", o.overlaybdBackstoreMarkFile(snID), err)
 	}
 
 	mountPoint := o.overlaybdMountpoint(snID)
-	log.G(ctx).Debugf("check overlaybd mountpoint is in use: %s", mountPoint)
 	busy, err := o.checkOverlaybdInUse(ctx, mountPoint)
 	if err != nil {
 		return err
@@ -247,6 +246,18 @@ func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID stri
 		log.G(ctx).Infof("device still in use.")
 		return nil
 	}
+
+	if upperDirKey != "" {
+		inuse, err := checkIsParent(ctx, key, upperDirKey)
+		if err != nil {
+			return fmt.Errorf("failed to check whether snID %v check key %v err: %v", snID, key, err)
+		}
+		if inuse {
+			log.G(ctx).Infof("device is parent to someone else, ignore umount")
+			return nil
+		}
+	}
+
 	log.G(ctx).Infof("umount device, mountpoint: %s", mountPoint)
 	if err := mount.UnmountAll(mountPoint, 0); err != nil {
 		return fmt.Errorf("failed to umount %s: %w", mountPoint, err)
@@ -257,7 +268,24 @@ func (o *snapshotter) UnmountAndDetachBlockDevice(ctx context.Context, snID stri
 	}
 	log.G(ctx).Infof("destroy overlaybd device success(sn: %s): %s", snID, devName)
 	return nil
+}
 
+// checkIsParent checks if the given parent is a parent of any other active snapshot
+func checkIsParent(ctx context.Context, key, exclude string) (bool, error) {
+	found := false
+	if err := storage.WalkInfo(ctx, func(ctx context.Context, info snapshots.Info) error {
+		if found {
+			return nil
+		}
+
+		if info.Name != exclude && info.Parent == key && (info.Kind == snapshots.KindActive || info.Kind == snapshots.KindView) {
+			found = true
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return found, nil
 }
 
 // IsErofsFilesystem determines whether the block device represented

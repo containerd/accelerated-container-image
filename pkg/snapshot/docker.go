@@ -236,7 +236,7 @@ func (o *snapshotter) RemoveDockerLayer(ctx context.Context, key string, initID 
 	if parentStype == storageTypeLocalBlock || parentStype == storageTypeRemoteBlock {
 		if _, err := os.Stat(o.overlaybdBackstoreMarkFile(parentID)); err == nil {
 			log.G(ctx).Infof("RemoveDockerLayer: destroying overlaybd device for parent %s", parentID)
-			if err = o.UnmountAndDetachBlockDevice(ctx, parentID); err != nil {
+			if err = o.UnmountAndDetachBlockDevice(ctx, parentID, parentInfo.Name, key); err != nil {
 				log.G(ctx).Warnf("failed to destroy overlaybd device for parent %s: %v", parentID, err)
 				// Don't block remove, device might still be in use by other containers
 			}
