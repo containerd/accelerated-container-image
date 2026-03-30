@@ -853,7 +853,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		} else if _, err := o.loadBackingStoreConfig(id); err != nil {
 			log.G(ctx).Info("not an overlaybd writable layer")
 		} else {
-			if err := o.UnmountAndDetachBlockDevice(ctx, id); err != nil {
+			if err := o.UnmountAndDetachBlockDevice(ctx, id, key, ""); err != nil {
 				return fmt.Errorf("failed to destroy target device for snapshot %s: %w", key, err)
 			}
 
@@ -1047,7 +1047,7 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	if stype != storageTypeNormal {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
-			err = o.UnmountAndDetachBlockDevice(ctx, id)
+			err = o.UnmountAndDetachBlockDevice(ctx, id, key, "")
 			if err != nil {
 				return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 			}
@@ -1071,7 +1071,12 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 
 			log.G(ctx).Debugf("try to verify parent snapshots format.")
 			if st, err := o.identifySnapshotStorageType(ctx, s.ParentIDs[0], info); err == nil && st != storageTypeNormal {
-				err = o.UnmountAndDetachBlockDevice(ctx, s.ParentIDs[0])
+				// Get parent snapshot info for key and parent
+				_, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
+				if err != nil {
+					return mylog.TracedErrorf(ctx, "failed to get parent snapshot info for %s: %w", s.ParentIDs[0], err)
+				}
+				err = o.UnmountAndDetachBlockDevice(ctx, s.ParentIDs[0], parentInfo.Name, key)
 				if err != nil {
 					return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 				}
