@@ -13,10 +13,6 @@ env:
 
 jobs:
   CodeQL-Build:
-
-    strategy:
-      fail-fast: false
-
     runs-on: ubuntu-22.04
 
     timeout-minutes: 30
