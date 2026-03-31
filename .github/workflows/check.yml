@@ -30,6 +30,8 @@ jobs:
           - 1.26
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: install Go
         uses: actions/setup-go@v6
         with:
@@ -56,6 +58,7 @@ jobs:
         with:
           path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
+          persist-credentials: false
 
       - name: set env
         shell: bash

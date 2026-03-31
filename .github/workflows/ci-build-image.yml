@@ -38,6 +38,7 @@ jobs:
         with:
           ref: ${{ inputs.commit-hash }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v2

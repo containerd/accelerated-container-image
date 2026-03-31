@@ -32,6 +32,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         fetch-depth: 100
+        persist-credentials: false
     - name: Setup buildx instance
       uses: docker/setup-buildx-action@v2
       with:

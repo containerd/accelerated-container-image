@@ -51,6 +51,7 @@ jobs:
         with:
           ref: ${{ inputs.commit-hash }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Start OverlayBD
         working-directory: /app
