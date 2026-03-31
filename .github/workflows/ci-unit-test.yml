@@ -34,4 +34,4 @@ jobs:
 
       - name: unit test
         run: |
-          sudo GO_TESTFLAGS=-v make test
+          GO_TESTFLAGS='-v -exec sudo' make test
