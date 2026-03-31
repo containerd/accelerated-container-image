@@ -16,7 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
 
       - name: install Go
@@ -24,13 +23,6 @@ jobs:
         with:
           go-version: '1.26'
 
-      - name: set env
-        shell: bash
-        run: |
-          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-
       - name: unit test
-        working-directory: src/github.com/containerd/accelerated-container-image
         run: |
           sudo GO_TESTFLAGS=-v make test
