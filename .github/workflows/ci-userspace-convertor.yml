@@ -12,11 +12,19 @@ on:
         required: true
         type: string
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   run-ci-userspace-convertor:
-    name: Run CI | Userspace Convertor
+    name: Run CI | Userspace Convertor (${{ matrix.go-version || 'minimum' }})
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    strategy:
+      matrix:
+        go-version:
+          - "" # empty; fall back on go-version-file (use go.mod); see https://github.com/actions/setup-go/issues/450#issuecomment-3620402646
+          - 1.26
     container:
       image: ghcr.io/${{ inputs.github-repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
       credentials:
@@ -85,7 +93,9 @@ jobs:
       - name: install Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          go-version: ${{ matrix.go-version }}
+          go-version-file: "go.mod" # used when go-version is not specified.
+          check-latest: true
 
       - name: set env
         shell: bash

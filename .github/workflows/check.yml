@@ -5,25 +5,31 @@ on:
       - main
   pull_request:
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   #
   # Linter checker
   #
   linters:
-    name: Linters
+    name: Linters (${{ matrix.go-version || 'minimum' }})
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
     strategy:
       matrix:
-        go-version: [1.26]
-
+        go-version:
+          - "" # empty; fall back on go-version-file (use go.mod); see https://github.com/actions/setup-go/issues/450#issuecomment-3620402646
+          - 1.26
     steps:
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v6
+      - name: install Go
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
-
-      - uses: actions/checkout@v6
+          go-version-file: "go.mod" # used when go-version is not specified.
+          check-latest: true
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9

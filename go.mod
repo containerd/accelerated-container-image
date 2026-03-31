@@ -1,6 +1,11 @@
 module github.com/containerd/accelerated-container-image
 
-go 1.26.0
+// The go directive declares the minimum Go version required for this module.
+//
+// DO NOT change this version unless support for older Go versions is dropped
+// or the module requires newer Go features. To update the version used for CI
+// and releases, update "go-version" and "GO_VERSION" in "/.github/workflows".
+go 1.25
 
 require (
 	github.com/containerd/containerd/api v1.8.0
