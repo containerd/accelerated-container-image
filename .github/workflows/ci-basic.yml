@@ -9,6 +9,12 @@ on:
         required: true
         type: string
 
+# Default to 'contents: read', which grants actions to read commits.
+#
+# see https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions:
+  contents: read
+
 jobs:
   run-ci-basic:
     name: Run CI | Basic

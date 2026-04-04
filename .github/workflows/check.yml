@@ -5,25 +5,39 @@ on:
       - main
   pull_request:
 
+# Default to 'contents: read', which grants actions to read commits.
+#
+# see https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   #
   # Linter checker
   #
   linters:
-    name: Linters
+    name: Linters (${{ matrix.go-version || 'minimum' }})
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
     strategy:
       matrix:
-        go-version: [1.26]
-
+        go-version:
+          - "" # empty; fall back on go-version-file (use go.mod); see https://github.com/actions/setup-go/issues/450#issuecomment-3620402646
+          - 1.26
     steps:
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: install Go
+        uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go-version }}
-
-      - uses: actions/checkout@v6
+          go-version-file: "go.mod" # used when go-version is not specified.
+          check-latest: true
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9
@@ -44,6 +58,7 @@ jobs:
         with:
           path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
+          persist-credentials: false
 
       - name: set env
         shell: bash

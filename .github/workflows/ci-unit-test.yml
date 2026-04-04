@@ -7,30 +7,38 @@ on:
     branches:
       - 'main'
 
+# Default to 'contents: read', which grants actions to read commits.
+#
+# see https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   unit-test:
-    name: Unit Test
+    name: Unit Test (${{ matrix.go-version || 'minimum' }})
     runs-on: ubuntu-22.04
     timeout-minutes: 10
-
+    strategy:
+      matrix:
+        go-version:
+          - "" # empty; fall back on go-version-file (use go.mod); see https://github.com/actions/setup-go/issues/450#issuecomment-3620402646
+          - 1.26
     steps:
       - uses: actions/checkout@v6
         with:
-          path: src/github.com/containerd/accelerated-container-image
           fetch-depth: 100
+          persist-credentials: false
 
       - name: install Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
-
-      - name: set env
-        shell: bash
-        run: |
-          echo "GOPATH=${{ github.workspace }}" >> $GITHUB_ENV
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+          go-version: ${{ matrix.go-version }}
+          go-version-file: "go.mod" # used when go-version is not specified.
+          check-latest: true
 
       - name: unit test
-        working-directory: src/github.com/containerd/accelerated-container-image
         run: |
-          sudo GO_TESTFLAGS=-v make test
+          GO_TESTFLAGS='-v -exec sudo' make test
