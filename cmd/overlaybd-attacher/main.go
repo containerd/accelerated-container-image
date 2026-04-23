@@ -62,7 +62,7 @@ func main() {
 					&cli.BoolFlag{
 						Name:  "with-devid",
 						Usage: "Include devid in dev_config",
-						Value: true,
+						Value: false,
 					},
 				},
 				Action: attachAction,
