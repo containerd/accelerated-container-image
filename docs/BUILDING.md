@@ -37,7 +37,12 @@ sudo mkdir /etc/overlaybd-snapshotter
 sudo cat <<-EOF | sudo tee /etc/overlaybd-snapshotter/config.json
 {
     "root": "/var/lib/overlaybd/",
-    "address": "/run/overlaybd-snapshotter/overlaybd.sock"
+    "address": "/run/overlaybd-snapshotter/overlaybd.sock",
+    "experimental": {
+        "enabled": false,
+        "preAuth": true,
+        "overlaybdApiServer": "http://127.0.0.1:9862"
+    }
 }
 EOF
 ```
