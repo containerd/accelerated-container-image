@@ -301,7 +301,6 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 
 // Stat returns the info for an active or committed snapshot by the key.
 func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, retErr error) {
-	log.G(ctx).Infof("Stat (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -356,7 +355,6 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 
 // Usage returns the resources taken by the snapshot identified by key.
 func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage, retErr error) {
-	log.G(ctx).Infof("Usage (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
