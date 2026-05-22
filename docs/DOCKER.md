@@ -49,7 +49,8 @@ Edit `/etc/docker/daemon.json`:
 {
     "features": {
         "containerd-snapshotter": true
-    }
+    },
+    "storage-driver": "overlaybd"
 }
 ```
 
@@ -84,23 +85,35 @@ sudo systemctl restart containerd
 Once configured, you can run overlaybd images with Docker:
 
 ```bash
-# Pull an overlaybd image
-docker pull registry.hub.docker.com/overlaybd/redis:7.2.3_obd
-
 # Run with overlaybd snapshotter
-docker run --rm -it --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:7.2.3_obd
-```
+docker run --rm -it registry.hub.docker.com/overlaybd/redis:7.2.3_obd
 
-Or set overlaybd as the default snapshotter:
-
-```bash
-# In daemon.json
-{
-    "features": {
-        "containerd-snapshotter": true
-    },
-    "snapshotter": "overlaybd"
-}
+Unable to find image 'registry.hub.docker.com/overlaybd/redis:7.2.3_obd' locally
+7.2.3_obd: Pulling from overlaybd/redis
+Digest: sha256:d4c391ded1cdd1752f0ec14a5c594c8aa072983af10f29032294f4588dc6a5fc
+Status: Downloaded newer image for registry.hub.docker.com/overlaybd/redis:7.2.3_obd
+1:C 26 Apr 2026 05:09:54.784 # WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition. Being disabled, it can also cause failures without low memory condition, see https://github.com/jemalloc/jemalloc/issues/1328. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+1:C 26 Apr 2026 05:09:54.784 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+1:C 26 Apr 2026 05:09:54.784 * Redis version=7.2.3, bits=64, commit=00000000, modified=0, pid=1, just started
+1:C 26 Apr 2026 05:09:54.784 # Warning: no config file specified, using the default config. In order to specify a config file use redis-server /path/to/redis.conf
+1:M 26 Apr 2026 05:09:54.785 * monotonic clock: POSIX clock_gettime
+                _._
+           _.-``__ ''-._
+      _.-``    `.  `_.  ''-._           Redis 7.2.3 (00000000/0) 64 bit
+  .-`` .-```.  ```\/    _.,_ ''-._
+ (    '      ,       .-`  | `,    )     Running in standalone mode
+ |`-._`-...-` __...-.``-._|'` _.-'|     Port: 6379
+ |    `-._   `._    /     _.-'    |     PID: 1
+  `-._    `-._  `-./  _.-'    _.-'
+ |`-._`-._    `-.__.-'    _.-'_.-'|
+ |    `-._`-._        _.-'_.-'    |           https://redis.io
+  `-._    `-._`-.__.-'_.-'    _.-'
+ |`-._`-._    `-.__.-'    _.-'_.-'|
+ |    `-._`-._        _.-'_.-'    |
+  `-._    `-._`-.__.-'_.-'    _.-'
+      `-._    `-.__.-'    _.-'
+          `-._        _.-'
+              `-.__.-'
 ```
 
 ### Verifying Device Creation
@@ -118,122 +131,3 @@ lsblk
 # Check mounts
 mount | grep overlaybd
 ```
-
-## How It Works
-
-### Container Startup Flow
-
-1. **Image Pull**: Docker pulls overlaybd format layers through containerd
-2. **Init Layer Preparation**:
-   - Docker creates an init layer (key ends with `-init`)
-   - Snapshotter attaches overlaybd device at parent's mountpoint
-   - Returns bind mount to init layer's `fs` directory
-3. **Container Layer Preparation**:
-   - Parent is the init layer
-   - Returns overlay mount with `lowerdir=init/fs:overlaybd_mountpoint`
-4. **Container Startup**: Docker starts container with the prepared rootfs
-
-### Device Lifecycle
-
-- **Creation**: Device is created during init layer preparation
-- **Sharing**: Multiple containers from the same image share the same overlaybd device
-- **Cleanup**: Device is destroyed when the init layer is removed (after all containers exit)
-
-## Limitations
-
-### 1. Read-Write Mode Restrictions
-
-Docker support **only works with `rwMode: "overlayfs"`**. Other modes (`dir`, `dev`) are not supported because:
-- Docker requires overlayfs for its layer management
-- Init layer mechanism is designed for overlayfs-based storage
-
-### 2. Init Layer Overhead
-
-Docker creates an extra init layer that:
-- Adds one additional layer to the overlay stack
-- Consumes minimal storage (usually contains only Docker metadata)
-- May add slight latency during container preparation
-
-### 3. Device Cleanup Timing
-
-Unlike containerd where devices are cleaned up immediately after container exit:
-- Docker may delay init layer removal
-- Device remains attached until init layer is garbage collected
-- This is normal Docker behavior and doesn't affect functionality
-
-### 4. Storage Compatibility
-
-- Works with **overlaybd format images** (converted or turboOCI)
-- Works with **OCI images** (converted on-the-fly, slower startup)
-- Does not support:
-  - Native OCI images with ZFile (use turboOCI instead)
-  - Direct block device mode (`rwMode: "dev"`)
-
-### 5. Performance Considerations
-
-- First container startup from an image: Full overlaybd device initialization
-- Subsequent containers from same image: Reuses existing device (fast)
-- Image pull performance: Same as containerd mode
-
-### 6. Known Issues
-
-- **Device busy errors**: May occur if trying to remove an image while containers are still using it. This is handled gracefully by the snapshotter.
-- **Init layer identification**: Relies on `-init` suffix in snapshot keys. Unusual Docker configurations may not be detected correctly.
-
-## Troubleshooting
-
-### Container fails to start
-
-1. Check snapshotter logs:
-```bash
-sudo journalctl -u overlaybd-snapshotter -f
-```
-
-2. Verify runtimeType configuration:
-```bash
-cat /etc/overlaybd-snapshotter/config.json | grep runtimeType
-```
-
-3. Ensure overlaybd-tcmu is running:
-```bash
-sudo systemctl status overlaybd-tcmu
-```
-
-### Device not cleaned up
-
-Check if containers/init layers are still holding references:
-```bash
-# List active snapshots
-sudo ctr snapshot --snapshotter=overlaybd ls
-
-# Check mounts
-mount | grep overlaybd
-```
-
-### Performance issues
-
-1. Enable trace recording for frequently used images
-2. Check network connectivity to registry
-3. Verify overlaybd cache settings
-
-## Migration from Containerd
-
-If migrating existing setups from containerd to Docker:
-
-1. Images remain compatible (same overlaybd format)
-2. Existing pulled images can be reused
-3. Configuration changes required:
-   - Add `runtimeType: "docker"` to snapshotter config
-   - Enable containerd snapshotter in Docker daemon
-4. Restart services in order:
-   - overlaybd-tcmu
-   - overlaybd-snapshotter
-   - containerd
-   - Docker
-
-## References
-
-- [QUICKSTART](QUICKSTART.md) - General overlaybd setup
-- [EXAMPLES](EXAMPLES.md) - Running overlaybd containers
-- [TurboOCI](TURBO_OCI.md) - On-the-fly OCI image acceleration
-- [Configuration](../script/config.json) - Full configuration options

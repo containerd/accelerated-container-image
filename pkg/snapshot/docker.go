@@ -135,13 +135,12 @@ func (o *snapshotter) prepareDockerContainerLayer(ctx context.Context, s storage
 			log.G(ctx).Infof("Docker container layer: using overlaybd mountpoint=%s", mountpoint)
 			lowerPaths = append(lowerPaths, mountpoint)
 		} else {
-			// Normal image: use all parent layers' fs directories
-			initSnapshot, err := storage.GetSnapshot(ctx, initInfo.Name)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get init snapshot: %w", err)
-			}
-			for _, pid := range initSnapshot.ParentIDs {
-				lowerPaths = append(lowerPaths, o.upperPath(pid))
+			// Normal image: use parent layers' fs directories from container snapshot
+			// s.ParentIDs[0] is init layer (already added above), [1:] are image layers
+			if len(s.ParentIDs) > 1 {
+				for _, pid := range s.ParentIDs[1:] {
+					lowerPaths = append(lowerPaths, o.upperPath(pid))
+				}
 			}
 		}
 	} else {
@@ -295,5 +294,7 @@ func (o *snapshotter) dockerContainerLayerMount(ctx context.Context,
 		}, nil
 	}
 
-	return nil, nil
+	// Normal image: fall back to standard overlay mount
+	// s.ParentIDs already contains [initLayerID, imageLayer1ID, ...]
+	return o.normalOverlayMount(s), nil
 }

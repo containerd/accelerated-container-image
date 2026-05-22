@@ -226,10 +226,6 @@ There are several methods.
 
     See [Docker Runtime Support](https://github.com/containerd/accelerated-container-image/blob/main/docs/DOCKER.md) for details about using Docker with overlaybd.
 
-    ```bash
-    sudo docker run --net host -it --rm --snapshotter=overlaybd registry.hub.docker.com/overlaybd/redis:7.2.3_obd
-    ```
-
 - use k8s/cri
 
     Run with k8s or crictl, refer to [EXAMPLES_CRI](https://github.com/containerd/accelerated-container-image/blob/main/docs/EXAMPLES_CRI.md).
