@@ -38,7 +38,7 @@ jobs:
           go-version: ${{ matrix.go-version }}
           go-version-file: "go.mod" # used when go-version is not specified.
           check-latest: true
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@63c23d5020da8f97005b6de340504130bdbe42c7 # v9
         with:
           version: v2.9
           skip-cache: true
