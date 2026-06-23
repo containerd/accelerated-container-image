@@ -1,0 +1,29 @@
+# Keep dependencies up to date automatically.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "gomod"
+    directory: "/ci/e2e"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions used by CI/release workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Docker base images used for builds
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/ci/build_image"
+    schedule:
+      interval: "weekly"
