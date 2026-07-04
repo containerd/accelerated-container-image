@@ -3,7 +3,7 @@ ARG GO_VERSION=latest
 ARG GOLANG_IMAGE=golang:${GO_VERSION}
 FROM ${GOLANG_IMAGE} AS golang
 
-FROM ubuntu:22.04 AS builder
+FROM ubuntu:26.04 AS builder
 
 WORKDIR /go/src/github.com
 ARG TARGETARCH
@@ -24,7 +24,7 @@ RUN export PATH=$PATH:/usr/local/go/bin && \
     cd overlaybd && rm -rf build && mkdir build && cd build && cmake ../ && make -j && make install && cd ../.. && \
     cd accelerated-container-image && make -j && make install
 
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 COPY --from=builder /opt/overlaybd /opt/overlaybd
 COPY --from=builder /etc/overlaybd /etc/overlaybd
