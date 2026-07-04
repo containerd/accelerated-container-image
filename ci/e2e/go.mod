@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/containerd/containerd/v2 v2.0.9
-	github.com/opencontainers/image-spec v1.1.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.10.0
 	oras.land/oras-go/v2 v2.5.0
 )
