@@ -37,7 +37,7 @@ RUN make && \
     nfpm pkg --packager rpm --target /tmp/
 
 # build image
-FROM ubuntu:22.04 AS release
+FROM ubuntu:26.04 AS release
 ARG OBD_VERSION
 ARG RELEASE_VERSION
 SHELL ["/bin/bash", "-c"]
