@@ -80,7 +80,7 @@ jobs:
     needs: [build]
     steps:
       - name: Download builds and release notes
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: releases
           path: releases
@@ -106,7 +106,7 @@ jobs:
     needs: [build]
     steps:
       - name: Download builds and release notes
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v8
         with:
           name: releases
           path: releases
