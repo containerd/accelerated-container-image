@@ -78,7 +78,12 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
             "host": "registry-1.docker.io",
             "insecure": false
         }
-    ]
+    ],
+    "experimental": {
+        "enabled": false,
+        "preAuth": true,
+        "overlaybdApiServer": "http://127.0.0.1:9862"
+    }
 }
 ```
 | Field | Description |
@@ -93,6 +98,9 @@ The config file is `/etc/overlaybd-snapshotter/config.json`. Please create the f
 | `exporterConfig.enable` | whether or not create a server to show Prometheus metrics |
 | `exporterConfig.uriPrefix` | URI prefix for export metrics, default `/metrics` |
 | `exporterConfig.port` | port for http server to show metrics, default `9863` |
+| `experimental.enabled` | enable experimental features |
+| `experimental.preAuth` | enable overlaybd API server pre-auth notification |
+| `experimental.overlaybdApiServer` | overlaybd API server address, default `http://127.0.0.1:9862` |
 | `mirrorRegistry` | an arrary of mirror registries |
 | `mirrorRegistry.host` | host address, eg. `registry-1.docker.io`` |
 | `mirrorRegistry.insecure` | `true` or `false` |
