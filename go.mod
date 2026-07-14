@@ -5,7 +5,7 @@ module github.com/containerd/accelerated-container-image
 // DO NOT change this version unless support for older Go versions is dropped
 // or the module requires newer Go features. To update the version used for CI
 // and releases, update "go-version" and "GO_VERSION" in "/.github/workflows".
-go 1.25
+go 1.25.0
 
 require (
 	github.com/containerd/containerd/api v1.8.0
@@ -21,16 +21,16 @@ require (
 	github.com/moby/locker v1.0.1
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/opencontainers/image-spec v1.1.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
 	github.com/urfave/cli/v2 v2.27.5
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.39.0
 	google.golang.org/grpc v1.79.3
-	oras.land/oras-go/v2 v2.5.0
+	oras.land/oras-go/v2 v2.6.2
 )
 
 require (
