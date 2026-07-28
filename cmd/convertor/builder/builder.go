@@ -91,6 +91,20 @@ type graphBuilder struct {
 	id        atomic.Int32
 }
 
+const (
+	attestationManifestAnnotation = "vnd.docker.reference.type"
+	attestationManifestType       = "attestation-manifest"
+)
+
+// isAttestationManifest reports whether desc is a BuildKit attestation manifest
+// (provenance/SBOM). Detection uses only the explicit
+// vnd.docker.reference.type=attestation-manifest annotation: the accompanying
+// unknown/unknown platform is a BuildKit convention shared by other artifacts,
+// so it is not a reliable identifier on its own.
+func isAttestationManifest(desc v1.Descriptor) bool {
+	return desc.Annotations[attestationManifestAnnotation] == attestationManifestType
+}
+
 func (b *graphBuilder) Build(ctx context.Context) error {
 	fetcher, err := b.Resolver.Fetcher(ctx, b.Ref)
 	if err != nil {
@@ -150,6 +164,17 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		for _i, _m := range index.Manifests {
 			i := _i
 			m := _m
+			if isAttestationManifest(m) {
+				// BuildKit attestation manifests (provenance/SBOM) carry no
+				// rootfs layers and reference a source platform manifest by
+				// digest (vnd.docker.reference.digest). That digest changes on
+				// conversion, so the attestation cannot be re-associated and
+				// converting its zero-layer manifest panics. Drop it from the
+				// converted index (with a warning) rather than emitting a stale
+				// reference.
+				log.G(ctx).Warnf("skipping attestation manifest %s: cannot be re-associated after conversion", m.Digest)
+				continue
+			}
 			wg.Add(1)
 			b.group.Go(func() error {
 				defer wg.Done()
@@ -165,6 +190,16 @@ func (b *graphBuilder) process(ctx context.Context, src v1.Descriptor, tag bool)
 		if ctx.Err() != nil {
 			return v1.Descriptor{}, ctx.Err()
 		}
+
+		// Drop attestation manifests from the converted index: their
+		// source-digest references no longer point at an image in the index.
+		filtered := index.Manifests[:0]
+		for _, m := range index.Manifests {
+			if !isAttestationManifest(m) {
+				filtered = append(filtered, m)
+			}
+		}
+		index.Manifests = filtered
 
 		// upload index
 		if b.Referrer {

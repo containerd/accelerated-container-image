@@ -27,7 +27,7 @@ jobs:
           - "" # empty; fall back on go-version-file (use go.mod); see https://github.com/actions/setup-go/issues/450#issuecomment-3620402646
           - 1.26
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 100
           persist-credentials: false
