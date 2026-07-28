@@ -59,7 +59,7 @@ jobs:
           echo "RELEASE_VERSION=${releasever}" >> $GITHUB_ENV
 
       - name: Build and Push
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v7
         with:
           tags: ghcr.io/${{ inputs.github-repository }}/overlaybd-ci-images:${{ inputs.image-tag }}
           push: true
