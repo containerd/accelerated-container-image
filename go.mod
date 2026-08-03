@@ -25,7 +25,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.4
-	github.com/spf13/cobra v1.8.1
+	github.com/spf13/cobra v1.10.2
 	github.com/urfave/cli/v2 v2.27.7
 	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.46.0
