@@ -64,7 +64,7 @@ jobs:
         XZ_OPT="-T0 -9" tar --create --auto-compress --file "releases/accelerated-container-image-${GITHUB_REF_NAME#v}-vendor.tar.xz" --transform="s:^:accelerated-container-image-${GITHUB_REF_NAME#v}/:" --owner=root --group=root vendor/
         ls -l releases/*
     - name: Upload
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: releases
         path: |
