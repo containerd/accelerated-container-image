@@ -34,7 +34,7 @@ jobs:
         fetch-depth: 100
         persist-credentials: false
     - name: Setup buildx instance
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@v4
       with:
         use: true
     - name: Build
