@@ -98,7 +98,7 @@ jobs:
           bash run_container.sh localhost:5000/redis:309f99718ff2424f4ae5ebf0e46f7f0ce03058bf47d9061d1d66e4af53b70ffc_turbo
 
       - name: install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go-version }}
           go-version-file: "go.mod" # used when go-version is not specified.
