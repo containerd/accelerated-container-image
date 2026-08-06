@@ -22,6 +22,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -86,6 +89,12 @@ type Registry struct {
 	Insecure bool   `json:"insecure"`
 }
 
+type ExperimentalConfig struct {
+	Enabled            bool   `json:"enabled"`
+	PreAuth            bool   `json:"preAuth"`
+	OverlaybdApiServer string `json:"overlaybdApiServer"`
+}
+
 type BootConfig struct {
 	AsyncRemove       bool                   `json:"asyncRemove"`
 	Address           string                 `json:"address"`
@@ -102,6 +111,7 @@ type BootConfig struct {
 	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
 	TurboFsType       []string               `json:"turboFsType"`
 	RuntimeType       string                 `json:"runtimeType"` // "containerd" (default) or "docker"
+	Experimental      ExperimentalConfig     `json:"experimental"`
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -126,6 +136,11 @@ func DefaultBootConfig() *BootConfig {
 			"ext4",
 		},
 		RuntimeType: "containerd",
+		Experimental: ExperimentalConfig{
+			Enabled:            false,
+			PreAuth:            true,
+			OverlaybdApiServer: "http://127.0.0.1:9862",
+		},
 	}
 }
 
@@ -206,6 +221,7 @@ type snapshotter struct {
 	turboFsType       []string
 	asyncRemove       bool
 	runtimeType       string
+	experimental      ExperimentalConfig
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -270,6 +286,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		turboFsType:       bootConfig.TurboFsType,
 		tenant:            bootConfig.Tenant,
 		quotaSize:         bootConfig.RootfsQuota,
+		experimental:      bootConfig.Experimental,
 		quotaDriver: &diskquota.PrjQuotaDriver{
 			QuotaIDs: make(map[uint32]struct{}),
 		},
@@ -423,7 +440,78 @@ func (o *snapshotter) isPrepareRootfs(info snapshots.Info) bool {
 	return true
 }
 
+func (o *snapshotter) preAuthEnabled() bool {
+	return o.experimental.Enabled && o.experimental.PreAuth
+}
+
+func (o *snapshotter) notifyOverlaybdAPIServer(configPath string) {
+	if !o.preAuthEnabled() || configPath == "" {
+		return
+	}
+
+	go func() {
+		address := strings.TrimSpace(o.experimental.OverlaybdApiServer)
+		if address == "" {
+			log.L.Warn("overlaybd api server address is empty")
+			return
+		}
+
+		authBase, err := url.Parse(address)
+		if err != nil {
+			log.L.WithError(err).Warnf("failed to parse overlaybd api server address %q", address)
+			return
+		}
+
+		authURL := authBase.ResolveReference(&url.URL{Path: "/auth"})
+		query := authURL.Query()
+		query.Set("config", configPath)
+		authURL.RawQuery = query.Encode()
+
+		log.L.Infof("overlaybd api request: %s", authURL.String())
+
+		reqCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, authURL.String(), nil)
+		if err != nil {
+			log.L.WithError(err).Warnf("failed to create overlaybd api request for %s", authURL.String())
+			return
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.L.WithError(err).Warnf("overlaybd api request failed: %s", authURL.String())
+			return
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.L.WithError(err).Warnf("failed to read overlaybd api response from %s", authURL.String())
+			return
+		}
+
+		log.L.Infof("overlaybd api response: url=%s status=%s body=%s", authURL.String(), resp.Status, strings.TrimSpace(string(body)))
+	}()
+}
+
 func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind, key string, parent string, opts ...snapshots.Opt) (_ []mount.Mount, retErr error) {
+	if parent != "" && o.preAuthEnabled() {
+		readCtx, readTxn, err := o.ms.TransactionContext(ctx, false)
+		if err != nil {
+			return nil, err
+		}
+
+		parentID, _, _, err := storage.GetInfo(readCtx, parent)
+		if rerr := readTxn.Rollback(); rerr != nil {
+			log.G(ctx).WithError(rerr).Warn("failed to rollback read transaction")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to get info of parent snapshot %s: %w", parent, err)
+		}
+
+		o.notifyOverlaybdAPIServer(o.overlaybdConfPath(parentID))
+	}
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
@@ -631,6 +719,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 			}
 			log.G(ctx).Debugf("attachAndMountBlockDevice (obdID: %s, writeType: %s, fsType %s, targetPath: %s)",
 				obdID, writeType, fsType, overlaybdTargetPath(obdHbaNum(o.tenant), obdID))
+			o.notifyOverlaybdAPIServer(o.overlaybdConfPath(obdID))
 			if err = o.attachAndMountBlockDevice(ctx, obdID, writeType, fsType, parent == ""); err != nil {
 				log.G(ctx).Errorf("%v", err)
 				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", obdID, err)
