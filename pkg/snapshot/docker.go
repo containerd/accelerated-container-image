@@ -48,19 +48,36 @@ func IsDockerContainerLayer(parent string) bool {
 	return strings.HasSuffix(parent, DockerInitSuffix) // || strings.Contains(parent, "-init")
 }
 
-// isDockerInitLayer checks if this is a Docker init layer
-// Only applies when runtimeType is "docker" and rwMode is "overlayfs"
+func (o *snapshotter) dockerWritableModeOrDefault() string {
+	if o.dockerWritableMode == "" {
+		return DockerWritableOverlayFS
+	}
+	return o.dockerWritableMode
+}
+
+// isDockerOverlayfsMode is the existing lazy-lower + kernel overlayfs upper path.
+func (o *snapshotter) isDockerOverlayfsMode() bool {
+	return o.runtimeType == "docker" &&
+		o.dockerWritableModeOrDefault() == DockerWritableOverlayFS &&
+		o.rwMode == RoDir
+}
+
+// isDockerNativeMode is the snapshot-capable native OverlayBD writable upper path.
+func (o *snapshotter) isDockerNativeMode() bool {
+	return o.runtimeType == "docker" && o.dockerWritableModeOrDefault() == DockerWritableNative
+}
+
+// isDockerInitLayer checks if this is a Docker init layer for either Docker mode.
 func (o *snapshotter) isDockerInitLayer(key string) bool {
-	if o.runtimeType != "docker" || o.rwMode != RoDir {
+	if !o.isDockerOverlayfsMode() && !o.isDockerNativeMode() {
 		return false
 	}
 	return IsDockerInitLayer(key)
 }
 
-// isDockerContainerLayer checks if the parent is a Docker init layer
-// Only applies when runtimeType is "docker" and rwMode is "overlayfs"
+// isDockerContainerLayer checks if the parent is a Docker init layer.
 func (o *snapshotter) isDockerContainerLayer(parent string) bool {
-	if o.runtimeType != "docker" || o.rwMode != RoDir {
+	if !o.isDockerOverlayfsMode() && !o.isDockerNativeMode() {
 		return false
 	}
 	return IsDockerContainerLayer(parent)
@@ -170,10 +187,14 @@ func (o *snapshotter) prepareDockerContainerLayer(ctx context.Context, s storage
 // PrepareDockerLayer handles Docker runtime layer preparation.
 // This function is called when preparing init layer or container layer in Docker mode.
 func (o *snapshotter) PrepareDockerLayer(ctx context.Context, key string, parent string, s storage.Snapshot,
-	parentID string, parentInfo snapshots.Info) ([]mount.Mount, storageType, error) {
+	parentID string, parentInfo snapshots.Info, kind snapshots.Kind) ([]mount.Mount, storageType, error) {
+
+	if o.isDockerNativeMode() {
+		return o.prepareDockerNativeLayer(ctx, key, parent, s, parentID, parentInfo, kind)
+	}
 
 	if o.isDockerInitLayer(key) {
-		// Docker init layer
+		// Docker init layer (overlayfs writable upper)
 		var parentStype storageType
 		if parent != "" {
 			var err error
@@ -198,6 +219,228 @@ func (o *snapshotter) PrepareDockerLayer(ctx context.Context, key string, parent
 	}
 
 	return nil, storageTypeUnknown, fmt.Errorf("not a Docker layer")
+}
+
+func (o *snapshotter) prepareDockerNativeLayer(ctx context.Context, key string, parent string,
+	s storage.Snapshot, parentID string, parentInfo snapshots.Info, kind snapshots.Kind) ([]mount.Mount, storageType, error) {
+
+	if o.isDockerInitLayer(key) {
+		m, stype, err := o.prepareDockerNativeInitLayer(ctx, key, s, parentID, parentInfo)
+		if err != nil {
+			return nil, storageTypeUnknown, err
+		}
+		return m, stype, nil
+	}
+	if o.isDockerContainerLayer(parent) {
+		// View(init) must expose the immutable image base so Moby diff/commit
+		// does not compare two aliases of the same mutable mount.
+		if kind == snapshots.KindView && isLiveSnapshotLabeled(parentInfo) {
+			m, err := o.viewDockerNativeInitBase(ctx, parentID, parentInfo)
+			if err != nil {
+				return nil, storageTypeUnknown, err
+			}
+			return m, storageTypeNormal, nil
+		}
+		m, err := o.prepareDockerNativeContainerLayer(ctx, key, s, parentID, parentInfo)
+		if err != nil {
+			return nil, storageTypeUnknown, err
+		}
+		return m, storageTypeNormal, nil
+	}
+	return nil, storageTypeUnknown, fmt.Errorf("not a Docker native layer")
+}
+
+// prepareDockerNativeInitLayer creates one owner OverlayBD device/mount over the
+// immutable image parent. Application and Docker init writes share this upper.
+func (o *snapshotter) prepareDockerNativeInitLayer(ctx context.Context, key string, s storage.Snapshot,
+	parentID string, parentInfo snapshots.Info) ([]mount.Mount, storageType, error) {
+
+	log.G(ctx).Infof("Preparing Docker native init owner (sn: %s, parent: %s)", s.ID, parentID)
+
+	parentStype := storageTypeNormal
+	if parentID != "" {
+		var err error
+		parentStype, err = o.identifySnapshotStorageType(ctx, parentID, parentInfo)
+		if err != nil {
+			return nil, storageTypeUnknown, err
+		}
+	}
+	if parentStype != storageTypeLocalBlock && parentStype != storageTypeRemoteBlock {
+		// Fall back to existing overlayfs Docker init handling for non-accelerated images.
+		m, err := o.prepareDockerInitLayer(ctx, s, parentID, parentInfo, parentStype)
+		return m, parentStype, err
+	}
+
+	// ConstructOverlayBDSpec expects the storage key, not the numeric snapshot ID.
+	if err := o.ConstructOverlayBDSpec(ctx, key, true); err != nil {
+		return nil, storageTypeUnknown, fmt.Errorf("construct native writable overlaybd spec: %w", err)
+	}
+
+	meta, err := o.ensureLiveSnapshotMetadata(s.ID)
+	if err != nil {
+		return nil, storageTypeUnknown, err
+	}
+
+	fsType, ok := parentInfo.Labels[label.OverlayBDBlobFsType]
+	if !ok {
+		if isTurboOCI, _, _ := o.checkTurboOCI(parentInfo.Labels); isTurboOCI {
+			_, fsType = o.turboOCIFsMeta(parentID)
+		} else {
+			fsType = o.defaultFsType
+		}
+	}
+
+	if err := o.attachAndMountBlockDeviceWithDevID(ctx, s.ID, RwDir, fsType, true, meta.DeviceID); err != nil {
+		return nil, storageTypeUnknown, fmt.Errorf("attach native writable overlaybd: %w", err)
+	}
+
+	if saved, err := os.ReadFile(o.overlaybdBackstoreMarkFile(s.ID)); err == nil {
+		meta.BlockDevicePath = string(saved)
+		if err := o.storeLiveSnapshotMetadata(meta); err != nil {
+			return nil, storageTypeUnknown, err
+		}
+	}
+
+	_, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return nil, storageTypeUnknown, err
+	}
+	if info.Labels == nil {
+		info.Labels = map[string]string{}
+	}
+	info.Labels[label.OverlayBDDeviceID] = meta.DeviceID
+	info.Labels[label.OverlayBDConfigPath] = meta.ConfigPath
+	info.Labels[label.OverlayBDDeviceOwner] = s.ID
+	info.Labels[label.OverlayBDNativeBaseSnapshot] = parentID
+	info.Labels[label.OverlayBDLiveSnapshot] = "true"
+	info.Labels[label.SupportReadWriteMode] = "dir"
+	if _, err := storage.UpdateInfo(ctx, info); err != nil {
+		return nil, storageTypeUnknown, fmt.Errorf("persist native live-snapshot labels: %w", err)
+	}
+
+	return []mount.Mount{{
+		Source:  meta.Mountpoint,
+		Type:    "bind",
+		Options: []string{"rw", "rbind"},
+	}}, storageTypeLocalBlock, nil
+}
+
+// prepareDockerNativeContainerLayer aliases the init owner's mount/device so
+// there is exactly one writable OverlayBD upper for init+container writes.
+func (o *snapshotter) prepareDockerNativeContainerLayer(ctx context.Context, key string, s storage.Snapshot,
+	initID string, initInfo snapshots.Info) ([]mount.Mount, error) {
+
+	log.G(ctx).Infof("Preparing Docker native container alias (sn: %s, owner: %s)", s.ID, initID)
+
+	if initInfo.Labels[label.OverlayBDLiveSnapshot] != "true" &&
+		initInfo.Labels[label.OverlayBDDeviceID] == "" {
+		// Owner was prepared under overlayfs mode or is not live-snapshot capable.
+		return o.prepareDockerContainerLayer(ctx, s, initID, initInfo)
+	}
+
+	if err := ensureSingleLiveSnapshotChild(ctx, initInfo.Name, key); err != nil {
+		return nil, err
+	}
+
+	meta, err := o.loadLiveSnapshotMetadata(initID)
+	if err != nil {
+		return nil, fmt.Errorf("load owner live-snapshot metadata: %w", err)
+	}
+
+	if err := o.ensureLiveSnapshotOwnerMounted(ctx, initID, meta); err != nil {
+		return nil, err
+	}
+
+	_, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if info.Labels == nil {
+		info.Labels = map[string]string{}
+	}
+	info.Labels[label.OverlayBDDeviceID] = meta.DeviceID
+	info.Labels[label.OverlayBDConfigPath] = meta.ConfigPath
+	info.Labels[label.OverlayBDDeviceOwner] = initID
+	info.Labels[label.OverlayBDLiveSnapshot] = "true"
+	if base := initInfo.Labels[label.OverlayBDNativeBaseSnapshot]; base != "" {
+		info.Labels[label.OverlayBDNativeBaseSnapshot] = base
+	}
+	if _, err := storage.UpdateInfo(ctx, info); err != nil {
+		return nil, fmt.Errorf("persist native container alias labels: %w", err)
+	}
+
+	return []mount.Mount{{
+		Source:  meta.Mountpoint,
+		Type:    "bind",
+		Options: []string{"rw", "rbind"},
+	}}, nil
+}
+
+// viewDockerNativeInitBase returns a readonly bind of the immutable image base
+// under a live-snapshot init owner. Moby uses View(init) for diff/commit.
+func (o *snapshotter) viewDockerNativeInitBase(ctx context.Context, initID string, initInfo snapshots.Info) ([]mount.Mount, error) {
+	baseID := initInfo.Labels[label.OverlayBDNativeBaseSnapshot]
+	if baseID == "" {
+		return nil, fmt.Errorf("live-snapshot init %s missing native base snapshot", initID)
+	}
+
+	fsType := o.defaultFsType
+	if initInfo.Parent != "" {
+		_, parentInfo, _, err := storage.GetInfo(ctx, initInfo.Parent)
+		if err == nil {
+			if ft, ok := parentInfo.Labels[label.OverlayBDBlobFsType]; ok {
+				fsType = ft
+			} else if isTurboOCI, _, _ := o.checkTurboOCI(parentInfo.Labels); isTurboOCI {
+				_, fsType = o.turboOCIFsMeta(baseID)
+			}
+		}
+	}
+
+	if err := o.attachAndMountBlockDevice(ctx, baseID, RoDir, fsType, false); err != nil {
+		return nil, fmt.Errorf("attach native base snapshot %s for View(init): %w", baseID, err)
+	}
+
+	return []mount.Mount{{
+		Source:  o.overlaybdMountpoint(baseID),
+		Type:    "bind",
+		Options: []string{"ro", "rbind"},
+	}}, nil
+}
+
+func (o *snapshotter) ensureLiveSnapshotOwnerMounted(ctx context.Context, ownerID string, meta *liveSnapshotMetadata) error {
+	if meta == nil {
+		var err error
+		meta, err = o.loadLiveSnapshotMetadata(ownerID)
+		if err != nil {
+			return fmt.Errorf("load owner live-snapshot metadata: %w", err)
+		}
+	}
+	fsType := o.defaultFsType
+	if err := o.attachAndMountBlockDeviceWithDevID(ctx, ownerID, RwDir, fsType, false, meta.DeviceID); err != nil {
+		return fmt.Errorf("ensure owner overlaybd device mounted: %w", err)
+	}
+	return nil
+}
+
+// mountsDockerNativeLiveSnapshot returns a bind mount to the shared owner
+// mountpoint for native live-snapshot owners and container aliases.
+func (o *snapshotter) mountsDockerNativeLiveSnapshot(ctx context.Context, id string, info snapshots.Info) ([]mount.Mount, error) {
+	ownerID := info.Labels[label.OverlayBDDeviceOwner]
+	if ownerID == "" {
+		return nil, fmt.Errorf("live-snapshot snapshot %s missing device owner", id)
+	}
+	meta, err := o.loadLiveSnapshotMetadata(ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("load owner live-snapshot metadata: %w", err)
+	}
+	if err := o.ensureLiveSnapshotOwnerMounted(ctx, ownerID, meta); err != nil {
+		return nil, err
+	}
+	return []mount.Mount{{
+		Source:  meta.Mountpoint,
+		Type:    "bind",
+		Options: []string{"rw", "rbind"},
+	}}, nil
 }
 
 // RemoveDockerLayer handles Docker init layer removal.

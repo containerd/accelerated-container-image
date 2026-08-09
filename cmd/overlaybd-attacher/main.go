@@ -134,7 +134,11 @@ func attachAction(c *cli.Context) error {
 	}
 
 	ctx := context.Background()
-	params := snapshot.NewAttachDeviceParams(id, tenant, absConfigPath, resultFile, withDevID)
+	devID := ""
+	if withDevID {
+		devID = id
+	}
+	params := snapshot.NewAttachDeviceParams(id, tenant, absConfigPath, resultFile, devID)
 
 	logrus.Infof("attaching device: id=%s, tenant=%d, config=%s, resultFile=%s, withDevID=%t", id, tenant, absConfigPath, resultFile, withDevID)
 

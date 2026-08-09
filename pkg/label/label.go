@@ -103,6 +103,27 @@ const (
 
 	// ActiveLayerDir is the label to mark active layer directory, default is snapshots/$snid/
 	ActiveLayerDir = "containerd.io/snapshot/overlay.active.path"
+
+	// OverlayBDDeviceID identifies a writable OverlayBD device registered with
+	// the live-snapshot service.
+	OverlayBDDeviceID = "containerd.io/snapshot/overlaybd/device-id"
+
+	// OverlayBDConfigPath is the canonical config path used to recover an
+	// OverlayBD device after the snapshotter or host restarts.
+	OverlayBDConfigPath = "containerd.io/snapshot/overlaybd/config-path"
+
+	// OverlayBDDeviceOwner is the snapshot ID which owns a Docker native
+	// writable device. Docker's active container snapshot aliases the private
+	// device created for its init snapshot.
+	OverlayBDDeviceOwner = "containerd.io/snapshot/overlaybd/device-owner"
+
+	// OverlayBDNativeBaseSnapshot records the immutable image snapshot below a
+	// Docker native writable device.
+	OverlayBDNativeBaseSnapshot = "containerd.io/snapshot/overlaybd/native-base-snapshot"
+
+	// OverlayBDLiveSnapshot marks snapshots whose device is registered with the
+	// local OverlayBD live-snapshot service.
+	OverlayBDLiveSnapshot = "containerd.io/snapshot/overlaybd/live-snapshot"
 )
 
 // OverlayBDAnnotations is used in filterAnnotationsForSave (https://github.com/moby/buildkit/blob/v0.11/cache/refs.go#L882)
