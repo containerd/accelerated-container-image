@@ -769,15 +769,14 @@ func (o *snapshotter) ConstructOverlayBDSpec(ctx context.Context, key string, wr
 		if !writable {
 			return fmt.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
-		vsizeGB := 0
-		if info.Parent == "" {
-			if vsize, ok := info.Labels[label.OverlayBDVsize]; ok {
-				vsizeGB, err = strconv.Atoi(vsize)
-				if err != nil {
-					vsizeGB = 64
-				}
-			} else {
-				vsizeGB = 64
+		// Writable uppers always need a non-zero virtual size. Docker-native
+		// init owners have a parent (the image top layer); previously only
+		// parent-less snapshots defaulted to 64G, leaving vsize=0 and breaking
+		// TCMU enable for native writable attaches.
+		vsizeGB := 64
+		if vsize, ok := info.Labels[label.OverlayBDVsize]; ok {
+			if parsed, parseErr := strconv.Atoi(vsize); parseErr == nil && parsed > 0 {
+				vsizeGB = parsed
 			}
 		}
 		rwdir := o.blockPath(id)
