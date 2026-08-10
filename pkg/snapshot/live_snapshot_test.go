@@ -237,6 +237,63 @@ func TestNewSnapshotterDockerWritableModeValidation(t *testing.T) {
 	defer sn.Close()
 }
 
+func TestCopyRuntimeOwnedOverlayBDLabels(t *testing.T) {
+	labels := map[string]string{
+		label.OverlayBDLiveSnapshot:      "true",
+		label.OverlayBDDeviceID:          "dev",
+		label.OverlayBDConfigPath:        "/cfg",
+		label.OverlayBDDeviceOwner:       "2",
+		label.OverlayBDNativeBaseSnapshot: "1",
+		label.SupportReadWriteMode:       "dir",
+		"user.label":                     "keep-out",
+	}
+	got := copyRuntimeOwnedOverlayBDLabels(labels)
+	want := map[string]string{
+		label.OverlayBDLiveSnapshot:       "true",
+		label.OverlayBDDeviceID:           "dev",
+		label.OverlayBDConfigPath:         "/cfg",
+		label.OverlayBDDeviceOwner:        "2",
+		label.OverlayBDNativeBaseSnapshot: "1",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v want %#v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("key %s: got %q want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestWithPreservedRuntimeOwnedLabelsSurvivesWithLabelsReplace(t *testing.T) {
+	preserved := map[string]string{
+		label.OverlayBDLiveSnapshot: "true",
+		label.OverlayBDDeviceID:     "dev",
+		label.OverlayBDDeviceOwner:  "2",
+	}
+	info := snapshots.Info{
+		Labels: map[string]string{
+			label.OverlayBDLiveSnapshot: "true",
+			label.OverlayBDDeviceID:     "dev",
+			label.OverlayBDDeviceOwner:  "2",
+			"other":                     "x",
+		},
+	}
+	// Simulate Moby Commit: WithLabels replaces the entire map.
+	if err := snapshots.WithLabels(map[string]string{"moby": "1"})(&info); err != nil {
+		t.Fatalf("WithLabels: %v", err)
+	}
+	if err := withPreservedRuntimeOwnedLabels(preserved)(&info); err != nil {
+		t.Fatalf("preserve: %v", err)
+	}
+	if info.Labels[label.OverlayBDLiveSnapshot] != "true" || info.Labels[label.OverlayBDDeviceID] != "dev" {
+		t.Fatalf("runtime labels not preserved: %#v", info.Labels)
+	}
+	if info.Labels["moby"] != "1" {
+		t.Fatalf("moby labels should remain: %#v", info.Labels)
+	}
+}
+
 func TestShouldSkipSealOnLiveSnapshotCommit(t *testing.T) {
 	cases := []struct {
 		name string

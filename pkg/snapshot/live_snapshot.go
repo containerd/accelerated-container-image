@@ -140,6 +140,42 @@ func isLiveSnapshotLabeled(info snapshots.Info) bool {
 	return info.Labels[label.OverlayBDLiveSnapshot] == "true"
 }
 
+// copyRuntimeOwnedOverlayBDLabels returns the runtime-owned OverlayBD labels
+// that must survive CommitActive. Moby Commit opts use snapshots.WithLabels,
+// which replaces the entire label map and would otherwise drop these.
+func copyRuntimeOwnedOverlayBDLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for key, value := range labels {
+		if isRuntimeOwnedOverlayBDLabel(key) {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// withPreservedRuntimeOwnedLabels merges runtime-owned OverlayBD labels into
+// the committed snapshot info after any WithLabels opt has replaced the map.
+func withPreservedRuntimeOwnedLabels(preserved map[string]string) snapshots.Opt {
+	return func(info *snapshots.Info) error {
+		if len(preserved) == 0 {
+			return nil
+		}
+		if info.Labels == nil {
+			info.Labels = map[string]string{}
+		}
+		for key, value := range preserved {
+			info.Labels[key] = value
+		}
+		return nil
+	}
+}
+
 // isLiveSnapshotOwner reports whether snapshot id owns the Docker-native
 // writable OverlayBD device (collapsed init).
 func isLiveSnapshotOwner(id string, info snapshots.Info) bool {

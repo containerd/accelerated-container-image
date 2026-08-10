@@ -290,7 +290,9 @@ func (o *snapshotter) prepareDockerNativeInitLayer(ctx context.Context, key stri
 		}
 	}
 
-	if err := o.attachAndMountBlockDeviceWithDevID(ctx, s.ID, RwDir, fsType, true, meta.DeviceID); err != nil {
+	// The OverlayBD device already presents the image filesystem from lowers.
+	// mkfs would write an empty FS into the writable upper and hide the image.
+	if err := o.attachAndMountBlockDeviceWithDevID(ctx, s.ID, RwDir, fsType, false, meta.DeviceID); err != nil {
 		return nil, storageTypeUnknown, fmt.Errorf("attach native writable overlaybd: %w", err)
 	}
 

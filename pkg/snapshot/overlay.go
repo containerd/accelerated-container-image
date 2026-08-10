@@ -891,6 +891,11 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 	// Sealing happens later at a HUD-controlled snapshot boundary, not on
 	// Docker Commit of the collapsed init (or alias) layer.
 	liveSnapshot := isLiveSnapshotLabeled(oinfo)
+	// Moby Commit passes snapshots.WithLabels, which replaces the label map.
+	// Re-apply runtime-owned live-snapshot labels after that replacement.
+	if preserved := copyRuntimeOwnedOverlayBDLabels(oinfo.Labels); len(preserved) > 0 {
+		opts = append(opts, withPreservedRuntimeOwnedLabels(preserved))
+	}
 
 	// if writable, should commit the data and make it immutable.
 	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD && !liveSnapshot {
