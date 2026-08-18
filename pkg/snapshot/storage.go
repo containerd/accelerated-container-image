@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -78,16 +79,16 @@ type AttachDeviceParams struct {
 
 	configPath string // config.v1.json
 	resultFile string // init-debug.log
-	withDevID  bool
+	devID      string
 }
 
-func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string, withDevID bool) *AttachDeviceParams {
+func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string, devID string) *AttachDeviceParams {
 	return &AttachDeviceParams{
 		id:         id,
 		tenant:     tenant,
 		configPath: configPath,
 		resultFile: resultFile,
-		withDevID:  withDevID,
+		devID:      devID,
 	}
 }
 
@@ -329,13 +330,13 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 		}
 	}()
 
-	if params.withDevID {
-		if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s;%s", configPath, snID)), 0666); err != nil {
-			return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s;%s: %w", targetPath, configPath, snID, err)
+	if params.devID != "" {
+		if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s;%s", configPath, params.devID)), 0666); err != nil {
+			return devName, fmt.Errorf("failed to write target live-snapshot dev_config for %s: %w", targetPath, err)
 		}
 	} else {
 		if err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("dev_config=overlaybd/%s", configPath)), 0666); err != nil {
-			return devName, fmt.Errorf("failed to write target dev_config for %s: dev_config=overlaybd/%s: %w", targetPath, configPath, err)
+			return devName, fmt.Errorf("failed to write target dev_config for %s: %w", targetPath, err)
 		}
 	}
 
@@ -474,7 +475,11 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 // attachAndMountBlockDevice
 //
 // TODO(fuweid): need to track the middle state if the process has been killed.
-func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) (retErr error) {
+func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string, writable string, fsType string, mkfs bool) error {
+	return o.attachAndMountBlockDeviceWithDevID(ctx, snID, writable, fsType, mkfs, "")
+}
+
+func (o *snapshotter) attachAndMountBlockDeviceWithDevID(ctx context.Context, snID string, writable string, fsType string, mkfs bool, devID string) (retErr error) {
 
 	configPath := o.overlaybdConfPath(snID)
 
@@ -485,24 +490,38 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	} else {
 		log.G(ctx).Info(err.Error())
 	}
+	devSavedPath := o.overlaybdBackstoreMarkFile(snID)
+	if savedDevice, err := os.ReadFile(devSavedPath); err == nil {
+		device := string(savedDevice)
+		if _, err := os.Stat(device); err == nil {
+			return o.mountBlockDevice(ctx, snID, device, writable, fsType, false)
+		}
+		if err := os.Remove(devSavedPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("failed to remove stale backstore mark for snapshot %s: %w", snID, err)
+		}
+	}
+
 	device, err := AttachDevice(ctx,
 		NewAttachDeviceParams(
 			snID,
 			o.tenant,
 			configPath,
 			o.overlaybdInitDebuglogPath(snID),
-			false,
+			devID,
 		),
 	)
 	if err != nil {
 		return err
 	}
-	devSavedPath := o.overlaybdBackstoreMarkFile(snID)
 	if err := os.WriteFile(devSavedPath, []byte(device), 0644); err != nil {
 		// o.DetachDevice(ctx, snID)
 		return fmt.Errorf("failed to create backstore mark file of snapshot %s: %w", snID, err)
 	}
 	log.G(ctx).Debugf("write device name: %s into file: %s", device, devSavedPath)
+	return o.mountBlockDevice(ctx, snID, device, writable, fsType, mkfs)
+}
+
+func (o *snapshotter) mountBlockDevice(ctx context.Context, snID string, device string, writable string, fsType string, mkfs bool) (retErr error) {
 	options := strings.Split(fsType, ";")
 	fstype := options[0]
 
@@ -750,15 +769,14 @@ func (o *snapshotter) ConstructOverlayBDSpec(ctx context.Context, key string, wr
 		if !writable {
 			return fmt.Errorf("unexpect storage %v of snapshot %v during construct overlaybd spec(writable=%v, parent=%s)", stype, key, writable, info.Parent)
 		}
-		vsizeGB := 0
-		if info.Parent == "" {
-			if vsize, ok := info.Labels[label.OverlayBDVsize]; ok {
-				vsizeGB, err = strconv.Atoi(vsize)
-				if err != nil {
-					vsizeGB = 64
-				}
-			} else {
-				vsizeGB = 64
+		// Writable uppers always need a non-zero virtual size. Docker-native
+		// init owners have a parent (the image top layer); previously only
+		// parent-less snapshots defaulted to 64G, leaving vsize=0 and breaking
+		// TCMU enable for native writable attaches.
+		vsizeGB := 64
+		if vsize, ok := info.Labels[label.OverlayBDVsize]; ok {
+			if parsed, parseErr := strconv.Atoi(vsize); parseErr == nil && parsed > 0 {
+				vsizeGB = parsed
 			}
 		}
 		rwdir := o.blockPath(id)

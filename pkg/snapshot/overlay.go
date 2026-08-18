@@ -78,6 +78,9 @@ const (
 	RwDir = "dir"       // mount overlaybd as rootfs, return overlaybd mountpoint
 	RwDev = "dev"       // use overlaybd directly, return overlaybd devName
 
+	DockerWritableOverlayFS = "overlayfs"
+	DockerWritableNative    = "native"
+
 	LayerBlob = "layer" // decompressed tgz layer (maybe compressed by ZFile)
 )
 
@@ -87,21 +90,22 @@ type Registry struct {
 }
 
 type BootConfig struct {
-	AsyncRemove       bool                   `json:"asyncRemove"`
-	Address           string                 `json:"address"`
-	Root              string                 `json:"root"`
-	LogLevel          string                 `json:"verbose"`
-	LogReportCaller   bool                   `json:"logReportCaller"`
-	RwMode            string                 `json:"rwMode"` // overlayfs, dir or dev
-	AutoRemoveDev     bool                   `json:"autoRemoveDev"`
-	ExporterConfig    metrics.ExporterConfig `json:"exporterConfig"`
-	WritableLayerType string                 `json:"writableLayerType"` // append or sparse
-	MirrorRegistry    []Registry             `json:"mirrorRegistry"`
-	DefaultFsType     string                 `json:"defaultFsType"`
-	RootfsQuota       string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
-	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
-	TurboFsType       []string               `json:"turboFsType"`
-	RuntimeType       string                 `json:"runtimeType"` // "containerd" (default) or "docker"
+	AsyncRemove        bool                   `json:"asyncRemove"`
+	Address            string                 `json:"address"`
+	Root               string                 `json:"root"`
+	LogLevel           string                 `json:"verbose"`
+	LogReportCaller    bool                   `json:"logReportCaller"`
+	RwMode             string                 `json:"rwMode"` // overlayfs, dir or dev
+	AutoRemoveDev      bool                   `json:"autoRemoveDev"`
+	ExporterConfig     metrics.ExporterConfig `json:"exporterConfig"`
+	WritableLayerType  string                 `json:"writableLayerType"` // append or sparse
+	MirrorRegistry     []Registry             `json:"mirrorRegistry"`
+	DefaultFsType      string                 `json:"defaultFsType"`
+	RootfsQuota        string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
+	Tenant             int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
+	TurboFsType        []string               `json:"turboFsType"`
+	RuntimeType        string                 `json:"runtimeType"`        // "containerd" (default) or "docker"
+	DockerWritableMode string                 `json:"dockerWritableMode"` // overlayfs (default) or native
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -125,7 +129,8 @@ func DefaultBootConfig() *BootConfig {
 			"erofs",
 			"ext4",
 		},
-		RuntimeType: "containerd",
+		RuntimeType:        "containerd",
+		DockerWritableMode: DockerWritableOverlayFS,
 	}
 }
 
@@ -191,21 +196,22 @@ func AsynchronousRemove(config *BootConfig) error {
 //	#
 //	- metadata.db
 type snapshotter struct {
-	root              string
-	rwMode            string
-	config            SnapshotterConfig
-	metacopyOption    string
-	ms                *storage.MetaStore
-	indexOff          bool
-	autoRemoveDev     bool
-	writableLayerType string
-	mirrorRegistry    []Registry
-	defaultFsType     string
-	tenant            int
-	locker            *locker.Locker
-	turboFsType       []string
-	asyncRemove       bool
-	runtimeType       string
+	root               string
+	rwMode             string
+	config             SnapshotterConfig
+	metacopyOption     string
+	ms                 *storage.MetaStore
+	indexOff           bool
+	autoRemoveDev      bool
+	writableLayerType  string
+	mirrorRegistry     []Registry
+	defaultFsType      string
+	tenant             int
+	locker             *locker.Locker
+	turboFsType        []string
+	asyncRemove        bool
+	runtimeType        string
+	dockerWritableMode string
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -213,6 +219,15 @@ type snapshotter struct {
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
 func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter, error) {
+	if bootConfig.DockerWritableMode == "" {
+		bootConfig.DockerWritableMode = DockerWritableOverlayFS
+	}
+	if bootConfig.DockerWritableMode != DockerWritableOverlayFS && bootConfig.DockerWritableMode != DockerWritableNative {
+		return nil, fmt.Errorf("unsupported Docker writable mode %q", bootConfig.DockerWritableMode)
+	}
+	if bootConfig.DockerWritableMode == DockerWritableNative && bootConfig.RuntimeType != "docker" {
+		return nil, fmt.Errorf("Docker writable mode %q requires runtimeType %q", DockerWritableNative, "docker")
+	}
 	config := defaultConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -273,8 +288,9 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		quotaDriver: &diskquota.PrjQuotaDriver{
 			QuotaIDs: make(map[uint32]struct{}),
 		},
-		asyncRemove: bootConfig.AsyncRemove,
-		runtimeType: bootConfig.RuntimeType,
+		asyncRemove:        bootConfig.AsyncRemove,
+		runtimeType:        bootConfig.RuntimeType,
+		dockerWritableMode: bootConfig.DockerWritableMode,
 	}, nil
 }
 
@@ -304,8 +320,7 @@ func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, r
 // Updates updates the label of the given snapshot.
 //
 // NOTE: It supports patch-update.
-//
-// TODO(fuweid): should not touch the interface-like or internal label!
+// Runtime-owned OverlayBD live-snapshot labels cannot be mutated by clients.
 func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpaths ...string) (_ snapshots.Info, retErr error) {
 	log.G(ctx).Infof("Update (fieldpaths: %s)", fieldpaths)
 	start := time.Now()
@@ -318,6 +333,16 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 
 	ctx, t, err := o.ms.TransactionContext(ctx, true)
 	if err != nil {
+		return snapshots.Info{}, err
+	}
+
+	_, current, _, err := storage.GetInfo(ctx, info.Name)
+	if err != nil {
+		t.Rollback()
+		return snapshots.Info{}, err
+	}
+	if err := rejectRuntimeOwnedLabelMutation(current, info, fieldpaths...); err != nil {
+		t.Rollback()
 		return snapshots.Info{}, err
 	}
 
@@ -553,7 +578,7 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 
 	// Docker runtime: handle init and container layers
 	if o.isDockerInitLayer(key) || o.isDockerContainerLayer(parent) {
-		m, _, err := o.PrepareDockerLayer(ctx, key, parent, s, parentID, parentInfo)
+		m, _, err := o.PrepareDockerLayer(ctx, key, parent, s, parentID, parentInfo, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -754,17 +779,34 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 	log.G(ctx).Debugf("Mounts (key: %s, id: %s, parentID: %s, kind: %d)", key, s.ID, s.ParentIDs, s.Kind)
 
+	_, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get info: %w", err)
+	}
+
+	// Native Docker live-snapshot owners/aliases always bind the shared owner mount.
+	if isLiveSnapshotLabeled(info) {
+		return o.mountsDockerNativeLiveSnapshot(ctx, s.ID, info)
+	}
+
+	// View(init) for a live-snapshot owner must keep exposing the immutable
+	// image base (same as Prepare/View), not the mutable owner device.
+	if s.Kind == snapshots.KindView && info.Parent != "" && o.isDockerContainerLayer(info.Parent) {
+		parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get info of parent snapshot %s: %w", info.Parent, err)
+		}
+		if isLiveSnapshotLabeled(parentInfo) {
+			return o.viewDockerNativeInitBase(ctx, parentID, parentInfo)
+		}
+	}
+
 	if len(s.ParentIDs) > 0 {
 		if o.autoRemoveDev {
 			o.locker.Lock(s.ID)
 			defer o.locker.Unlock(s.ID)
 			o.locker.Lock(s.ParentIDs[0])
 			defer o.locker.Unlock(s.ParentIDs[0])
-		}
-
-		_, info, _, err := storage.GetInfo(ctx, key)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get info: %w", err)
 		}
 
 		writeType := o.getWritableType(ctx, s.ID, info)
@@ -845,8 +887,18 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		return fmt.Errorf("failed to get info of snapshot %s: %w", key, err)
 	}
 
+	// Docker native live-snapshot owners keep the writable device mounted.
+	// Sealing happens later at a HUD-controlled snapshot boundary, not on
+	// Docker Commit of the collapsed init (or alias) layer.
+	liveSnapshot := isLiveSnapshotLabeled(oinfo)
+	// Moby Commit passes snapshots.WithLabels, which replaces the label map.
+	// Re-apply runtime-owned live-snapshot labels after that replacement.
+	if preserved := copyRuntimeOwnedOverlayBDLabels(oinfo.Labels); len(preserved) > 0 {
+		opts = append(opts, withPreservedRuntimeOwnedLabels(preserved))
+	}
+
 	// if writable, should commit the data and make it immutable.
-	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD {
+	if _, writableBD := oinfo.Labels[label.SupportReadWriteMode]; writableBD && !liveSnapshot {
 		// TODO(fuweid): how to rollback?
 		if oinfo.Labels[label.AccelerationLayer] == "yes" {
 			log.G(ctx).Info("Commit accel-layer requires no writable_data")
@@ -863,6 +915,8 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 
 			opts = append(opts, snapshots.WithLabels(map[string]string{label.LocalOverlayBDPath: o.overlaybdSealedFilePath(id)}))
 		}
+	} else if liveSnapshot {
+		log.G(ctx).Infof("Commit preserves live-snapshot writable device (sn: %s)", id)
 	}
 
 	if isOverlaybd, err := zdfs.PrepareOverlayBDSpec(ctx, key, id, o.snPath(id), oinfo, o.snPath); isOverlaybd {
@@ -904,7 +958,7 @@ func (o *snapshotter) Commit(ctx context.Context, name, key string, opts ...snap
 		stype = storageTypeLocalBlock
 	}
 
-	if stype == storageTypeLocalBlock {
+	if stype == storageTypeLocalBlock && !liveSnapshot {
 		if err := o.ConstructOverlayBDSpec(ctx, name, false); err != nil {
 			return fmt.Errorf("failed to construct overlaybd config: %w", err)
 		}
@@ -1039,12 +1093,26 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return err
 	}
 
+	// Container aliases only drop metadata; the shared owner device stays until
+	// the private init owner itself is removed with no remaining children.
+	if isLiveSnapshotAlias(id, info) {
+		log.G(ctx).Infof("Remove live-snapshot alias (key: %s, owner: %s)", key, info.Labels[label.OverlayBDDeviceOwner])
+	} else if isLiveSnapshotOwner(id, info) {
+		inuse, err := checkIsParent(ctx, key, "")
+		if err != nil {
+			return mylog.TracedErrorf(ctx, "failed to check live-snapshot owner children for %s: %w", key, err)
+		}
+		if inuse {
+			return mylog.TracedErrorf(ctx, "cannot remove live-snapshot owner %s while child snapshots exist: %w", key, errdefs.ErrFailedPrecondition)
+		}
+	}
+
 	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
 	}
 
-	if stype != storageTypeNormal {
+	if stype != storageTypeNormal && !isLiveSnapshotAlias(id, info) {
 		_, err = os.Stat(o.overlaybdBackstoreMarkFile(id))
 		if err == nil {
 			err = o.UnmountAndDetachBlockDevice(ctx, id, key, "")
@@ -1055,14 +1123,15 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	}
 
 	// Docker init layer: check if parent's overlaybd device should be destroyed
-	if o.isDockerInitLayer(key) {
+	if o.isDockerInitLayer(key) && !isLiveSnapshotOwner(id, info) {
 		if err := o.RemoveDockerLayer(ctx, key, id, info); err != nil {
 			log.G(ctx).Warnf("failed to handle docker init layer removal: %v", err)
 		}
 	}
 
-	// for TypeNormal, verify its(parent) meets the condition of overlaybd format
-	if o.autoRemoveDev {
+	// for TypeNormal, verify its(parent) meets the condition of overlaybd format.
+	// Never auto-detach a live-snapshot owner while removing a container alias.
+	if o.autoRemoveDev && !isLiveSnapshotAlias(id, info) {
 		if s, err := storage.GetSnapshot(ctx, key); err == nil && s.Kind == snapshots.KindActive && len(s.ParentIDs) > 0 {
 			o.locker.Lock(s.ID)
 			defer o.locker.Unlock(s.ID)
@@ -1076,8 +1145,9 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 				if err != nil {
 					return mylog.TracedErrorf(ctx, "failed to get parent snapshot info for %s: %w", s.ParentIDs[0], err)
 				}
-				err = o.UnmountAndDetachBlockDevice(ctx, s.ParentIDs[0], parentInfo.Name, key)
-				if err != nil {
+				if isLiveSnapshotOwner(s.ParentIDs[0], parentInfo) {
+					log.G(ctx).Infof("skip autoRemoveDev detach for live-snapshot owner parent %s", s.ParentIDs[0])
+				} else if err = o.UnmountAndDetachBlockDevice(ctx, s.ParentIDs[0], parentInfo.Name, key); err != nil {
 					return mylog.TracedErrorf(ctx, "failed to destroy target device for snapshot %s: %w", key, err)
 				}
 			}

@@ -71,26 +71,35 @@ func TestIsDockerContainerLayer(t *testing.T) {
 }
 
 // TestSnapshotterDockerGates makes sure the snapshotter methods
-// honour both the runtimeType and rwMode gates, so Docker-specific
-// behaviour only kicks in under runtimeType="docker" AND rwMode=RoDir.
+// honour both the runtimeType and writable-mode gates, so Docker-specific
+// behaviour only kicks in under runtimeType="docker" with either the
+// overlayfs (lazy) or native live-snapshot writable mode.
 func TestSnapshotterDockerGates(t *testing.T) {
 	cases := []struct {
-		name        string
-		runtimeType string
-		rwMode      string
-		key         string
-		parent      string
-		wantInit    bool
-		wantCont    bool
+		name               string
+		runtimeType        string
+		rwMode             string
+		dockerWritableMode string
+		key                string
+		parent             string
+		wantInit           bool
+		wantCont           bool
 	}{
-		{"docker + overlayfs", "docker", RoDir, "foo-init-key", "foo-init", true, true},
-		{"docker + RwDir (gated off)", "docker", RwDir, "foo-init-key", "foo-init", false, false},
-		{"containerd runtime (gated off)", "containerd", RoDir, "foo-init-key", "foo-init", false, false},
-		{"docker + non-init key", "docker", RoDir, "foo", "bar", false, false},
+		{"docker + overlayfs", "docker", RoDir, DockerWritableOverlayFS, "foo-init-key", "foo-init", true, true},
+		{"docker + overlayfs default mode", "docker", RoDir, "", "foo-init-key", "foo-init", true, true},
+		{"docker + RwDir (gated off)", "docker", RwDir, DockerWritableOverlayFS, "foo-init-key", "foo-init", false, false},
+		{"containerd runtime (gated off)", "containerd", RoDir, DockerWritableOverlayFS, "foo-init-key", "foo-init", false, false},
+		{"docker + non-init key", "docker", RoDir, DockerWritableOverlayFS, "foo", "bar", false, false},
+		{"docker + native", "docker", RoDir, DockerWritableNative, "foo-init-key", "foo-init", true, true},
+		{"docker + native ignores rwMode", "docker", RwDir, DockerWritableNative, "foo-init-key", "foo-init", true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			o := &snapshotter{runtimeType: tc.runtimeType, rwMode: tc.rwMode}
+			o := &snapshotter{
+				runtimeType:        tc.runtimeType,
+				rwMode:             tc.rwMode,
+				dockerWritableMode: tc.dockerWritableMode,
+			}
 			if got := o.isDockerInitLayer(tc.key); got != tc.wantInit {
 				t.Errorf("isDockerInitLayer = %v, want %v", got, tc.wantInit)
 			}
