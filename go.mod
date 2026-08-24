@@ -14,7 +14,7 @@ require (
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/go-cni v1.1.13
 	github.com/containerd/log v0.1.0
-	github.com/containerd/platforms v1.0.0-rc.4
+	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/data-accelerator/zdfs v0.1.5
 	github.com/docker/go-units v0.5.0
 	github.com/go-sql-driver/mysql v1.10.0
