@@ -3,7 +3,7 @@ module github.com/containerd/accelerated-container-image/ci/e2e
 go 1.26.3
 
 require (
-	github.com/containerd/containerd/v2 v2.3.4
+	github.com/containerd/containerd/v2 v2.3.5
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.11.1
 	oras.land/oras-go/v2 v2.6.2
@@ -12,7 +12,7 @@ require (
 require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
-	github.com/containerd/platforms v1.0.0-rc.4 // indirect
+	github.com/containerd/platforms v1.0.0-rc.5 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
