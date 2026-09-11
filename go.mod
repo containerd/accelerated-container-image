@@ -9,12 +9,12 @@ go 1.26.3
 
 require (
 	github.com/containerd/containerd/api v1.11.1
-	github.com/containerd/containerd/v2 v2.3.3
+	github.com/containerd/containerd/v2 v2.3.5
 	github.com/containerd/continuity v0.5.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/go-cni v1.1.13
 	github.com/containerd/log v0.1.0
-	github.com/containerd/platforms v1.0.0-rc.4
+	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/data-accelerator/zdfs v0.1.5
 	github.com/docker/go-units v0.5.0
 	github.com/go-sql-driver/mysql v1.10.0
@@ -104,7 +104,7 @@ require (
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apimachinery v0.36.0 // indirect
+	k8s.io/apimachinery v0.36.3 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 	tags.cncf.io/container-device-interface v1.1.0 // indirect
