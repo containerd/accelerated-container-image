@@ -6,5 +6,10 @@
     "runtimeType": "containerd",
     "logReportCaller": false,
     "autoRemoveDev": false,
-    "mirrorRegistry": []
+    "mirrorRegistry": [],
+    "experimental": {
+        "enabled": false,
+        "preAuth": true,
+        "overlaybdApiServer": "http://127.0.0.1:9862"
+    }
 }

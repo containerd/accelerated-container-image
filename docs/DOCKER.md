@@ -31,7 +31,12 @@ Edit `/etc/overlaybd-snapshotter/config.json`:
     "verbose": "info",
     "logReportCaller": false,
     "autoRemoveDev": true,
-    "mirrorRegistry": []
+    "mirrorRegistry": [],
+    "experimental": {
+        "enabled": false,
+        "preAuth": true,
+        "overlaybdApiServer": "http://127.0.0.1:9862"
+    }
 }
 ```
 
