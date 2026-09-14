@@ -280,7 +280,6 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 
 // Stat returns the info for an active or committed snapshot by the key.
 func (o *snapshotter) Stat(ctx context.Context, key string) (_ snapshots.Info, retErr error) {
-	log.G(ctx).Infof("Stat (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -335,7 +334,6 @@ func (o *snapshotter) Update(ctx context.Context, info snapshots.Info, fieldpath
 
 // Usage returns the resources taken by the snapshot identified by key.
 func (o *snapshotter) Usage(ctx context.Context, key string) (_ snapshots.Usage, retErr error) {
-	log.G(ctx).Infof("Usage (key: %s)", key)
 	start := time.Now()
 	defer func() {
 		if retErr != nil {
@@ -375,31 +373,40 @@ func (o *snapshotter) getWritableType(ctx context.Context, id string, info snaps
 	defer func() {
 		log.G(ctx).Infof("snapshot R/W label: %s", mode)
 	}()
-	// check image type (OCIv1 or overlaybd)
-	if id != "" {
-		if _, err := o.loadBackingStoreConfig(id); err != nil {
-			log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
+
+	parseMode := func(m string) string {
+		switch m {
+		case "dir":
+			return RwDir
+		case "dev":
+			return RwDev
+		default:
 			return RoDir
 		}
-	} else {
-		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
 	}
-	// overlaybd
-	rwMode := func(m string) string {
-		if m == "dir" {
-			return RwDir
-		}
-		if m == "dev" {
-			return RwDev
+
+	// check image type (OCIv1 or overlaybd)
+	if id == "" {
+		log.G(ctx).Debugf("empty snID get. It should be an initial layer.")
+		// An initial layer without an explicit R/W label is prepared for
+		// pulling an image rather than for a container rootfs, keep it
+		// read-only instead of falling back to the global rwMode.
+		if m, ok := info.Labels[label.SupportReadWriteMode]; ok {
+			return parseMode(m)
 		}
 		return RoDir
 	}
-	m, ok := info.Labels[label.SupportReadWriteMode]
-	if !ok {
-		return rwMode(o.rwMode)
+
+	if _, err := o.loadBackingStoreConfig(id); err != nil {
+		log.G(ctx).Debugf("[%s] is not an overlaybd image.", id)
+		return RoDir
 	}
 
-	return rwMode(m)
+	// overlaybd
+	if m, ok := info.Labels[label.SupportReadWriteMode]; ok {
+		return parseMode(m)
+	}
+	return parseMode(o.rwMode)
 }
 
 func (o *snapshotter) checkTurboOCI(labels map[string]string) (bool, string, string) {
@@ -1542,6 +1549,10 @@ func (o *snapshotter) turboOCIFsMeta(id string) (string, string) {
 		if _, err := os.Stat(fsmeta); err == nil {
 			if fsType == "erofs" && !IsErofsSupported() {
 				log.L.Warn("erofs is not supported on this system, fallback to other fs type")
+				continue
+			}
+			if fsType == "erofs" && o.rwMode != RoDir {
+				log.L.Warn("erofs is read-only, it cannot be used as a writable rootfs, fallback to other fs type")
 				continue
 			}
 			return fsmeta, fsType
