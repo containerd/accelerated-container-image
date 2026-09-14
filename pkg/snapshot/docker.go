@@ -249,13 +249,13 @@ func (o *snapshotter) RemoveDockerLayer(ctx context.Context, key string, initID 
 
 // dockerContainerLayerMount handles Docker container layer mounting logic
 func (o *snapshotter) dockerContainerLayerMount(ctx context.Context,
-	parentInfo snapshots.Info, s storage.Snapshot, parentID string) ([]mount.Mount, error) {
+	parentInfo snapshots.Info, s storage.Snapshot, parentID string, info snapshots.Info) ([]mount.Mount, error) {
 
 	// Get init layer's parent (the image top layer key)
 	initParentKey := parentInfo.Parent
 	if initParentKey == "" {
 		log.G(ctx).Warnf("Mounts: Docker container layer has no init parent, falling back to normal mount")
-		return o.normalOverlayMount(s), nil
+		return o.normalOverlayMount(s, info), nil
 	}
 
 	// Get image top layer info
@@ -296,5 +296,5 @@ func (o *snapshotter) dockerContainerLayerMount(ctx context.Context,
 
 	// Normal image: fall back to standard overlay mount
 	// s.ParentIDs already contains [initLayerID, imageLayer1ID, ...]
-	return o.normalOverlayMount(s), nil
+	return o.normalOverlayMount(s, info), nil
 }

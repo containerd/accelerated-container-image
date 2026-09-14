@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -79,6 +80,10 @@ const (
 	RwDev = "dev"       // use overlaybd directly, return overlaybd devName
 
 	LayerBlob = "layer" // decompressed tgz layer (maybe compressed by ZFile)
+
+	// Snapshot labels for user namespace ID mapping (defined in containerd/v2/core/snapshots)
+	labelSnapshotUIDMapping = "containerd.io/snapshot/uidmapping"
+	labelSnapshotGIDMapping = "containerd.io/snapshot/gidmapping"
 )
 
 type Registry struct {
@@ -102,6 +107,7 @@ type BootConfig struct {
 	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
 	TurboFsType       []string               `json:"turboFsType"`
 	RuntimeType       string                 `json:"runtimeType"` // "containerd" (default) or "docker"
+	RemapIDs          bool                   `json:"remapIDs"`    // enable kernel ID-mapped mounts for user namespace support (requires kernel 5.19+)
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -206,6 +212,7 @@ type snapshotter struct {
 	turboFsType       []string
 	asyncRemove       bool
 	runtimeType       string
+	remapIDs          bool
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -255,6 +262,19 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		log.L.Infof("mirror Registry: %+v", bootConfig.MirrorRegistry)
 	}
 
+	remapIDs := false
+	if bootConfig.RemapIDs {
+		supported, err := remapSupportProbe(root)
+		if err != nil {
+			log.L.WithError(err).Warn("remapIDs requested but support probe failed; ID remapping disabled")
+		} else if supported {
+			remapIDs = true
+			log.L.Info("remapIDs enabled after kernel, userns, and filesystem support checks")
+		} else {
+			log.L.Warn("remapIDs requested but not supported on this host; containerd may use chown fallback")
+		}
+	}
+
 	return &snapshotter{
 		root:              root,
 		rwMode:            bootConfig.RwMode,
@@ -275,6 +295,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		},
 		asyncRemove: bootConfig.AsyncRemove,
 		runtimeType: bootConfig.RuntimeType,
+		remapIDs:    remapIDs,
 	}, nil
 }
 
@@ -673,10 +694,10 @@ func (o *snapshotter) createMountPoint(ctx context.Context, kind snapshots.Kind,
 				},
 			}
 		} else {
-			m = o.normalOverlayMount(s)
+			m = o.normalOverlayMount(s, info)
 		}
 	case storageTypeLocalBlock, storageTypeRemoteBlock:
-		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType)
+		m, err = o.basedOnBlockDeviceMount(ctx, s, writeType, info)
 		if err != nil {
 			return nil, err
 		}
@@ -769,7 +790,7 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 
 		writeType := o.getWritableType(ctx, s.ID, info)
 		if writeType != RoDir {
-			return o.basedOnBlockDeviceMount(ctx, s, writeType)
+			return o.basedOnBlockDeviceMount(ctx, s, writeType, info)
 		}
 
 		parentID, parentInfo, _, err := storage.GetInfo(ctx, info.Parent)
@@ -794,18 +815,19 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) (_ []mount.Mount, 
 			if err := o.attachAndMountBlockDevice(ctx, parentID, RoDir, fsType, false); err != nil {
 				return nil, fmt.Errorf("failed to attach and mount for snapshot %v: %w", key, err)
 			}
-			return o.basedOnBlockDeviceMount(ctx, s, RoDir)
+			return o.basedOnBlockDeviceMount(ctx, s, RoDir, info)
 		}
 
 		// Docker runtime: handle container layer mounts
 		// The container layer's parent is the init layer, which has init layer's parent as the image top layer
 		if o.runtimeType == "docker" && o.isDockerContainerLayer(info.Parent) {
 			log.G(ctx).Infof("Mounts: Docker container layer detected (key: %s, parent: %s)", key, info.Parent)
-			return o.dockerContainerLayerMount(ctx, parentInfo, s, parentID)
+			return o.dockerContainerLayerMount(ctx, parentInfo, s, parentID, info)
 		}
 
+		return o.normalOverlayMount(s, info), nil
 	}
-	return o.normalOverlayMount(s), nil
+	return o.normalOverlayMount(s, snapshots.Info{}), nil
 }
 
 // Commit
@@ -1039,6 +1061,13 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		return err
 	}
 
+	idmappedLower := o.idmappedLowerPath(id)
+	if mounted, err := o.isMounted(ctx, idmappedLower); err == nil && mounted {
+		if uerr := mount.Unmount(idmappedLower, 0); uerr != nil {
+			log.G(ctx).WithError(uerr).WithField("path", idmappedLower).Warn("failed to unmount idmapped lower")
+		}
+	}
+
 	stype, err := o.identifySnapshotStorageType(ctx, id, info)
 	if err != nil {
 		return err
@@ -1168,7 +1197,44 @@ func (o *snapshotter) prepareDirectory(ctx context.Context, snapshotDir string, 
 	return td, nil
 }
 
-func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Snapshot, writeType string) (m []mount.Mount, err error) {
+func (o *snapshotter) ensureIDMappedLower(ctx context.Context, activeID, parentID string, info snapshots.Info) (string, error) {
+	original := o.overlaybdMountpoint(parentID)
+	if !o.remapIDs {
+		return original, nil
+	}
+
+	uidmap, uok := info.Labels[labelSnapshotUIDMapping]
+	gidmap, gok := info.Labels[labelSnapshotGIDMapping]
+	if !uok || !gok || uidmap == "" || gidmap == "" {
+		return original, nil
+	}
+
+	dst := o.idmappedLowerPath(activeID)
+	if err := os.MkdirAll(dst, 0700); err != nil {
+		return "", fmt.Errorf("failed to create idmapped lower dir: %w", err)
+	}
+
+	if mounted, err := o.isMounted(ctx, dst); err == nil && mounted {
+		return dst, nil
+	}
+
+	usernsFd, err := mount.GetUsernsFD(uidmap, gidmap)
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("failed to create userns fd for idmapped lower, using unmapped block lower")
+		return original, nil
+	}
+	defer usernsFd.Close()
+
+	if err := mount.IDMapMount(original, dst, int(usernsFd.Fd())); err != nil {
+		log.G(ctx).WithError(err).Warn("failed to idmap block device mountpoint, using unmapped block lower")
+		return original, nil
+	}
+
+	log.G(ctx).Infof("idmapped block device mount: %s -> %s (uidmap=%s)", original, dst, uidmap)
+	return dst, nil
+}
+
+func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Snapshot, writeType string, info snapshots.Info) (m []mount.Mount, err error) {
 	defer func() {
 		if err == nil {
 			log.G(ctx).Infof("return mount point(R/W mode: %s): %v", writeType, m)
@@ -1218,11 +1284,19 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 			if o.indexOff {
 				options = append(options, "index=off")
 			}
+			lowerPath, err := o.ensureIDMappedLower(ctx, s.ID, s.ParentIDs[0], info)
+			if err != nil {
+				return nil, err
+			}
 			options = append(options,
 				fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
 				fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
-				fmt.Sprintf("lowerdir=%s", o.overlaybdMountpoint(s.ParentIDs[0])),
+				fmt.Sprintf("lowerdir=%s", lowerPath),
 			)
+			// If snapshotter already idmapped the lower, omit uidmap/gidmap so containerd does not shift twice.
+			if lowerPath == o.overlaybdMountpoint(s.ParentIDs[0]) {
+				options = o.appendIDMapMountOptions(options, info)
+			}
 			return []mount.Mount{
 				{
 					Type:    "overlay",
@@ -1256,7 +1330,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 	}, nil
 }
 
-func (o *snapshotter) normalOverlayMount(s storage.Snapshot) []mount.Mount {
+func (o *snapshotter) normalOverlayMount(s storage.Snapshot, info snapshots.Info) []mount.Mount {
 	if len(s.ParentIDs) == 0 {
 		roFlag := "rw"
 		if s.Kind == snapshots.KindView {
@@ -1285,9 +1359,6 @@ func (o *snapshotter) normalOverlayMount(s storage.Snapshot) []mount.Mount {
 			fmt.Sprintf("workdir=%s", o.workPath(s.ID)),
 			fmt.Sprintf("upperdir=%s", o.upperPath(s.ID)),
 		)
-		// if o.metacopyOption != "" {
-		// 	options = append(options, o.metacopyOption)
-		// }
 	} else if len(s.ParentIDs) == 1 {
 		return []mount.Mount{
 			{
@@ -1307,6 +1378,7 @@ func (o *snapshotter) normalOverlayMount(s storage.Snapshot) []mount.Mount {
 	}
 
 	options = append(options, fmt.Sprintf("lowerdir=%s", strings.Join(parentPaths, ":")))
+	options = o.appendIDMapMountOptions(options, info)
 	return []mount.Mount{
 		{
 			Type:    "overlay",
@@ -1323,6 +1395,49 @@ func (o *snapshotter) getDiskQuotaSize(info *snapshots.Info) string {
 		}
 	}
 	return o.quotaSize
+}
+
+// rootIDFromMapping parses a user namespace ID mapping string and returns the
+// host ID that maps to container ID 0 (root). The mapping format is
+// "containerID:hostID:size[,containerID:hostID:size,...]".
+func rootIDFromMapping(mapping string) (int, error) {
+	for _, entry := range strings.Split(mapping, ",") {
+		parts := strings.SplitN(strings.TrimSpace(entry), ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		containerID, err := strconv.Atoi(parts[0])
+		if err != nil {
+			return -1, fmt.Errorf("invalid container ID %q: %w", parts[0], err)
+		}
+		hostID, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return -1, fmt.Errorf("invalid host ID %q: %w", parts[1], err)
+		}
+		size, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return -1, fmt.Errorf("invalid size %q: %w", parts[2], err)
+		}
+		if containerID <= 0 && containerID+size > 0 {
+			return hostID + (0 - containerID), nil
+		}
+	}
+	return -1, fmt.Errorf("no mapping found for container root (ID 0)")
+}
+
+// appendIDMapMountOptions appends uidmap/gidmap overlay mount options from snapshot
+// labels when remapIDs is enabled.
+func (o *snapshotter) appendIDMapMountOptions(options []string, info snapshots.Info) []string {
+	if !o.remapIDs {
+		return options
+	}
+	if v, ok := info.Labels[labelSnapshotUIDMapping]; ok {
+		options = append(options, "uidmap="+v)
+	}
+	if v, ok := info.Labels[labelSnapshotGIDMapping]; ok {
+		options = append(options, "gidmap="+v)
+	}
+	return options
 }
 
 func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, key, parent string, opts []snapshots.Opt) (_ string, _ snapshots.Info, err error) {
@@ -1355,19 +1470,44 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		return "", snapshots.Info{}, fmt.Errorf("failed to create snapshot: %w", err)
 	}
 
-	if len(s.ParentIDs) > 0 {
+	id, info, _, err := storage.GetInfo(ctx, key)
+	if err != nil {
+		return "", snapshots.Info{}, fmt.Errorf("failed to get snapshot info: %w", err)
+	}
+
+	// When remapIDs is enabled and ID mapping labels are present, use the
+	// mapped root UID/GID. Otherwise fall back to copying from parent.
+	mappedUID, mappedGID := -1, -1
+	if o.remapIDs {
+		if v, ok := info.Labels[labelSnapshotUIDMapping]; ok {
+			if uid, err := rootIDFromMapping(v); err == nil {
+				mappedUID = uid
+			}
+		}
+		if v, ok := info.Labels[labelSnapshotGIDMapping]; ok {
+			if gid, err := rootIDFromMapping(v); err == nil {
+				mappedGID = gid
+			}
+		}
+	}
+	if (mappedUID == -1 || mappedGID == -1) && len(s.ParentIDs) > 0 {
 		st, err := os.Stat(o.upperPath(s.ParentIDs[0]))
 		if err != nil {
 			return "", snapshots.Info{}, fmt.Errorf("failed to stat parent: %w", err)
 		}
-
 		stat := st.Sys().(*syscall.Stat_t)
-		if err := os.Lchown(filepath.Join(td, "fs"), int(stat.Uid), int(stat.Gid)); err != nil {
+		if mappedUID == -1 {
+			mappedUID = int(stat.Uid)
+		}
+		if mappedGID == -1 {
+			mappedGID = int(stat.Gid)
+		}
+	}
+	if mappedUID != -1 && mappedGID != -1 {
+		if err := os.Lchown(filepath.Join(td, "fs"), mappedUID, mappedGID); err != nil {
 			return "", snapshots.Info{}, fmt.Errorf("failed to chown: %w", err)
 		}
 	}
-	// _, tmpinfo, _, err := storage.GetInfo(ctx, key)
-	id, info, _, err := storage.GetInfo(ctx, key)
 	if o.isPrepareRootfs(info) {
 		if diskQuotaSize := o.getDiskQuotaSize(&info); diskQuotaSize != "" {
 			log.G(ctx).Infof("set usage quota %s for rootfs(sn: %s)", diskQuotaSize, s.ID)
@@ -1389,11 +1529,7 @@ func (o *snapshotter) createSnapshot(ctx context.Context, kind snapshots.Kind, k
 		return "", snapshots.Info{}, fmt.Errorf("failed to rename: %w", err)
 	}
 	td = ""
-	// id, info, _, err := storage.GetInfo(ctx, key)
 
-	if err != nil {
-		return "", snapshots.Info{}, fmt.Errorf("failed to get snapshot info: %w", err)
-	}
 	img, ok := info.Labels[label.CRIImageRef]
 	if !ok {
 		img, ok = info.Labels[label.TargetImageRef]
@@ -1563,6 +1699,12 @@ func (o *snapshotter) overlaybdSealedFilePath(id string) string {
 
 func (o *snapshotter) overlaybdMountpoint(id string) string {
 	return filepath.Join(o.root, "snapshots", id, "block", "mountpoint")
+}
+
+// idmappedLowerPath is the mountpoint for an idmapped clone of the parent's overlaybd
+// mount when remapIDs and mapping labels are used (see ensureIDMappedLower).
+func (o *snapshotter) idmappedLowerPath(activeID string) string {
+	return filepath.Join(o.blockPath(activeID), "idmapped-lower")
 }
 
 func (o *snapshotter) overlaybdConfPath(id string) string {
