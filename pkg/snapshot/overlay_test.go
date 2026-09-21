@@ -133,6 +133,12 @@ func TestAppendIDMapMountOptions(t *testing.T) {
 			labels:   map[string]string{},
 			wantLen:  0,
 		},
+		{
+			name:     "enabled with empty label values",
+			remapIDs: true,
+			labels:   map[string]string{labelSnapshotUIDMapping: "", labelSnapshotGIDMapping: ""},
+			wantLen:  0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

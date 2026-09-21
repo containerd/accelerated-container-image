@@ -1435,10 +1435,10 @@ func (o *snapshotter) appendIDMapMountOptions(options []string, info snapshots.I
 	if !o.remapIDs {
 		return options
 	}
-	if v, ok := info.Labels[labelSnapshotUIDMapping]; ok {
+	if v, ok := info.Labels[labelSnapshotUIDMapping]; ok && v != "" {
 		options = append(options, "uidmap="+v)
 	}
-	if v, ok := info.Labels[labelSnapshotGIDMapping]; ok {
+	if v, ok := info.Labels[labelSnapshotGIDMapping]; ok && v != "" {
 		options = append(options, "gidmap="+v)
 	}
 	return options
