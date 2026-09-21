@@ -1062,9 +1062,13 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 	}
 
 	idmappedLower := o.idmappedLowerPath(id)
-	if mounted, err := o.isMounted(ctx, idmappedLower); err == nil && mounted {
+	mounted, err := o.isMounted(ctx, idmappedLower)
+	if err != nil {
+		return mylog.TracedErrorf(ctx, "failed to check idmapped lower mount: %w", err)
+	}
+	if mounted {
 		if uerr := mount.Unmount(idmappedLower, 0); uerr != nil {
-			log.G(ctx).WithError(uerr).WithField("path", idmappedLower).Warn("failed to unmount idmapped lower")
+			return mylog.TracedErrorf(ctx, "failed to unmount idmapped lower %s: %w", idmappedLower, uerr)
 		}
 	}
 
@@ -1113,8 +1117,8 @@ func (o *snapshotter) Remove(ctx context.Context, key string) (err error) {
 		}
 	}
 
-	// Just in case, check if snapshot contains mountpoint
-	mounted, err := o.isMounted(ctx, o.overlaybdMountpoint(id))
+	// Do not remove snapshot metadata while block mounts are still active.
+	mounted, err = o.isMounted(ctx, o.overlaybdMountpoint(id))
 	if err != nil {
 		return mylog.TracedErrorf(ctx, "failed to check mountpoint: %w", err)
 	} else if mounted {
