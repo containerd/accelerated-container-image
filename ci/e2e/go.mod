@@ -1,9 +1,9 @@
 module github.com/containerd/accelerated-container-image/ci/e2e
 
-go 1.26.3
+go 1.26.8
 
 require (
-	github.com/containerd/containerd/v2 v2.3.5
+	github.com/containerd/containerd/v2 v2.3.6
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/stretchr/testify v1.11.1
 	oras.land/oras-go/v2 v2.6.2
