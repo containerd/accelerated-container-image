@@ -51,7 +51,9 @@ import (
 )
 
 const (
-	maxAttachAttempts = 50
+	// maxAttachAttempts is the number of 10ms-spaced polls waiting for a
+	// device node or a target to show up, i.e. a 5s timeout.
+	maxAttachAttempts = 500
 
 	// hba number used to create tcmu devices in configfs
 	// all overlaybd devices are configured in /sys/kernel/config/target/core/user_999999999/
@@ -463,12 +465,25 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 				time.Sleep(10 * time.Millisecond)
 				break // retry
 			}
-			devName = device
-			break
+			goto waitDevReady
 		}
 	}
-	log.G(ctx).Infof("Device has been created. {id: %s: dev: %s}", snID, devName)
-	return devName, nil
+	return "", fmt.Errorf("timeout to find device for snID: %s, lastErr: %w", snID, e)
+
+waitDevReady:
+	// Wait for /dev/sdX block device node to be fully ready.
+	// After sysfs timeout is set, udev may still be creating the device node.
+	for _, wait := range []time.Duration{5, 10, 20, 50, 100, 100, 100, 100, 100, 100} {
+		f, err := os.Open(devName)
+		if err == nil {
+			f.Close()
+			log.G(ctx).Infof("Device has been created. {id: %s: dev: %s}", snID, devName)
+			return devName, nil
+		}
+		e = fmt.Errorf("block device %s not ready yet: %w", devName, err)
+		time.Sleep(wait * time.Millisecond)
+	}
+	return "", fmt.Errorf("block device %s not ready after retries", devName)
 }
 
 // attachAndMountBlockDevice
