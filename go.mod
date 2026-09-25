@@ -5,11 +5,11 @@ module github.com/containerd/accelerated-container-image
 // DO NOT change this version unless support for older Go versions is dropped
 // or the module requires newer Go features. To update the version used for CI
 // and releases, update "go-version" and "GO_VERSION" in "/.github/workflows".
-go 1.26.3
+go 1.26.8
 
 require (
 	github.com/containerd/containerd/api v1.11.1
-	github.com/containerd/containerd/v2 v2.3.5
+	github.com/containerd/containerd/v2 v2.3.6
 	github.com/containerd/continuity v0.5.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/containerd/go-cni v1.1.13
