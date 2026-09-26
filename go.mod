@@ -12,7 +12,7 @@ require (
 	github.com/containerd/containerd/v2 v2.3.5
 	github.com/containerd/continuity v0.5.0
 	github.com/containerd/errdefs v1.0.0
-	github.com/containerd/go-cni v1.1.13
+	github.com/containerd/go-cni v1.1.14
 	github.com/containerd/log v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/data-accelerator/zdfs v0.1.5
