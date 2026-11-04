@@ -78,7 +78,7 @@ type AttachDeviceParams struct {
 	resultFile string // init-debug.log
 	withDevID  bool
 
-	// MaxDataAreaMB limits the device's TCMU data area in MiB. Zero uses 4 MiB.
+	// MaxDataAreaMB requests the device's TCMU data-area limit in MiB. Zero requests 4 MiB.
 	MaxDataAreaMB int
 }
 
@@ -113,6 +113,11 @@ func setMaxDataAreaMB(ctx context.Context, targetPath string, requested int) err
 	// A successful control write can silently clamp the request to the global limit.
 	// Check before enabling so a mismatch leaves no active device to tear down.
 	data, err := os.ReadFile(path.Join(targetPath, "attrib", "max_data_area_mb"))
+	if os.IsNotExist(err) {
+		// Older kernels can accept the control write while ignoring the unknown option.
+		log.G(ctx).WithError(err).Warnf("TCMU data-area readback unavailable for %s (requested %d MiB); the kernel may ignore this setting, continuing without size verification", targetPath, requested)
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("failed to read TCMU data area for %s (requested %d MiB): %w", targetPath, requested, err)
 	}

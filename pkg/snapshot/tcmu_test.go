@@ -19,10 +19,15 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/containerd/log"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 )
 
 func TestNewSnapshotterMaxDataAreaMB(t *testing.T) {
@@ -118,12 +123,14 @@ func TestAttachDeviceRejectsInvalidMaxDataAreaMB(t *testing.T) {
 
 func TestSetMaxDataAreaMB(t *testing.T) {
 	tests := []struct {
-		name         string
-		requested    int
-		readback     string
-		missing      bool
-		controlIsDir bool
-		wantErr      string
+		name          string
+		requested     int
+		readback      string
+		missing       bool
+		readbackIsDir bool
+		controlIsDir  bool
+		wantWarning   bool
+		wantErr       string
 	}{
 		{name: "default", requested: 4, readback: "4\n"},
 		{name: "64 MiB", requested: 64, readback: "64\n"},
@@ -132,7 +139,9 @@ func TestSetMaxDataAreaMB(t *testing.T) {
 		{name: "larger than requested", requested: 64, readback: "128\n", wantErr: "requested 64 MiB, effective 128 MiB"},
 		{name: "zero readback", requested: 64, readback: "0\n", wantErr: "requested 64 MiB, effective 0 MiB"},
 		{name: "malformed readback", requested: 64, readback: "invalid\n", wantErr: "invalid TCMU data area"},
-		{name: "missing readback", requested: 64, missing: true, wantErr: "failed to read TCMU data area"},
+		{name: "legacy kernel default", requested: 4, missing: true, wantWarning: true},
+		{name: "legacy kernel custom size", requested: 64, missing: true, wantWarning: true},
+		{name: "unreadable readback", requested: 64, readbackIsDir: true, wantErr: "failed to read TCMU data area"},
 		{name: "control write failure", requested: 64, readback: "64\n", controlIsDir: true, wantErr: "failed to set TCMU data area"},
 	}
 	for _, tt := range tests {
@@ -143,7 +152,11 @@ func TestSetMaxDataAreaMB(t *testing.T) {
 			if err := os.Mkdir(attrib, 0700); err != nil {
 				t.Fatal(err)
 			}
-			if !tt.missing {
+			if tt.readbackIsDir {
+				if err := os.Mkdir(filepath.Join(attrib, "max_data_area_mb"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else if !tt.missing {
 				if err := os.WriteFile(filepath.Join(attrib, "max_data_area_mb"), []byte(tt.readback), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -155,7 +168,33 @@ func TestSetMaxDataAreaMB(t *testing.T) {
 				}
 			}
 
-			err := setMaxDataAreaMB(context.Background(), target, tt.requested)
+			// Capture logs per device so the legacy fallback remains observable.
+			logger, hook := logtest.NewNullLogger()
+			ctx := log.WithLogger(context.Background(), logrus.NewEntry(logger))
+			err := setMaxDataAreaMB(ctx, target, tt.requested)
+			entries := hook.AllEntries()
+			if tt.wantWarning {
+				// Missing capability preserves attachment and reports the unverified size.
+				if len(entries) != 1 || entries[0].Level != logrus.WarnLevel {
+					t.Fatalf("logs = %v, want one warning", entries)
+				}
+				entry := entries[0]
+				for _, text := range []string{target, fmt.Sprintf("requested %d MiB", tt.requested), "kernel may ignore", "continuing without size verification"} {
+					if !strings.Contains(entry.Message, text) {
+						t.Fatalf("warning = %q, want %q", entry.Message, text)
+					}
+				}
+				cause, ok := entry.Data[logrus.ErrorKey].(error)
+				if !ok || !os.IsNotExist(cause) {
+					t.Fatalf("warning error = %v, want the missing-attribute error", entry.Data[logrus.ErrorKey])
+				}
+			} else {
+				for _, entry := range entries {
+					if entry.Level == logrus.WarnLevel {
+						t.Fatalf("unexpected warning: %s", entry.Message)
+					}
+				}
+			}
 			if tt.wantErr != "" {
 				// A successful control write alone must not hide a rejected size.
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -170,7 +209,7 @@ func TestSetMaxDataAreaMB(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := "max_data_area_mb=" + strings.TrimSpace(tt.readback); string(data) != want {
+			if want := fmt.Sprintf("max_data_area_mb=%d", tt.requested); string(data) != want {
 				t.Fatalf("control = %q, want %q", data, want)
 			}
 		})

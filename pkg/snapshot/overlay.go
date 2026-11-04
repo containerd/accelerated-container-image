@@ -108,7 +108,7 @@ type BootConfig struct {
 	TurboFsType       []string               `json:"turboFsType"`
 	RuntimeType       string                 `json:"runtimeType"`   // "containerd" (default) or "docker"
 	RemapIDs          bool                   `json:"remapIDs"`      // enable kernel ID-mapped mounts for user namespace support (requires kernel 5.19+)
-	MaxDataAreaMB     int                    `json:"maxDataAreaMB"` // per-device TCMU data area in MiB; zero uses the default
+	MaxDataAreaMB     int                    `json:"maxDataAreaMB"` // requested per-device TCMU data-area limit in MiB; zero uses the default
 }
 
 func DefaultBootConfig() *BootConfig {
