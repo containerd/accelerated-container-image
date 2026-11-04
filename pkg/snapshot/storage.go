@@ -62,9 +62,7 @@ const (
 	// for example snID 128, the loopback device config in /sys/kernel/config/target/loopback/naa.1990000000000128
 	obdLoopNaaPrefixDefault = 199
 
-	// param used to restrict tcmu data area size
-	// it is worked by setting max_data_area_mb for devices in configfs.
-	obdMaxDataAreaMB = 4
+	defaultMaxDataAreaMB = 4
 
 	// Just in case someone really needs to force to ext4
 	ext4FSFallbackFile = ".TurboOCI_ext4"
@@ -79,16 +77,54 @@ type AttachDeviceParams struct {
 	configPath string // config.v1.json
 	resultFile string // init-debug.log
 	withDevID  bool
+
+	// MaxDataAreaMB limits the device's TCMU data area in MiB. Zero uses 4 MiB.
+	MaxDataAreaMB int
 }
 
 func NewAttachDeviceParams(id string, tenant int, configPath string, resultFile string, withDevID bool) *AttachDeviceParams {
 	return &AttachDeviceParams{
-		id:         id,
-		tenant:     tenant,
-		configPath: configPath,
-		resultFile: resultFile,
-		withDevID:  withDevID,
+		id:            id,
+		tenant:        tenant,
+		configPath:    configPath,
+		resultFile:    resultFile,
+		withDevID:     withDevID,
+		MaxDataAreaMB: defaultMaxDataAreaMB,
 	}
+}
+
+func resolveMaxDataAreaMB(value int) (int, error) {
+	// The kernel parses max_data_area_mb as a signed 32-bit integer.
+	if value < 0 || value > math.MaxInt32 {
+		return 0, fmt.Errorf("maxDataAreaMB must be between 0 and %d MiB, got %d", math.MaxInt32, value)
+	}
+	if value == 0 {
+		return defaultMaxDataAreaMB, nil
+	}
+	return value, nil
+}
+
+func setMaxDataAreaMB(ctx context.Context, targetPath string, requested int) error {
+	control := fmt.Sprintf("max_data_area_mb=%d", requested)
+	if err := os.WriteFile(path.Join(targetPath, "control"), []byte(control), 0666); err != nil {
+		return fmt.Errorf("failed to set TCMU data area for %s to %d MiB: %w", targetPath, requested, err)
+	}
+
+	// A successful control write can silently clamp the request to the global limit.
+	// Check before enabling so a mismatch leaves no active device to tear down.
+	data, err := os.ReadFile(path.Join(targetPath, "attrib", "max_data_area_mb"))
+	if err != nil {
+		return fmt.Errorf("failed to read TCMU data area for %s (requested %d MiB): %w", targetPath, requested, err)
+	}
+	effective, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid TCMU data area %q for %s: %w", strings.TrimSpace(string(data)), targetPath, err)
+	}
+	if effective != int64(requested) {
+		return fmt.Errorf("TCMU data area mismatch for %s: requested %d MiB, effective %d MiB", targetPath, requested, effective)
+	}
+	log.G(ctx).Infof("TCMU data area for %s: requested %d MiB, effective %d MiB", targetPath, requested, effective)
+	return nil
 }
 
 func (o *snapshotter) checkOverlaybdInUse(ctx context.Context, dir string) (bool, error) {
@@ -306,6 +342,10 @@ func IsErofsFilesystem(path string) bool {
 }
 
 func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName string, e error) {
+	maxDataAreaMB, err := resolveMaxDataAreaMB(params.MaxDataAreaMB)
+	if err != nil {
+		return "", err
+	}
 
 	devName = ""
 
@@ -314,7 +354,7 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 	configPath := params.configPath
 
 	targetPath := overlaybdTargetPath(obdHbaNum(tenant), snID)
-	err := os.MkdirAll(targetPath, 0700)
+	err = os.MkdirAll(targetPath, 0700)
 	if err != nil {
 		return devName, fmt.Errorf("failed to create target dir for %s: %w", targetPath, err)
 	}
@@ -339,9 +379,8 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 		}
 	}
 
-	err = os.WriteFile(path.Join(targetPath, "control"), ([]byte)(fmt.Sprintf("max_data_area_mb=%d", obdMaxDataAreaMB)), 0666)
-	if err != nil {
-		return devName, fmt.Errorf("failed to write target max_data_area_mb for %s: max_data_area_mb=%d: %w", targetPath, obdMaxDataAreaMB, err)
+	if err = setMaxDataAreaMB(ctx, targetPath, maxDataAreaMB); err != nil {
+		return devName, err
 	}
 
 	// enable target may fails with EAGAIN, so we need to retry
@@ -485,15 +524,15 @@ func (o *snapshotter) attachAndMountBlockDevice(ctx context.Context, snID string
 	} else {
 		log.G(ctx).Info(err.Error())
 	}
-	device, err := AttachDevice(ctx,
-		NewAttachDeviceParams(
-			snID,
-			o.tenant,
-			configPath,
-			o.overlaybdInitDebuglogPath(snID),
-			false,
-		),
+	params := NewAttachDeviceParams(
+		snID,
+		o.tenant,
+		configPath,
+		o.overlaybdInitDebuglogPath(snID),
+		false,
 	)
+	params.MaxDataAreaMB = o.maxDataAreaMB
+	device, err := AttachDevice(ctx, params)
 	if err != nil {
 		return err
 	}
