@@ -149,7 +149,7 @@ func (o *snapshotter) prepareDockerContainerLayer(ctx context.Context, s storage
 
 	// Build overlay mount options
 	var options []string
-	if o.indexOff {
+	if o.supportsIndex() {
 		options = append(options, "index=off")
 	}
 	options = append(options,
@@ -275,7 +275,7 @@ func (o *snapshotter) dockerContainerLayerMount(ctx context.Context,
 
 		// Build mount options: lowerdir = init/fs : overlaybd_mountpoint
 		var options []string
-		if o.indexOff {
+		if o.supportsIndex() {
 			options = append(options, "index=off")
 		}
 		options = append(options,

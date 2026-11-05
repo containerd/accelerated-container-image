@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -200,9 +201,9 @@ type snapshotter struct {
 	root              string
 	rwMode            string
 	config            SnapshotterConfig
-	metacopyOption    string
+	metacopyOption    atomic.Bool
 	ms                *storage.MetaStore
-	indexOff          bool
+	indexOff          atomic.Bool
 	autoRemoveDev     bool
 	writableLayerType string
 	mirrorRegistry    []Registry
@@ -247,15 +248,12 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 	}
 	log.L.Infof("new snapshotter: root = %s", root)
 
-	metacopyOption := ""
-	if _, err := os.Stat("/sys/module/overlay/parameters/metacopy"); err == nil {
-		metacopyOption = "metacopy=on"
-	}
-
-	// figure out whether "index=off" option is recognized by the kernel
-	var indexOff bool
-	if _, err = os.Stat("/sys/module/overlay/parameters/index"); err == nil {
-		indexOff = true
+	// The overlay module can be loaded after the snapshotter starts, so kernel
+	// features are probed lazily at mount time instead of only here.
+	for _, param := range []string{overlayIndexParamPath, overlayMetaParamPath} {
+		if _, err := os.Stat(param); err != nil {
+			log.L.Warnf("overlay parameter %s is not available yet, will re-check on mount: %v", param, err)
+		}
 	}
 
 	if bootConfig.MirrorRegistry != nil {
@@ -279,9 +277,7 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		root:              root,
 		rwMode:            bootConfig.RwMode,
 		ms:                ms,
-		indexOff:          indexOff,
 		config:            config,
-		metacopyOption:    metacopyOption,
 		autoRemoveDev:     bootConfig.AutoRemoveDev,
 		writableLayerType: bootConfig.WritableLayerType,
 		mirrorRegistry:    bootConfig.MirrorRegistry,
@@ -297,6 +293,37 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		runtimeType: bootConfig.RuntimeType,
 		remapIDs:    remapIDs,
 	}, nil
+}
+
+var (
+	overlayIndexParamPath = "/sys/module/overlay/parameters/index"
+	overlayMetaParamPath  = "/sys/module/overlay/parameters/metacopy"
+)
+
+// supportsIndex reports whether the kernel accepts the "index=off" overlay
+// mount option. The probe is repeated until it succeeds once, because the
+// overlay module may be loaded after the snapshotter has started.
+func (o *snapshotter) supportsIndex() bool {
+	if o.indexOff.Load() {
+		return true
+	}
+	if _, err := os.Stat(overlayIndexParamPath); err == nil {
+		o.indexOff.Store(true)
+		return true
+	}
+	return false
+}
+
+// supportsMeta reports whether the kernel accepts the "metacopy=on" option.
+func (o *snapshotter) supportsMeta() bool {
+	if o.metacopyOption.Load() {
+		return true
+	}
+	if _, err := os.Stat(overlayMetaParamPath); err == nil {
+		o.metacopyOption.Store(true)
+		return true
+	}
+	return false
 }
 
 // Stat returns the info for an active or committed snapshot by the key.
@@ -1292,7 +1319,7 @@ func (o *snapshotter) basedOnBlockDeviceMount(ctx context.Context, s storage.Sna
 		// for ro mode, always has parent
 		if s.Kind == snapshots.KindActive {
 			var options []string
-			if o.indexOff {
+			if o.supportsIndex() {
 				options = append(options, "index=off")
 			}
 			lowerPath, err := o.ensureIDMappedLower(ctx, s.ID, s.ParentIDs[0], info)
@@ -1361,7 +1388,7 @@ func (o *snapshotter) normalOverlayMount(s storage.Snapshot, info snapshots.Info
 	}
 	var options []string
 
-	if o.indexOff {
+	if o.supportsIndex() {
 		options = append(options, "index=off")
 	}
 

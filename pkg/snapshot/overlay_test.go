@@ -18,6 +18,8 @@ package snapshot
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -174,8 +176,8 @@ func TestOverlayOptions_omitIdmapWhenLowerPreMapped(t *testing.T) {
 	o := &snapshotter{
 		root:     t.TempDir(),
 		remapIDs: true,
-		indexOff: true,
 	}
+	o.indexOff.Store(true)
 	info := snapshots.Info{Labels: map[string]string{
 		labelSnapshotUIDMapping: "0:100000:65536",
 		labelSnapshotGIDMapping: "0:100000:65536",
@@ -202,4 +204,46 @@ func hasMountOptionPrefix(options []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func TestSupportsIndexAndMeta(t *testing.T) {
+	oldIndexPath, oldMetaPath := overlayIndexParamPath, overlayMetaParamPath
+	t.Cleanup(func() {
+		overlayIndexParamPath = oldIndexPath
+		overlayMetaParamPath = oldMetaPath
+	})
+
+	dir := t.TempDir()
+	overlayIndexParamPath = filepath.Join(dir, "index")
+	overlayMetaParamPath = filepath.Join(dir, "metacopy")
+
+	o := &snapshotter{}
+	if o.supportsIndex() {
+		t.Fatal("supportsIndex() = true before the overlay parameter exists")
+	}
+	if o.supportsMeta() {
+		t.Fatal("supportsMeta() = true before the overlay parameter exists")
+	}
+
+	for _, p := range []string{overlayIndexParamPath, overlayMetaParamPath} {
+		if err := os.WriteFile(p, []byte("Y"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !o.supportsIndex() {
+		t.Fatal("supportsIndex() = false after the overlay parameter appeared")
+	}
+	if !o.supportsMeta() {
+		t.Fatal("supportsMeta() = false after the overlay parameter appeared")
+	}
+
+	// A positive result must be cached: removing the parameter should not
+	// flip the result back.
+	if err := os.Remove(overlayIndexParamPath); err != nil {
+		t.Fatal(err)
+	}
+	if !o.supportsIndex() {
+		t.Fatal("supportsIndex() lost its cached value")
+	}
 }
