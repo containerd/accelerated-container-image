@@ -476,7 +476,7 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 	defer func() {
 		if e != nil {
 			rerr := os.RemoveAll(linkPath)
-			if err != nil {
+			if rerr != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback link %s", linkPath)
 			}
 		}
