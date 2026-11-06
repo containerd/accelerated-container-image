@@ -51,7 +51,9 @@ import (
 )
 
 const (
-	maxAttachAttempts = 50
+	// maxAttachAttempts is the number of 10ms-spaced polls waiting for a
+	// device node or a target to show up, i.e. a 5s timeout.
+	maxAttachAttempts = 500
 
 	// hba number used to create tcmu devices in configfs
 	// all overlaybd devices are configured in /sys/kernel/config/target/core/user_999999999/
@@ -305,6 +307,52 @@ func IsErofsFilesystem(path string) bool {
 	return binary.LittleEndian.Uint32(byte4) == 0xe0f5e1e2
 }
 
+// devicePollInterval is the interval between device discovery and readiness polls.
+const devicePollInterval = 10 * time.Millisecond
+
+// findReadyBlockDevice returns the /dev path of the block device under
+// deviceNumber once it is listed in sysfs and its /dev node can be opened.
+func findReadyBlockDevice(deviceNumber string) (string, error) {
+	entries, err := os.ReadDir(scsiBlockDevicePath(deviceNumber))
+	if err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("no block device found")
+	}
+	name := entries[0].Name()
+	if err := os.WriteFile(path.Join("/sys/block", name, "device", "timeout"),
+		[]byte(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
+		return "", fmt.Errorf("failed to set timeout for /dev/%s: %w", name, err)
+	}
+	devName := "/dev/" + name
+	f, err := os.Open(devName)
+	if err != nil {
+		return "", fmt.Errorf("block device %s not ready: %w", devName, err)
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return devName, nil
+}
+
+// waitForBlockDevice polls find until the block device for deviceNumber is
+// discovered and its /dev node is ready, then returns the /dev path. find is
+// injectable so the retry logic can be tested without a real device.
+func waitForBlockDevice(deviceNumber string, attempts int, interval time.Duration,
+	find func(string) (string, error)) (string, error) {
+	var lastErr error
+	for retry := 0; retry < attempts; retry++ {
+		devName, err := find(deviceNumber)
+		if err == nil {
+			return devName, nil
+		}
+		lastErr = err
+		time.Sleep(interval)
+	}
+	return "", fmt.Errorf("block device for %s not ready after %d attempts: %w", deviceNumber, attempts, lastErr)
+}
+
 func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName string, e error) {
 
 	devName = ""
@@ -428,7 +476,7 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 	defer func() {
 		if e != nil {
 			rerr := os.RemoveAll(linkPath)
-			if err != nil {
+			if rerr != nil {
 				log.G(ctx).WithError(rerr).Warnf("failed to clean loopback link %s", linkPath)
 			}
 		}
@@ -441,32 +489,13 @@ func AttachDevice(ctx context.Context, params *AttachDeviceParams) (devName stri
 	}
 	deviceNumber := strings.TrimSuffix(string(bytes), "\n")
 
-	// The device doesn't show up instantly. Need retry here.
-	for retry := 0; retry < maxAttachAttempts; retry++ {
-		devDirs, err := os.ReadDir(scsiBlockDevicePath(deviceNumber))
-		if err != nil {
-			e = err
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		if len(devDirs) == 0 {
-			e = fmt.Errorf("empty device found")
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-
-		for _, dev := range devDirs {
-			device := fmt.Sprintf("/dev/%s", dev.Name()) // /dev/sdX
-			if err := os.WriteFile(path.Join("/sys/block", dev.Name(), "device", "timeout"),
-				([]byte)(fmt.Sprintf("%v", math.MaxInt32/1000)), 0666); err != nil {
-				e = fmt.Errorf("failed to set timeout for %s: %w", device, err)
-				time.Sleep(10 * time.Millisecond)
-				break // retry
-			}
-			devName = device
-			break
-		}
+	// The device doesn't show up instantly, and its /dev node can lag behind
+	// sysfs. Wait for both before returning the device path.
+	devName, err = waitForBlockDevice(deviceNumber, maxAttachAttempts, devicePollInterval, findReadyBlockDevice)
+	if err != nil {
+		return "", fmt.Errorf("failed to wait for the block device of snID %s: %w", snID, err)
 	}
+
 	log.G(ctx).Infof("Device has been created. {id: %s: dev: %s}", snID, devName)
 	return devName, nil
 }

@@ -15,8 +15,13 @@ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
         > /sys/fs/cgroup/cgroup.subtree_control
 fi
 
-/sbin/modprobe target_core_user && /opt/overlaybd/bin/overlaybd-tcmu &
+# Load kernel modules before starting their consumers, so that kernel
+# features (e.g. overlay "index=off") are available when services probe them.
+/sbin/modprobe target_core_user
+/sbin/modprobe overlay
+
+/opt/overlaybd/bin/overlaybd-tcmu &
 
 /opt/overlaybd/snapshotter/overlaybd-snapshotter &>/var/log/overlaybd-snapshotter.log &
 
-/sbin/modprobe overlay && /usr/bin/containerd &>/var/log/containerd.log &
+/usr/bin/containerd &>/var/log/containerd.log &
