@@ -107,8 +107,9 @@ type BootConfig struct {
 	RootfsQuota       string                 `json:"rootfsQuota"` // "20g" rootfs quota, only effective when rwMode is 'overlayfs'
 	Tenant            int                    `json:"tenant"`      // do not set this if only a single snapshotter service in the host
 	TurboFsType       []string               `json:"turboFsType"`
-	RuntimeType       string                 `json:"runtimeType"` // "containerd" (default) or "docker"
-	RemapIDs          bool                   `json:"remapIDs"`    // enable kernel ID-mapped mounts for user namespace support (requires kernel 5.19+)
+	RuntimeType       string                 `json:"runtimeType"`   // "containerd" (default) or "docker"
+	RemapIDs          bool                   `json:"remapIDs"`      // enable kernel ID-mapped mounts for user namespace support (requires kernel 5.19+)
+	MaxDataAreaMB     int                    `json:"maxDataAreaMB"` // requested per-device TCMU data-area limit in MiB; zero uses the default
 }
 
 func DefaultBootConfig() *BootConfig {
@@ -118,6 +119,7 @@ func DefaultBootConfig() *BootConfig {
 		RwMode:          "overlayfs",
 		LogReportCaller: false,
 		AutoRemoveDev:   false,
+		MaxDataAreaMB:   defaultMaxDataAreaMB,
 		ExporterConfig: metrics.ExporterConfig{
 			Enable:    false,
 			UriPrefix: "/metrics",
@@ -214,6 +216,7 @@ type snapshotter struct {
 	asyncRemove       bool
 	runtimeType       string
 	remapIDs          bool
+	maxDataAreaMB     int
 
 	quotaDriver *diskquota.PrjQuotaDriver
 	quotaSize   string
@@ -221,6 +224,11 @@ type snapshotter struct {
 
 // NewSnapshotter returns a Snapshotter which uses block device based on overlayFS.
 func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter, error) {
+	maxDataAreaMB, err := resolveMaxDataAreaMB(bootConfig.MaxDataAreaMB)
+	if err != nil {
+		return nil, err
+	}
+
 	config := defaultConfig
 	for _, opt := range opts {
 		if err := opt(&config); err != nil {
@@ -289,9 +297,10 @@ func NewSnapshotter(bootConfig *BootConfig, opts ...Opt) (snapshots.Snapshotter,
 		quotaDriver: &diskquota.PrjQuotaDriver{
 			QuotaIDs: make(map[uint32]struct{}),
 		},
-		asyncRemove: bootConfig.AsyncRemove,
-		runtimeType: bootConfig.RuntimeType,
-		remapIDs:    remapIDs,
+		asyncRemove:   bootConfig.AsyncRemove,
+		runtimeType:   bootConfig.RuntimeType,
+		remapIDs:      remapIDs,
+		maxDataAreaMB: maxDataAreaMB,
 	}, nil
 }
 

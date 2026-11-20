@@ -6,5 +6,6 @@
     "runtimeType": "containerd",
     "logReportCaller": false,
     "autoRemoveDev": false,
+    "maxDataAreaMB": 4,
     "mirrorRegistry": []
 }
